@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16
+    container_name: pizzaria-db
+    environment:
+      POSTGRES_USER: pizzaria
+      POSTGRES_PASSWORD: pizzaria123
+      POSTGRES_DB: pizzaria
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
