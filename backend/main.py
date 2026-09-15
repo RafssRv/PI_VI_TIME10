@@ -35,32 +35,40 @@ async def processar_audio(audio: UploadFile = File(...)):
     except Exception as e:
         return JSONResponse(status_code=500, content={"erro": str(e)})
 
-# =====================================================================
-# NOVIDADE DA FASE 3 ABAIXO
-# =====================================================================
-
 # --- rota 3: websocket para streaming de audio (fase 3) ---
 @app.websocket("/ws/falar")
 async def websocket_audio(websocket: WebSocket):
     """
-    endpoint de websocket. aqui a gnt nao recebe um arquivo inteiro,
-    mas sim 'pedacinhos' (chunks) do audio em tempo real enquanto a pessoa fala.
+    endpoint de websocket fase 3. 
+    recebe chunks de audio, junta tudo num arquivo so e guarda.
     """
-    # primeiro a gente aceita a conexao que o frontend pediu
     await websocket.accept()
     print("[websocket] cliente conectou no tubo de streaming!")
     
+    # a gnt cria um arquivo e abre ele no modo "wb" (write bytes)
+    # ou "ab" (append bytes). vamos de "wb" e manter ele aberto.
+    caminho_audio = "audio_cliente_streaming.webm"
+    
     try:
-        # esse while true deixa o tubo aberto rodando sem parar
-        while True:
-            # recebe um pedacinho de dado (em bytes) do front
-            data = await websocket.receive_bytes()
-            print(f"[websocket] recebi um chunk de audio de {len(data)} bytes")
-            
-            # mock da fase 3: a gente devolve o mesmo chunk pro front (efeito eco)
-            # na vida real (fase 3 final), a gnt ia repassar esses bytes pro roveris (IA)
-            await websocket.send_bytes(data)
-            
+        # abrimos o arquivo uma vez so, pra ir enchendo ele de dados
+        with open(caminho_audio, "wb") as arquivo:
+            while True:
+                # recebe o pedacinho (chunk) do front
+                data = await websocket.receive_bytes()
+                
+                # escreve o pedacinho no final do arquivo
+                arquivo.write(data)
+                print(f"[websocket] recebi e guardei um chunk de {len(data)} bytes")
+                
+                # manda um textinho pro front so pra confirmar q chegou
+                await websocket.send_text("chunk guardado no backend!")
+                
     except WebSocketDisconnect:
-        # se o cliente fechar a pagina ou a ligacao cair, cai aqui
-        print("[websocket] cliente desconectou da ligacao.")
+        # quando o cara desligar a chamada no front (ou fechar a aba), cai aqui
+        print(f"[websocket] cliente desconectou.")
+        print(f"[websocket] audio completo salvo em: {caminho_audio}")
+        
+        # --- MOCK DA FASE 3 ---
+        # na vida real, aqui seria o momento exato q a gente chamaria:
+        # texto_do_cliente = roveris_transcrever(caminho_audio)
+        # ----------------------
