@@ -7,9 +7,10 @@ services:
       POSTGRES_PASSWORD: pizzaria123
       POSTGRES_DB: pizzaria
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./banco.sql:/docker-entrypoint-initdb.d/banco.sql
 
 volumes:
   pgdata:
