@@ -2,6 +2,8 @@ from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 import os
 import shutil
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="Backend Pizzaria - Agente de Voz", version="0.1.0")
 
@@ -72,3 +74,8 @@ async def websocket_audio(websocket: WebSocket):
         # na vida real, aqui seria o momento exato q a gente chamaria:
         # texto_do_cliente = roveris_transcrever(caminho_audio)
         # ----------------------
+
+
+# --- front-end: o proprio fastapi entrega a pasta frontend ---
+PASTA_FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
+app.mount("/app", StaticFiles(directory=PASTA_FRONTEND, html=True), name="frontend")
