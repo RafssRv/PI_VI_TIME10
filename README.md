@@ -2,8 +2,8 @@
 
 # Atendente de pedidos por voz
 
-**Ninguém deveria perder um pedido por falta de quem atenda.**<br>
-O cliente fala pelo celular e a IA ouve, entende, consulta e responde em voz, tudo numa máquina local.
+**Ninguém deveria perder um pedido por falta de atente.**<br>
+O cliente fala e a IA ouve, entende, consulta e responde em voz, tudo local.
 
 <img align="absmiddle" alt="ouvir: faster-whisper" src="https://img.shields.io/badge/ouvir-faster--whisper-E4572E?style=flat-square&labelColor=24292F">
 →
@@ -13,7 +13,7 @@ O cliente fala pelo celular e a IA ouve, entende, consulta e responde em voz, tu
 →
 <img align="absmiddle" alt="responder: Piper" src="https://img.shields.io/badge/responder-Piper-E4572E?style=flat-square&labelColor=24292F">
 
-<sub>Projeto Integrador VI · Engenharia de Software · PUC-Campinas · Time 10</sub>
+<sub>Projeto Integrador VI Time 10 · Engenharia de Software PUC-Campinas</sub>
 
 [A ideia](#a-ideia) · [Como funciona](#como-funciona) · [Como rodar](#como-rodar) · [Documentação](#documentação) · [Equipe](#equipe)
 
@@ -68,7 +68,7 @@ Roadmap:
 
 ## Equipe
 
-Time 10 · Projeto Integrador VI · Engenharia de Software PUC-Campinas · 2º semestre de 2026
+Projeto Integrador VI Time 10 · Engenharia de Software PUC-Campinas
 
 | Integrante | RA |
 | :-- | :-- |
