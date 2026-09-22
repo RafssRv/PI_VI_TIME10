@@ -10,6 +10,14 @@ app = FastAPI(title="Backend Pizzaria - Agente de Voz", version="0.1.0")
 async def root():
     return {"status": "ok", "mensagem": "servidor fastapi da pizzaria rodando!"}
 
+# --- ROTA EXTRA: Apenas para servir a nossa página html de teste ---
+@app.get("/teste")
+async def pagina_teste():
+    """
+    Servindo o html pelo servidor pra driblar o bloqueio de microfone do navegador.
+    """
+    return FileResponse("teste_ws.html")
+
 # --- rota 2: mock pra processar o audio inteiro (fases 1 e 2) ---
 @app.post("/api/v1/falar")
 async def processar_audio(audio: UploadFile = File(...)):
@@ -69,6 +77,6 @@ async def websocket_audio(websocket: WebSocket):
         print(f"[websocket] audio completo salvo em: {caminho_audio}")
         
         # --- MOCK DA FASE 3 ---
-        # na vida real, aqui seria o momento exato q a gente chamaria:
+        # aqui seria o momento exato q a gente chamaria:
         # texto_do_cliente = roveris_transcrever(caminho_audio)
         # ----------------------
