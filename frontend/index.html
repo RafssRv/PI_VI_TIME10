@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Atendente de voz - Pizzaria</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="container">
+    <h1>Atendente de voz</h1>
+    <p class="subtitulo">prototipo fase 1: gravar, mandar pro backend e ouvir de volta</p>
+
+    <!-- status da conexao com o websocket -->
+    <div class="status">
+      <span id="bolinha" class="bolinha desconectado"></span>
+      <span id="texto-status">desconectado</span>
+    </div>
+
+    <!-- botao principal: clica pra gravar, clica de novo pra parar -->
+    <button id="botao-gravar" class="botao">Gravar</button>
+    <p id="timer" class="timer">00:00</p>
+
+    <!-- player pra ouvir o que foi gravado -->
+    <section class="bloco">
+      <h2>Ultima gravacao</h2>
+      <audio id="player" controls></audio>
+    </section>
+
+    <!-- log pra ver o que ta acontecendo (ajuda a testar sem postman) -->
+    <section class="bloco">
+      <h2>Log</h2>
+      <ul id="log" class="log"></ul>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
