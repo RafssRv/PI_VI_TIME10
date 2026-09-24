@@ -7,9 +7,12 @@ services:
       POSTGRES_PASSWORD: pizzaria123
       POSTGRES_DB: pizzaria
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # o postgres roda o banco.sql sozinho no primeiro boot, mas SO se o volume estiver vazio:
+      # mexeu no esquema, roda "docker compose down -v" antes de subir de novo
+      - ./banco.sql:/docker-entrypoint-initdb.d/banco.sql:ro
 
 volumes:
   pgdata:
