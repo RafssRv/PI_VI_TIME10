@@ -6,33 +6,172 @@
   <title>Atendente de voz - Pizzaria</title>
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
-  <main class="container">
-    <h1>Atendente de voz</h1>
-    <p class="subtitulo">prototipo fase 1: gravar, mandar pro backend e ouvir de volta</p>
+<body data-estado="ocioso">
 
-    <!-- status da conexao com o websocket -->
-    <div class="status">
+  <!-- faixa do modo demonstracao: so aparece quando a demo esta ligada -->
+  <div id="faixa-demo" hidden>
+    <span class="faixa-demo-texto">MODO DEMONSTRAÇÃO — falas e pedido são de mentira, nada vai para o banco</span>
+    <button type="button" id="botao-sair-demo" class="botao-secundario">Sair do modo demonstração</button>
+  </div>
+
+  <!-- barra de cima: titulo, duracao da chamada e estado da conexao -->
+  <header id="barra-topo">
+    <h1 class="titulo">Pizzaria — atendimento por voz</h1>
+    <div class="bloco-chamada">
+      <span class="rotulo-chamada">CHAMADA</span>
+      <span id="timer">00:00</span>
+    </div>
+    <div class="bloco-conexao">
       <span id="bolinha" class="bolinha desconectado"></span>
       <span id="texto-status">desconectado</span>
     </div>
+  </header>
 
-    <!-- botao principal: clica pra gravar, clica de novo pra parar -->
-    <button id="botao-gravar" class="botao">Gravar</button>
-    <p id="timer" class="timer">00:00</p>
+  <!-- tarja de erro: largura inteira, com hachura, nunca so a bolinha vermelha -->
+  <div id="tarja-erro" class="tarja-erro" role="alert" hidden>
+    <span class="hachura" aria-hidden="true"></span>
+    <p id="tarja-erro-texto"></p>
+    <button type="button" id="tarja-erro-botao" class="botao-secundario">Tentar de novo</button>
+  </div>
 
-    <!-- player pra ouvir o que foi gravado -->
-    <section class="bloco">
-      <h2>Ultima gravacao</h2>
-      <audio id="player" controls></audio>
+  <main id="corpo">
+
+    <!-- coluna da esquerda: a chamada -->
+    <section id="coluna-chamada">
+
+      <div id="cartao-estado" aria-live="polite">
+        <div id="circulo">
+          <div id="anel" aria-hidden="true"></div>
+          <div class="ondas icone" aria-hidden="true"><span></span><span></span></div>
+
+          <!-- microfone riscado (ocioso / encerrada) -->
+          <div class="icone-mic icone" aria-hidden="true">
+            <span class="mic-capsula"></span>
+            <span class="mic-pe"></span>
+            <span class="mic-risco"></span>
+          </div>
+
+          <!-- 7 barrinhas que mexem com o nivel do microfone (ouvindo) -->
+          <div id="barras-mic" class="icone" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          </div>
+
+          <!-- tres pontinhos (conectando / processando) -->
+          <div class="icone-pontos icone" aria-hidden="true"><span></span><span></span><span></span></div>
+
+          <!-- alto-falante (falando) -->
+          <div class="icone-som icone" aria-hidden="true">
+            <span class="som-caixa"></span>
+            <span class="som-cone"></span>
+            <span class="som-onda"></span>
+          </div>
+
+          <!-- x (erro) -->
+          <div class="icone-x icone" aria-hidden="true"><span></span><span></span></div>
+        </div>
+
+        <p id="legenda-nivel" hidden>nível simulado</p>
+        <p id="rotulo-estado">Chamada não iniciada</p>
+        <p id="sublinha-estado">clique em LIGAR e fale normalmente</p>
+      </div>
+
+      <div id="caixa-conversa">
+        <h2 class="titulo-secao">CONVERSA</h2>
+        <div id="conversa" aria-live="polite">
+          <p class="conversa-vazia">A conversa aparece aqui enquanto vocês falam.</p>
+        </div>
+      </div>
+
+      <button type="button" id="botao-demo" class="botao-secundario">Modo demonstração</button>
+
+      <button type="button" id="botao-chamada" class="botao-chamada ligar">
+        <span class="forma" aria-hidden="true"></span>
+        <span id="texto-botao">LIGAR</span>
+      </button>
     </section>
 
-    <!-- log pra ver o que ta acontecendo (ajuda a testar sem postman) -->
-    <section class="bloco">
-      <h2>Log</h2>
-      <ul id="log" class="log"></ul>
+    <!-- coluna da direita: a comanda, em papel claro -->
+    <section id="comanda">
+      <div id="comanda-topo">
+        <h2>Seu pedido <span id="selo-simulacao" hidden>SIMULAÇÃO</span></h2>
+        <p id="comanda-cliente">Cliente: ainda não identificado</p>
+      </div>
+
+      <div id="comanda-itens" aria-live="polite">
+        <p class="comanda-vazia">Ainda não anotei nada.</p>
+        <p class="comanda-vazia fraca">O que você pedir vai aparecer aqui.</p>
+      </div>
+
+      <p id="comanda-aviso" hidden></p>
+
+      <div id="comanda-rodape">
+        <div class="linha-rodape">
+          <span>Pagamento: <strong id="comanda-pagamento">a combinar</strong></span>
+          <span>Entrega: <strong id="comanda-entrega">a confirmar</strong></span>
+        </div>
+        <div class="linha-total">
+          <span>TOTAL</span>
+          <strong id="comanda-total">R$ 0,00</strong>
+        </div>
+      </div>
     </section>
   </main>
+
+  <!-- tira de 44px: as 4 etapas do pipeline e o tempo do ultimo turno -->
+  <footer id="rodape-tecnico">
+    <details id="detalhes-tecnicos">
+      <summary><span class="seta" aria-hidden="true"></span>Detalhes técnicos</summary>
+      <div class="painel-tecnico">
+        <div class="painel-coluna">
+          <h3>última gravação (só para teste)</h3>
+          <audio id="player" controls></audio>
+        </div>
+        <div class="painel-coluna">
+          <h3>log</h3>
+          <ul id="log"></ul>
+        </div>
+      </div>
+    </details>
+
+    <div class="etapas">
+      <div class="etapa" id="etapa-1"><span class="etapa-num">1</span><span class="etapa-nome">ouvindo</span><span class="etapa-tempo">aguardando</span></div>
+      <div class="etapa" id="etapa-2"><span class="etapa-num">2</span><span class="etapa-nome">transcrevendo</span><span class="etapa-tempo">aguardando</span></div>
+      <div class="etapa" id="etapa-3"><span class="etapa-num">3</span><span class="etapa-nome">pensando</span><span class="etapa-tempo">aguardando</span></div>
+      <div class="etapa" id="etapa-4"><span class="etapa-num">4</span><span class="etapa-nome">respondendo</span><span class="etapa-tempo">aguardando</span></div>
+    </div>
+
+    <div class="bloco-turno">
+      <span>último turno: <strong id="tempo-turno">—</strong></span>
+      <span class="meta">meta: 5 s</span>
+    </div>
+  </footer>
+
+  <!-- resumo do fim da chamada (tarefa 20), desenhado pela mesma funcao da comanda -->
+  <div id="resumo" hidden>
+    <div class="resumo-caixa" role="dialog" aria-modal="true" aria-labelledby="resumo-titulo">
+      <h2 id="resumo-titulo">Pedido registrado</h2>
+      <p id="resumo-linhas"></p>
+      <p id="resumo-cliente">Cliente: ainda não identificado</p>
+      <div id="resumo-itens"></div>
+      <div class="resumo-rodape">
+        <div class="linha-rodape">
+          <span>Pagamento: <strong id="resumo-pagamento">a combinar</strong></span>
+          <span>Entrega: <strong id="resumo-entrega">a confirmar</strong></span>
+        </div>
+        <div class="linha-total">
+          <span>TOTAL</span>
+          <strong id="resumo-total">R$ 0,00</strong>
+        </div>
+      </div>
+      <div class="resumo-botoes">
+        <button type="button" id="resumo-ligar" class="botao-secundario forte">Ligar de novo</button>
+        <button type="button" id="resumo-fechar" class="botao-secundario">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- audio que o piper devolve; toca sozinho e com o microfone pausado -->
+  <audio id="audio-resposta" hidden></audio>
 
   <script src="app.js"></script>
 </body>

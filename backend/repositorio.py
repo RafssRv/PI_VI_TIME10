@@ -18,6 +18,21 @@ from seguranca import hashear_cpf
 # o que o modelo extrair da fala tem q cair num deles, senao nao grava
 FORMAS_PAGAMENTO = ("pix", "dinheiro", "cartao_credito", "cartao_debito")
 
+# ninguem fala "cartao_credito" no telefone, fala "no cartao de credito", "credito",
+# "vou pagar em dinheiro, troco pra cem". esses sao os sinais que a gente procura na frase:
+# palavra encontrada -> forma canonica
+SINAIS_DE_PAGAMENTO = {
+    "pix": "pix",
+    "dinheiro": "dinheiro",
+    "especie": "dinheiro",
+    "vivo": "dinheiro",
+    "credito": "cartao_credito",
+    "debito": "cartao_debito",
+}
+
+# "cartao" e "maquininha" sozinhos nao dizem se eh credito ou debito: pergunta, nao chuta
+SINAIS_AMBIGUOS = ("cartao", "maquininha", "cartao de credito ou debito")
+
 
 def _normalizar(texto):
     # "Coca-Cola 2 Litros" vira "coca cola 2 litros": sem acento, minusculo e sem pontuacao,
@@ -35,6 +50,44 @@ def _so_digitos(texto):
         return None
     digitos = re.sub(r"\D", "", str(texto))
     return digitos or None
+
+
+def interpretar_pagamento(forma_pagamento):
+    """
+    traduz a forma de pagamento como o cliente falou para uma das FORMAS_PAGAMENTO.
+    levanta ValueError quando nao da pra ter certeza, pq gravar pagamento errado eh pior
+    que perguntar de novo.
+    """
+    texto = _normalizar(forma_pagamento)
+    if not texto:
+        raise ValueError("forma de pagamento vazia, pergunte ao cliente como ele vai pagar.")
+
+    # ja veio canonico ("cartao_credito") ou quase ("cartao credito")
+    if texto.replace(" ", "_") in FORMAS_PAGAMENTO:
+        return texto.replace(" ", "_")
+
+    palavras = texto.split()
+    achados = {SINAIS_DE_PAGAMENTO[p] for p in palavras if p in SINAIS_DE_PAGAMENTO}
+
+    if len(achados) == 1:
+        return achados.pop()
+
+    if len(achados) > 1:
+        # "dinheiro ou cartao de credito": o cliente ainda nao decidiu
+        raise ValueError(
+            "o cliente citou mais de uma forma de pagamento ({}), confirme qual delas.".format(
+                ", ".join(sorted(achados))
+            )
+        )
+
+    if any(sinal in texto for sinal in SINAIS_AMBIGUOS):
+        raise ValueError("cartao no credito ou no debito? pergunte ao cliente.")
+
+    raise ValueError(
+        "forma de pagamento {!r} nao reconhecida, confirme com o cliente: {}.".format(
+            forma_pagamento, ", ".join(FORMAS_PAGAMENTO)
+        )
+    )
 
 
 def buscar_cliente_por_cpf(db, cpf):
@@ -192,13 +245,7 @@ def salvar_pedido(db, cliente_id, itens, endereco_entrega=None, forma_pagamento=
     # mesmo crivo do produto: fora do vocabulario nao grava. a coluna eh VARCHAR(20) e
     # "cartao de credito na maquininha" estouraria la no commit, com o pedido inteiro ja montado
     if forma_pagamento is not None:
-        forma_pagamento = _normalizar(forma_pagamento).replace(" ", "_")
-        if forma_pagamento not in FORMAS_PAGAMENTO:
-            raise ValueError(
-                "forma de pagamento {!r} nao existe, confirme com o cliente: {}.".format(
-                    forma_pagamento, ", ".join(FORMAS_PAGAMENTO)
-                )
-            )
+        forma_pagamento = interpretar_pagamento(forma_pagamento)
 
     cliente = db.get(Cliente, cliente_id)
     if cliente is None:
@@ -228,11 +275,21 @@ def salvar_pedido(db, cliente_id, itens, endereco_entrega=None, forma_pagamento=
             )
         produto = candidatos[0]
 
+        bruta = item.get("quantidade", 1)
         try:
-            quantidade = int(item.get("quantidade", 1))
+            quantidade = int(bruta)
         except (TypeError, ValueError):
             raise ValueError(
-                "quantidade invalida para {!r}: {!r}".format(produto.nome, item.get("quantidade"))
+                "quantidade invalida para {!r}: {!r}".format(produto.nome, bruta)
+            )
+
+        # "uma pizza e meia" vira 1.5 e o int() cortava pra 1 calado, cobrando a menos.
+        # meia pizza nao existe no cardapio: melhor perguntar do que decidir pelo cliente
+        if quantidade != bruta and not isinstance(bruta, str):
+            raise ValueError(
+                "quantidade de {!r} veio quebrada ({!r}), confirme quantas unidades o cliente quer.".format(
+                    produto.nome, bruta
+                )
             )
 
         if quantidade <= 0:
