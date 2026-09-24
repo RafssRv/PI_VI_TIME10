@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Teste WebSocket Pizzaria</title>
+</head>
+<body>
+    <h2>Teste de Streaming (Fase 3)</h2>
+    
+    <button id="btn-iniciar">começar a falar</button>
+    <button id="btn-parar" disabled>parar e desligar</button>
+    
+    <p id="status">status: esperando...</p>
+
+    <script>
+        let ws;
+        let mediaRecorder;
+
+        const btnIniciar = document.getElementById('btn-iniciar');
+        const btnParar = document.getElementById('btn-parar');
+        const textoStatus = document.getElementById('status');
+
+        btnIniciar.onclick = async () => {
+            // 1. conecta no nosso backend fastapi
+            ws = new WebSocket("ws://127.0.0.1:8000/ws/falar");
+
+            ws.onopen = async () => {
+                textoStatus.innerText = "status: conectado! gravando...";
+                btnIniciar.disabled = true;
+                btnParar.disabled = false;
+
+                // 2. pede permissao pro microfone do usuario
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                // 3. cria o gravador que vai fatiar o audio
+                mediaRecorder = new MediaRecorder(stream);
+
+                // 4. toda vez q ele tiver um pedacinho de audio, ele manda pro websocket
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+                        ws.send(event.data); // mandando o chunk pro nosso python!
+                    }
+                };
+
+                // manda fatiar o audio a cada 500 milissegundos
+                mediaRecorder.start(500); 
+            };
+
+            ws.onmessage = (event) => {
+                console.log("o backend respondeu:", event.data);
+            };
+        };
+
+        btnParar.onclick = () => {
+            // para de gravar e fecha a ligacao (tubo)
+            mediaRecorder.stop();
+            ws.close();
+            
+            textoStatus.innerText = "status: chamada encerrada. olha la o terminal do python!";
+            btnIniciar.disabled = false;
+            btnParar.disabled = true;
+        };
+    </script>
+</body>
+</html>
