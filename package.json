@@ -1,0 +1,15 @@
+{
+  "name": "pi-vi-time10",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Atendente de pedidos por voz - Projeto Integrador VI, Time 10",
+  "scripts": {
+    "dev": "docker compose up -d && echo Tela: http://localhost:3000 && cd backend && python -m uvicorn main:app --reload --port 3000 --log-level warning --no-access-log",
+    "banco": "docker compose up -d",
+    "banco:parar": "docker compose down",
+    "banco:recriar": "docker compose down -v && docker compose up -d",
+    "seed": "python backend/seed.py",
+    "seed:recriar": "python backend/seed.py --recriar",
+    "deps": "python -m pip install -r backend/requirements.txt"
+  }
+}

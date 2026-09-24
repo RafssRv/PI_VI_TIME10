@@ -13,12 +13,13 @@
 //      primeira e obrigatoria: é ela que tira a tela do modo mudo.
 //  2 {"tipo":"estado","etapa":"transcrevendo","turno":3}
 //      etapa so pode ser: ouvindo | transcrevendo | pensando | respondendo | ocioso.
-//      cada uma reinicia o relogio de 15 s, entao mande uma por etapa e o llama local pode
-//      demorar o quanto precisar sem a tela achar que o servidor morreu.
+//      cada uma acende a etapa correspondente na tira do topo e reinicia o relogio de 15 s,
+//      entao mande uma por etapa e o llama local pode demorar o quanto precisar sem a tela
+//      achar que o servidor morreu.
 //  3 {"tipo":"transcricao","turno":3,"quem":"cliente","texto":"duas margherita","parcial":true}
-//      quem: cliente | atendente. parcial=true vale pros DOIS lados: a tela guarda um balao
+//      quem: cliente | atendente. parcial=true vale pros DOIS lados: a tela guarda um bloco
 //      por lado e vai reescrevendo ele (serve pro streaming de token do ollama).
-//      parcial=false fecha o balao daquele lado.
+//      parcial=false fecha o bloco daquele lado.
 //  4 {"tipo":"audio_resposta","turno":3,"formato":"audio/wav"}
 //      é so o AVISO. logo depois venham 1 ou mais FRAMES BINARIOS com os pedacos do arquivo.
 //      binario que chega sem esse aviso é ignorado.
@@ -68,16 +69,18 @@ const RMS_FALA = 0.05;              // acima disso a gente considera que tem voz
 const RMS_SILENCIO = 0.02;          // abaixo disso a gente considera silencio
 const MS_PARA_CONFIRMAR_FALA = 300;
 const MS_DE_SILENCIO = 1200;
+const MS_DESTAQUE_ITEM = 4000;      // quanto tempo o item novo fica em destaque na comanda
 
-// textos de cada estado da chamada, num lugar so
+// textos de cada estado da chamada, num lugar so.
+// o botao "Conectando" ganha os tres pontinhos piscando pelo css
 const ESTADOS = {
-  ocioso:      { rotulo: "Chamada não iniciada", sublinha: "clique em LIGAR e fale normalmente", botao: "LIGAR" },
-  conectando:  { rotulo: "Chamando…",            sublinha: "abrindo o microfone e a conexão",    botao: "CONECTANDO" },
-  ouvindo:     { rotulo: "Pode falar",           sublinha: "seu microfone está ligado",          botao: "DESLIGAR" },
-  processando: { rotulo: "Anotando seu pedido…", sublinha: "microfone pausado",                  botao: "DESLIGAR" },
-  falando:     { rotulo: "Atendente falando",    sublinha: "seu microfone fica desligado até ele terminar", botao: "DESLIGAR" },
-  encerrada:   { rotulo: "Chamada encerrada",    sublinha: "",                                   botao: "LIGAR DE NOVO" },
-  erro:        { rotulo: "Não deu certo",        sublinha: "",                                   botao: "TENTAR DE NOVO" }
+  ocioso:      { rotulo: "Chamada não iniciada", sublinha: "clique em Ligar e fale normalmente", botao: "Ligar" },
+  conectando:  { rotulo: "Chamando…",            sublinha: "abrindo o microfone e a conexão",    botao: "Conectando" },
+  ouvindo:     { rotulo: "Pode falar",           sublinha: "seu microfone está ligado",          botao: "Desligar" },
+  processando: { rotulo: "Anotando seu pedido…", sublinha: "microfone pausado",                  botao: "Desligar" },
+  falando:     { rotulo: "Atendente falando",    sublinha: "seu microfone fica desligado até ele terminar", botao: "Desligar" },
+  encerrada:   { rotulo: "Chamada encerrada",    sublinha: "",                                   botao: "Ligar de novo" },
+  erro:        { rotulo: "Não deu certo",        sublinha: "",                                   botao: "Tentar de novo" }
 };
 
 const PAGAMENTOS = {
@@ -90,8 +93,6 @@ const PAGAMENTOS = {
 const ESTADOS_EM_CHAMADA = ["conectando", "ouvindo", "processando", "falando"];
 
 // ---------- elementos da tela ----------
-const faixaDemo = document.getElementById("faixa-demo");
-const botaoSairDemo = document.getElementById("botao-sair-demo");
 const timer = document.getElementById("timer");
 const bolinha = document.getElementById("bolinha");
 const textoStatus = document.getElementById("texto-status");
@@ -99,14 +100,11 @@ const tarjaErro = document.getElementById("tarja-erro");
 const tarjaErroTexto = document.getElementById("tarja-erro-texto");
 const tarjaErroBotao = document.getElementById("tarja-erro-botao");
 const barrasMic = document.getElementById("barras-mic");
-const legendaNivel = document.getElementById("legenda-nivel");
 const rotuloEstado = document.getElementById("rotulo-estado");
 const sublinhaEstado = document.getElementById("sublinha-estado");
 const conversa = document.getElementById("conversa");
 const botaoChamada = document.getElementById("botao-chamada");
 const textoBotao = document.getElementById("texto-botao");
-const botaoDemo = document.getElementById("botao-demo");
-const seloSimulacao = document.getElementById("selo-simulacao");
 const comandaCliente = document.getElementById("comanda-cliente");
 const comandaItens = document.getElementById("comanda-itens");
 const comandaAviso = document.getElementById("comanda-aviso");
@@ -171,11 +169,8 @@ let duracaoFinal = "00:00";
 let ultimoPedido = null;
 let pedidoSalvoId = null;
 let chavesDosItens = [];       // pra saber quais itens sao novos neste turno
-let falaParcial = { cliente: null, atendente: null };   // um balao em reconhecimento por lado
+let falaParcial = { cliente: null, atendente: null };   // um bloco em reconhecimento por lado
 let erroEhFatal = false;
-
-let modoDemo = false;
-let geracaoDemo = 0;           // cada rodarDemo pega um numero; o roteiro velho morre sozinho
 
 // ---------- log ----------
 let ultimaLinhaLog = null;
@@ -214,14 +209,10 @@ function definirEstado(nome, sublinha) {
   }
 
   estadoAtual = nome;
+  // o data-estado do body é quem acende o icone, o anel, o chip do microfone e o medidor
   document.body.dataset.estado = nome;
   rotuloEstado.textContent = dados.rotulo;
-
-  let textoSublinha = sublinha === undefined ? dados.sublinha : sublinha;
-  if (modoDemo && nome === "falando") {
-    textoSublinha = dados.sublinha + " — voz do navegador, não é o Piper";
-  }
-  sublinhaEstado.textContent = textoSublinha;
+  sublinhaEstado.textContent = sublinha === undefined ? dados.sublinha : sublinha;
 
   textoBotao.textContent = dados.botao;
   botaoChamada.disabled = nome === "conectando";
@@ -229,10 +220,6 @@ function definirEstado(nome, sublinha) {
   const emChamada = nome === "ouvindo" || nome === "processando" || nome === "falando";
   botaoChamada.classList.toggle("desligar", emChamada);
   botaoChamada.classList.toggle("ligar", !emChamada && nome !== "conectando");
-
-  // a demo continua a mao em ocioso, encerrada e erro: so some durante a chamada de verdade
-  botaoDemo.hidden = estaEmChamada() || modoDemo;
-  legendaNivel.hidden = !(modoDemo && nome === "ouvindo");
 }
 
 function mudarConexao(classe, texto) {
@@ -263,7 +250,7 @@ function pararTimer() {
   duracaoFinal = timer.textContent;
 }
 
-// ---------- etapas do rodape ----------
+// ---------- etapas da tira do topo ----------
 let etapaAtual = 0;
 let inicioEtapa = 0;
 
@@ -298,7 +285,8 @@ function marcarEtapa(numero) {
 
   const caixa = caixasEtapa[numero];
   caixa.className = "etapa ativa";
-  caixa.querySelector(".etapa-tempo").textContent = numero === 1 ? "OUVINDO AGORA" : "…";
+  // os pontinhos depois de "agora" quem poe é o css
+  caixa.querySelector(".etapa-tempo").textContent = "agora";
 }
 
 function marcarEtapaFalhou(onde) {
@@ -307,7 +295,7 @@ function marcarEtapaFalhou(onde) {
   if (!numero || !caixasEtapa[numero]) return;
   const caixa = caixasEtapa[numero];
   caixa.className = "etapa falhou";
-  caixa.querySelector(".etapa-tempo").textContent = "✕ FALHOU";
+  caixa.querySelector(".etapa-tempo").textContent = "falhou";
 }
 
 function emSegundos(ms) {
@@ -418,7 +406,7 @@ function tratarMensagem(evento) {
   aplicarMensagem(obj);
 }
 
-// o switch unico: a demo e o backend real passam os dois por aqui
+// o switch unico: toda mensagem de controle do servidor passa por aqui
 function aplicarMensagem(obj) {
   switch (obj.tipo) {
     case "pronto":
@@ -530,7 +518,7 @@ function limparConversa() {
   falaParcial = { cliente: null, atendente: null };
 }
 
-function criarBalao(quem, parcial) {
+function criarFala(quem, parcial) {
   const bloco = document.createElement("div");
   bloco.className = "fala fala-" + quem + (parcial ? " parcial" : "");
 
@@ -538,13 +526,6 @@ function criarBalao(quem, parcial) {
   rotulo.className = "quem";
   rotulo.textContent = quem === "cliente" ? "VOCÊ" : "ATENDENTE";
   bloco.appendChild(rotulo);
-
-  if (modoDemo) {
-    const etiqueta = document.createElement("span");
-    etiqueta.className = "etiqueta-demo";
-    etiqueta.textContent = "DEMO";
-    bloco.appendChild(etiqueta);
-  }
 
   const texto = document.createElement("p");
   texto.className = "texto";
@@ -561,14 +542,14 @@ function mostrarTranscricao(quem, texto, parcial) {
   const vazia = conversa.querySelector(".conversa-vazia");
   if (vazia) vazia.remove();
 
-  // parcial: um balao so, em italico, que vai sendo atualizado.
+  // parcial: um bloco so, em italico e com cursor piscando, que vai sendo atualizado.
   // vale pros dois lados: o llama respondendo em streaming também manda parcial
   if (parcial) {
     if (!falaParcial[quem]) {
-      falaParcial[quem] = criarBalao(quem, true);
+      falaParcial[quem] = criarFala(quem, true);
       conversa.appendChild(falaParcial[quem]);
     }
-    falaParcial[quem].querySelector(".texto").textContent = texto + "…";
+    falaParcial[quem].querySelector(".texto").textContent = texto;
     conversa.scrollTop = conversa.scrollHeight;
     return;
   }
@@ -578,7 +559,7 @@ function mostrarTranscricao(quem, texto, parcial) {
     falaParcial[quem].querySelector(".texto").textContent = texto;
     falaParcial[quem] = null;
   } else {
-    const bloco = criarBalao(quem, false);
+    const bloco = criarFala(quem, false);
     bloco.querySelector(".texto").textContent = texto;
     conversa.appendChild(bloco);
   }
@@ -676,7 +657,7 @@ function desenharPedido(pedido, destino) {
       setTimeout(() => {
         linha.classList.remove("novo");
         selo.remove();
-      }, 4000);
+      }, MS_DESTAQUE_ITEM);
     }
     miolo.appendChild(produto);
 
@@ -687,6 +668,11 @@ function desenharPedido(pedido, destino) {
       miolo.appendChild(observacao);
     }
     linha.appendChild(miolo);
+
+    // o pontilhado de conta leva o olho do produto ate o subtotal
+    const pontilhado = document.createElement("span");
+    pontilhado.className = "pontilhado";
+    linha.appendChild(pontilhado);
 
     const subtotal = document.createElement("span");
     subtotal.className = "subtotal";
@@ -751,7 +737,7 @@ function mostrarErro(mensagem, fatal) {
   // se o socket nem existia (erro de microfone, por exemplo), nao adianta culpar a conexao
   mudarConexao("erro", socket ? "erro de conexão" : "desconectado");
   encerrar(null, "erro");
-  sublinhaEstado.textContent = mensagem;   // a sublinha do círculo repete o erro em texto
+  sublinhaEstado.textContent = mensagem;   // a sublinha do orbe repete o erro em texto
   comandaAviso.textContent = "Este pedido ainda não foi salvo.";
   comandaAviso.hidden = false;
 }
@@ -882,12 +868,7 @@ function medirNivel() {
   const agora = Date.now();
   let nivel = 0;
 
-  if (modoDemo) {
-    // onda sintetica: na demo nao existe microfone aberto
-    nivel = estadoAtual === "ouvindo"
-      ? 0.18 + 0.2 * Math.abs(Math.sin(agora / 210)) + 0.1 * Math.abs(Math.sin(agora / 70))
-      : 0;
-  } else if (analisador && dadosNivel) {
+  if (analisador && dadosNivel) {
     analisador.getByteTimeDomainData(dadosNivel);
     let soma = 0;
     for (let i = 0; i < dadosNivel.length; i++) {
@@ -897,9 +878,10 @@ function medirNivel() {
     nivel = Math.sqrt(soma / dadosNivel.length);
   }
 
-  desenharBarras(nivel);
+  // fora de "ouvindo" as barras ficam na altura minima: e a prova visual do microfone fechado
+  desenharBarras(estadoAtual === "ouvindo" ? nivel : 0);
 
-  if (!modoDemo && estadoAtual === "ouvindo") {
+  if (estadoAtual === "ouvindo") {
     vigiarSilencio(nivel, agora);
   }
 }
@@ -1094,7 +1076,6 @@ async function ligar() {
 // motivo = null quando quem encerrou foi o servidor (ou um erro): aí não manda encerrar_chamada.
 // manterSocket = true deixa o websocket aberto mais um pouco (quem fecha é quem chamou)
 function encerrar(motivo, estadoFinal, manterSocket) {
-  pararDemo();
   clearTimeout(relogioSeguranca);
   clearTimeout(relogioFimAudio);
   pararMedicao();
@@ -1133,226 +1114,36 @@ function encerrarPeloCliente() {
   abrirResumo({ pedido: ultimoPedido, pedido_id: pedidoSalvoId, duracao: duracaoFinal });
 }
 
-// ---------- modo demonstracao ----------
-const CLIENTE_DEMO = { nome: "Maria Aparecida", telefone: "19998124477", cadastrado: true };
-// mesmos campos que o banco devolve: sem subtotal, que a tela calcula sozinha
-const PIZZA_DEMO = { produto: "Pizza Margherita", quantidade: 2, observacao: "sem cebola", preco_unitario: "39.90" };
-const COCA_DEMO = { produto: "Coca-Cola 2 Litros", quantidade: 1, observacao: null, preco_unitario: "12.00" };
-
-// os dois produtos existem no seed, entao esse roteiro continua verdadeiro quando o pipeline chegar
-const ROTEIRO_DEMO = [
-  {
-    cliente: "boa noite, eu queria fazer um pedido",
-    atendente: "Boa noite! Claro. Me diz o seu nome, por favor?"
-  },
-  {
-    cliente: "maria aparecida",
-    atendente: "Prazer, Maria. O que vai ser hoje?",
-    pedido: { cliente: CLIENTE_DEMO, itens: [], total: "0.00", forma_pagamento: null, endereco_entrega: null }
-  },
-  {
-    cliente: "duas pizzas margherita sem cebola",
-    atendente: "Anotei duas Margherita sem cebola. Mais alguma coisa?",
-    pedido: { cliente: CLIENTE_DEMO, itens: [PIZZA_DEMO], total: "79.80", forma_pagamento: null, endereco_entrega: "Rua das Acácias, 120" }
-  },
-  {
-    cliente: "uma coca de dois litros",
-    atendente: "Certo, uma Coca-Cola de dois litros. O pagamento vai ser como?",
-    pedido: { cliente: CLIENTE_DEMO, itens: [PIZZA_DEMO, COCA_DEMO], total: "91.80", forma_pagamento: null, endereco_entrega: "Rua das Acácias, 120" }
-  },
-  {
-    cliente: "pix",
-    atendente: "Fechado: duas Margherita sem cebola e uma Coca-Cola de dois litros, noventa e um reais e oitenta, no Pix. Já vai sair!",
-    pedido: { cliente: CLIENTE_DEMO, itens: [PIZZA_DEMO, COCA_DEMO], total: "91.80", forma_pagamento: "pix", endereco_entrega: "Rua das Acácias, 120" },
-    fim: true
-  }
-];
-
-function esperar(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function entrarNoModoDemo() {
-  modoDemo = true;
-  document.body.dataset.demo = "1";
-  faixaDemo.hidden = false;
-  seloSimulacao.hidden = false;
-  botaoDemo.hidden = true;
-  escreverLog("modo demonstração ligado: sem backend e sem microfone");
-}
-
-function pararDemo() {
-  geracaoDemo++;   // o roteiro que estiver rodando vira geração velha e desiste sozinho
-  if (window.speechSynthesis) {
-    try { speechSynthesis.cancel(); } catch (erro) { /* nada a fazer */ }
-  }
-}
-
-// voz do proprio navegador: a banca precisa OUVIR o meia-duplex acontecendo
-function falarComNavegador(texto) {
-  return new Promise((resolve) => {
-    if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
-      setTimeout(resolve, 1800);
-      return;
-    }
-    const fala = new SpeechSynthesisUtterance(texto);
-    fala.lang = "pt-BR";
-    fala.rate = 0.95;
-
-    let acabou = false;
-    const terminar = () => {
-      if (acabou) return;
-      acabou = true;
-      resolve();
-    };
-
-    fala.onend = terminar;
-    fala.onerror = terminar;
-    // trava: em alguns navegadores o onend some, entao solta assim mesmo
-    setTimeout(terminar, 3000 + texto.length * 80);
-
-    speechSynthesis.cancel();
-    speechSynthesis.speak(fala);
-  });
-}
-
-async function revelarParcial(frase, minha) {
-  const palavras = frase.split(" ");
-  let ate = "";
-  for (let i = 0; i < palavras.length; i++) {
-    if (minha !== geracaoDemo) return;
-    ate = ate ? ate + " " + palavras[i] : palavras[i];
-    aplicarMensagem({ tipo: "transcricao", turno: turno, quem: "cliente", texto: ate, parcial: true });
-    await esperar(120);
-  }
-}
-
-// a demo passa pelas mesmas funcoes do backend real: aplicarMensagem, definirEstado, desenharPedido
-async function rodarDemo() {
-  // cada roteiro tem o seu numero: se alguem desligar e ligar de novo, o roteiro antigo
-  // acorda do await, vê que nao é mais a geração da vez e para no lugar
-  const minha = ++geracaoDemo;
-
-  esconderTarjaErro();
-  fecharResumo();
-  limparConversa();
-  limparComanda();
-  resetarEtapas();
-  comandaAviso.hidden = true;
-  turno = 0;
-  pedidoSalvoId = null;
-  ultimoPedido = null;
-  protocoloNovo = false;
-
-  mudarConexao("conectando", "demonstração (sem servidor)");
-  definirEstado("conectando");
-  if (!loopNivel) medirNivel();
-  iniciarTimer();
-  await esperar(900);
-  if (minha !== geracaoDemo) return;
-
-  for (let i = 0; i < ROTEIRO_DEMO.length; i++) {
-    const passo = ROTEIRO_DEMO[i];
-    turno++;
-
-    aplicarMensagem({ tipo: "estado", etapa: "ouvindo", turno: turno });
-    await esperar(500);
-    if (minha !== geracaoDemo) return;
-
-    await revelarParcial(passo.cliente, minha);
-    if (minha !== geracaoDemo) return;
-    aplicarMensagem({ tipo: "transcricao", turno: turno, quem: "cliente", texto: passo.cliente, parcial: false });
-
-    // aqui o microfone fecharia de verdade: é o meia-duplex
-    pausarCaptura();
-    tempoInicioTurno = Date.now();
-    aplicarMensagem({ tipo: "estado", etapa: "transcrevendo", turno: turno });
-    await esperar(800);
-    if (minha !== geracaoDemo) return;
-
-    aplicarMensagem({ tipo: "estado", etapa: "pensando", turno: turno });
-    await esperar(1400);
-    if (minha !== geracaoDemo) return;
-
-    aplicarMensagem({ tipo: "estado", etapa: "respondendo", turno: turno });
-    aplicarMensagem({ tipo: "transcricao", turno: turno, quem: "atendente", texto: passo.atendente, parcial: false });
-    definirEstado("falando");
-    if (passo.pedido) {
-      aplicarMensagem(Object.assign({ tipo: "pedido", turno: turno }, passo.pedido));
-    }
-
-    // fim da fala do atendente: o microfone reabre pelo mesmo caminho do backend real
-    await falarComNavegador(passo.atendente);
-    if (minha !== geracaoDemo) return;
-    voltarAOuvir();
-
-    if (passo.fim) {
-      aplicarMensagem({ tipo: "pedido_salvo", pedido_id: 42, total: "91.80" });
-      await esperar(600);
-      if (minha !== geracaoDemo) return;
-      aplicarMensagem({ tipo: "chamada_encerrada", motivo: "pedido_finalizado" });
-      return;
-    }
-  }
-}
-
 // ---------- eventos ----------
 botaoChamada.addEventListener("click", () => {
-  if (estadoAtual === "ouvindo" || estadoAtual === "processando" || estadoAtual === "falando") {
-    if (modoDemo) {
-      pararDemo();
-      pararTimer();
-      definirEstado("encerrada", "duração " + duracaoFinal);
-      abrirResumo({ pedido: ultimoPedido, pedido_id: pedidoSalvoId, duracao: duracaoFinal });
-      return;
-    }
+  if (estaEmChamada()) {
     encerrarPeloCliente();
-    return;
-  }
-
-  if (modoDemo) {
-    rodarDemo();
     return;
   }
   ligar();
 });
 
-botaoDemo.addEventListener("click", () => {
-  entrarNoModoDemo();
-  rodarDemo();
-});
-
-botaoSairDemo.addEventListener("click", () => {
-  pararDemo();
-  location.href = location.pathname;   // recarrega limpo, sem ?demo=1
-});
-
 tarjaErroBotao.addEventListener("click", () => {
   const eraFatal = erroEhFatal;
   esconderTarjaErro();
-  if (!eraFatal) return;
-  if (modoDemo) {
-    rodarDemo();
-  } else {
-    ligar();
-  }
+  if (eraFatal) ligar();
 });
 
 resumoLigar.addEventListener("click", () => {
   fecharResumo();
-  if (modoDemo) {
-    rodarDemo();
-  } else {
-    ligar();
-  }
+  ligar();
 });
 
 resumoFechar.addEventListener("click", fecharResumo);
 
+// esc fecha o resumo, que é a unica janela modal da tela
+document.addEventListener("keydown", (evento) => {
+  if (evento.key === "Escape" && !resumo.hidden) fecharResumo();
+});
+
 // se fechar a aba no meio da chamada, solta o microfone e fecha o socket direito
 window.addEventListener("beforeunload", () => {
   if (estaEmChamada()) {
-    pararDemo();
     pararTracks();
     if (socket && socket.readyState === WebSocket.OPEN) {
       fechamosOSocket = true;
@@ -1369,9 +1160,4 @@ escreverLog("tela carregada");
 if (!navigator.mediaDevices || !window.MediaRecorder) {
   escreverLog("esse navegador não suporta gravação de áudio");
   mostrarErro("Este navegador não grava áudio. Use o Chrome ou o Edge.", false);
-}
-
-if (new URLSearchParams(location.search).get("demo") === "1") {
-  entrarNoModoDemo();
-  rodarDemo();
 }

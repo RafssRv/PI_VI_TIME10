@@ -8,9 +8,9 @@ from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="Backend Pizzaria - Agente de Voz", version="0.1.0")
 
-# --- rota 1: health check (pra confirmar se a api ta de pe) ---
-@app.get("/")
-async def root():
+# --- health check (pra confirmar se a api ta de pe) ---
+@app.get("/health")
+async def health():
     return {"status": "ok", "mensagem": "servidor fastapi da pizzaria rodando!"}
 
 # --- ROTA EXTRA: Apenas para servir a nossa página html de teste ---
@@ -151,6 +151,8 @@ async def websocket_audio(websocket: WebSocket):
     print(f"[websocket] audio completo salvo em: {caminho_audio}")
 
 
-# --- front-end: o proprio fastapi entrega a pasta frontend ---
+# --- front-end: o proprio fastapi entrega a pasta frontend na raiz ---
+# esse mount fica POR ULTIMO de proposito: as rotas declaradas acima (/health, /teste,
+# /api/v1/falar, /ws/falar) sao casadas antes, o resto cai nos arquivos da pasta frontend
 PASTA_FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
-app.mount("/app", StaticFiles(directory=PASTA_FRONTEND, html=True), name="frontend")
+app.mount("/", StaticFiles(directory=PASTA_FRONTEND, html=True), name="frontend")

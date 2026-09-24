@@ -22,7 +22,7 @@
 
         btnIniciar.onclick = async () => {
             // 1. conecta no nosso backend fastapi
-            ws = new WebSocket("ws://127.0.0.1:8000/ws/falar");
+            ws = new WebSocket(`ws://${location.host}/ws/falar`);
 
             ws.onopen = async () => {
                 textoStatus.innerText = "status: conectado! gravando...";
