@@ -3,57 +3,90 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Atendente de voz - Pizzaria</title>
+  <title>Pizzaria — atendimento por voz</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body data-estado="ocioso">
 
-  <!-- faixa do modo demonstracao: so aparece quando a demo esta ligada -->
-  <div id="faixa-demo" hidden>
-    <span class="faixa-demo-texto">MODO DEMONSTRAÇÃO — falas e pedido são de mentira, nada vai para o banco</span>
-    <button type="button" id="botao-sair-demo" class="botao-secundario">Sair do modo demonstração</button>
-  </div>
-
-  <!-- barra de cima: titulo, duracao da chamada e estado da conexao -->
+  <!-- faixa 1: marca, titulo, estado da conexao e duracao da chamada -->
   <header id="barra-topo">
+    <span class="marca" aria-hidden="true"></span>
     <h1 class="titulo">Pizzaria — atendimento por voz</h1>
+
+    <div id="chip-conexao">
+      <span id="bolinha" class="bolinha desconectado" aria-hidden="true"></span>
+      <span id="texto-status">desconectado</span>
+    </div>
+
     <div class="bloco-chamada">
       <span class="rotulo-chamada">CHAMADA</span>
       <span id="timer">00:00</span>
     </div>
-    <div class="bloco-conexao">
-      <span id="bolinha" class="bolinha desconectado"></span>
-      <span id="texto-status">desconectado</span>
-    </div>
   </header>
 
-  <!-- tarja de erro: largura inteira, com hachura, nunca so a bolinha vermelha -->
+  <!-- faixa 2: as 4 etapas do pipeline, no topo, com o tempo de cada uma -->
+  <section id="tira-etapas" aria-label="Etapas do atendimento">
+    <div class="etapa" id="etapa-1">
+      <span class="etapa-trilho" aria-hidden="true"></span>
+      <span class="etapa-id">
+        <span class="etapa-disco" aria-hidden="true"><span class="etapa-num">1</span></span>
+        <span class="etapa-nome">ouvindo</span>
+      </span>
+      <span class="etapa-tempo">aguardando</span>
+    </div>
+
+    <div class="etapa" id="etapa-2">
+      <span class="etapa-trilho" aria-hidden="true"></span>
+      <span class="etapa-id">
+        <span class="etapa-disco" aria-hidden="true"><span class="etapa-num">2</span></span>
+        <span class="etapa-nome">transcrevendo</span>
+      </span>
+      <span class="etapa-tempo">aguardando</span>
+    </div>
+
+    <div class="etapa" id="etapa-3">
+      <span class="etapa-trilho" aria-hidden="true"></span>
+      <span class="etapa-id">
+        <span class="etapa-disco" aria-hidden="true"><span class="etapa-num">3</span></span>
+        <span class="etapa-nome">pensando</span>
+      </span>
+      <span class="etapa-tempo">aguardando</span>
+    </div>
+
+    <div class="etapa" id="etapa-4">
+      <span class="etapa-trilho" aria-hidden="true"></span>
+      <span class="etapa-id">
+        <span class="etapa-disco" aria-hidden="true"><span class="etapa-num">4</span></span>
+        <span class="etapa-nome">respondendo</span>
+      </span>
+      <span class="etapa-tempo">aguardando</span>
+    </div>
+
+    <p class="bloco-turno">último turno: <strong id="tempo-turno">—</strong> · meta: 5 s</p>
+  </section>
+
+  <!-- faixa 3: tarja de erro, largura inteira, nunca so uma bolinha vermelha -->
   <div id="tarja-erro" class="tarja-erro" role="alert" hidden>
-    <span class="hachura" aria-hidden="true"></span>
+    <span class="tarja-x" aria-hidden="true"><span></span><span></span></span>
     <p id="tarja-erro-texto"></p>
-    <button type="button" id="tarja-erro-botao" class="botao-secundario">Tentar de novo</button>
+    <button type="button" id="tarja-erro-botao" class="botao-tarja">Tentar de novo</button>
   </div>
 
+  <!-- faixa 4: a chamada a esquerda, a comanda a direita -->
   <main id="corpo">
 
-    <!-- coluna da esquerda: a chamada -->
     <section id="coluna-chamada">
 
       <div id="cartao-estado" aria-live="polite">
-        <div id="circulo">
+        <div id="orbe">
           <div id="anel" aria-hidden="true"></div>
           <div class="ondas icone" aria-hidden="true"><span></span><span></span></div>
 
-          <!-- microfone riscado (ocioso / encerrada) -->
+          <!-- microfone: riscado em ocioso/encerrada, sem risco e laranja em ouvindo -->
           <div class="icone-mic icone" aria-hidden="true">
             <span class="mic-capsula"></span>
             <span class="mic-pe"></span>
             <span class="mic-risco"></span>
-          </div>
-
-          <!-- 7 barrinhas que mexem com o nivel do microfone (ouvindo) -->
-          <div id="barras-mic" class="icone" aria-hidden="true">
-            <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
           </div>
 
           <!-- tres pontinhos (conectando / processando) -->
@@ -70,30 +103,44 @@
           <div class="icone-x icone" aria-hidden="true"><span></span><span></span></div>
         </div>
 
-        <p id="legenda-nivel" hidden>nível simulado</p>
-        <p id="rotulo-estado">Chamada não iniciada</p>
-        <p id="sublinha-estado">clique em LIGAR e fale normalmente</p>
+        <div class="estado-texto">
+          <p id="rotulo-estado">Chamada não iniciada</p>
+          <p id="sublinha-estado">clique em Ligar e fale normalmente</p>
+        </div>
+
+        <div class="direita">
+          <!-- o meia-duplex escrito na tela: o css mostra um texto por estado -->
+          <span id="chip-mic">
+            <span class="ponto" aria-hidden="true"></span>
+            <span class="chip-aberto">MICROFONE ABERTO</span>
+            <span class="chip-pausado">MICROFONE PAUSADO</span>
+          </span>
+
+          <!-- 7 barrinhas que mexem com o nivel do microfone -->
+          <div id="barras-mic" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          </div>
+        </div>
       </div>
 
       <div id="caixa-conversa">
-        <h2 class="titulo-secao">CONVERSA</h2>
+        <p class="sobrancelha">CONVERSA</p>
         <div id="conversa" aria-live="polite">
           <p class="conversa-vazia">A conversa aparece aqui enquanto vocês falam.</p>
         </div>
       </div>
 
-      <button type="button" id="botao-demo" class="botao-secundario">Modo demonstração</button>
-
       <button type="button" id="botao-chamada" class="botao-chamada ligar">
         <span class="forma" aria-hidden="true"></span>
-        <span id="texto-botao">LIGAR</span>
+        <span id="texto-botao">Ligar</span>
       </button>
     </section>
 
-    <!-- coluna da direita: a comanda, em papel claro -->
+    <!-- a comanda: papel, e o que o cliente le -->
     <section id="comanda">
       <div id="comanda-topo">
-        <h2>Seu pedido <span id="selo-simulacao" hidden>SIMULAÇÃO</span></h2>
+        <p class="sobrancelha">COMANDA</p>
+        <h2>Seu pedido</h2>
         <p id="comanda-cliente">Cliente: ainda não identificado</p>
       </div>
 
@@ -109,6 +156,7 @@
           <span>Pagamento: <strong id="comanda-pagamento">a combinar</strong></span>
           <span>Entrega: <strong id="comanda-entrega">a confirmar</strong></span>
         </div>
+        <div class="regua" aria-hidden="true"></div>
         <div class="linha-total">
           <span>TOTAL</span>
           <strong id="comanda-total">R$ 0,00</strong>
@@ -117,7 +165,7 @@
     </section>
   </main>
 
-  <!-- tira de 44px: as 4 etapas do pipeline e o tempo do ultimo turno -->
+  <!-- faixa 5: detalhes tecnicos, log e player da ultima gravacao -->
   <footer id="rodape-tecnico">
     <details id="detalhes-tecnicos">
       <summary><span class="seta" aria-hidden="true"></span>Detalhes técnicos</summary>
@@ -132,21 +180,9 @@
         </div>
       </div>
     </details>
-
-    <div class="etapas">
-      <div class="etapa" id="etapa-1"><span class="etapa-num">1</span><span class="etapa-nome">ouvindo</span><span class="etapa-tempo">aguardando</span></div>
-      <div class="etapa" id="etapa-2"><span class="etapa-num">2</span><span class="etapa-nome">transcrevendo</span><span class="etapa-tempo">aguardando</span></div>
-      <div class="etapa" id="etapa-3"><span class="etapa-num">3</span><span class="etapa-nome">pensando</span><span class="etapa-tempo">aguardando</span></div>
-      <div class="etapa" id="etapa-4"><span class="etapa-num">4</span><span class="etapa-nome">respondendo</span><span class="etapa-tempo">aguardando</span></div>
-    </div>
-
-    <div class="bloco-turno">
-      <span>último turno: <strong id="tempo-turno">—</strong></span>
-      <span class="meta">meta: 5 s</span>
-    </div>
   </footer>
 
-  <!-- resumo do fim da chamada (tarefa 20), desenhado pela mesma funcao da comanda -->
+  <!-- resumo do fim da chamada, desenhado pela mesma funcao da comanda -->
   <div id="resumo" hidden>
     <div class="resumo-caixa" role="dialog" aria-modal="true" aria-labelledby="resumo-titulo">
       <h2 id="resumo-titulo">Pedido registrado</h2>
@@ -158,14 +194,15 @@
           <span>Pagamento: <strong id="resumo-pagamento">a combinar</strong></span>
           <span>Entrega: <strong id="resumo-entrega">a confirmar</strong></span>
         </div>
+        <div class="regua" aria-hidden="true"></div>
         <div class="linha-total">
           <span>TOTAL</span>
           <strong id="resumo-total">R$ 0,00</strong>
         </div>
       </div>
       <div class="resumo-botoes">
-        <button type="button" id="resumo-ligar" class="botao-secundario forte">Ligar de novo</button>
-        <button type="button" id="resumo-fechar" class="botao-secundario">Fechar</button>
+        <button type="button" id="resumo-ligar" class="botao-resumo forte">Ligar de novo</button>
+        <button type="button" id="resumo-fechar" class="botao-resumo">Fechar</button>
       </div>
     </div>
   </div>
