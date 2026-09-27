@@ -1,7 +1,7 @@
 # VOZ-01 Pipeline de voz
 
 Status: nao iniciado — nenhuma linha de transcricao, modelo de linguagem, sintese, deteccao de atividade de voz ou orquestracao foi escrita; este documento e a especificacao do que precisa ser construido, e as unicas pecas que existem hoje sao o tunel de audio do `/ws/falar` (que grava os chunks em disco) e o acesso ao banco do `backend/repositorio.py`.
-Backlog: doc/backlog.md (VOZ-01). Requisitos: RF02, RF06, RF10, RNF01, RNF02, RNF04, RIA01, RIA05, RIA06, RIA09.
+Backlog: doc/backlog.md (VOZ-01). Requisitos: RF02, RF06, RF10, RNF01, RNF02, RNF04, RIA01, RIA03, RIA05, RIA06, RIA09.
 
 ## Objetivo
 
@@ -18,7 +18,7 @@ O que existe hoje:
 | Caminho | O que e | Estado |
 | :-- | :-- | :-- |
 | `backend/main.py`, rota `@app.websocket("/ws/falar")` | Recebe os chunks binarios e os frames de controle de texto | Pronto como tunel, sem pipeline |
-| `backend/main.py`, ramo `tipo == "iniciar_chamada"` | Le `controle.get("formato")` e guarda em `formato_do_audio` | Pronto; a variavel ainda nao e usada por ninguem |
+| `backend/main.py`, ramo `tipo == "iniciar_chamada"` | Le `controle.get("formato_audio")` e guarda em `formato_do_audio` | Pronto. E essa variavel que a transcricao vai precisar para saber o container do audio (webm/opus, mp4/aac) |
 | `backend/main.py`, ramo `tipo == "fim_da_fala"` | Ponto exato onde a transcricao do turno tem que ser chamada; hoje so tem `print` e um bloco de comentario `--- MOCK DA FASE 3 ---` | Marcado, nao implementado |
 | `backend/main.py`, linha comentada `await websocket.send_json({"tipo": "pronto", "versao": 1})` | Comentada de proposito: o servidor so se apresenta quando houver transcricao de verdade | Aguardando VOZ-01 |
 | `backend/main.py`, `caminho_audio = "audio_cliente_streaming.webm"` | Arquivo unico onde todos os chunks sao concatenados | Pronto, e provisorio |
@@ -160,7 +160,7 @@ Fora do banco, escreve em disco o audio da chamada — hoje `audio_cliente_strea
 
 | Situacao | Comportamento esperado |
 | :-- | :-- |
-| Chunk de audio chega antes do `iniciar_chamada`, sem formato declarado | O decodificador ainda nao sabe o que abrir; tratar como erro de protocolo e nao adivinhar o container. Hoje `formato_do_audio` nasce `None` e ninguem le essa variavel |
+| Chunk de audio chega antes do `iniciar_chamada`, sem formato declarado | O decodificador ainda nao sabe o que abrir; tratar como erro de protocolo e nao adivinhar o container. `formato_do_audio` nasce `None` ate a tela declarar o formato |
 | Navegador grava em formato diferente do esperado (mp4, ogg) | O formato vem declarado no `iniciar_chamada` e o decodificador tem que respeita-lo; formato nao suportado vira erro explicito, nao transcricao vazia |
 | Cliente fica calado o turno inteiro | O VAD nao fecha turno; passado o tempo limite, o atendente pergunta se o cliente ainda esta na linha. Tempo limite nao definido |
 | Ruido ambiente alto, sem fala (RNF04) | O VAD nao pode tratar ruido como fala e abrir turno vazio; se a transcricao sair com confianca baixa, cai em RIA09 |

@@ -10,6 +10,7 @@
   --comanda:#FBF4EA;        /* papel da comanda e do resumo */
   --borda:#E8DFD2;          /* linha de 1px padrao */
   --borda-forte:#D3C7B5;    /* anel ocioso, pontilhado, regua */
+  --trilho:#9E9080;         /* trilho da etapa em repouso: 3,0:1 sobre --fundo, 3,1:1 sobre --superficie */
   --tinta:#1F1B17;          /* texto principal */
   --tinta-media:#57514A;    /* texto secundario */
   --tinta-fraca:#756E65;    /* terciario: so sobre --fundo ou --superficie */
@@ -26,6 +27,9 @@
   --halo:rgba(228,87,46,.12);
   --veu:rgba(31,27,23,.55);
   --brilho:rgba(255,255,255,.55);   /* varredura do trilho ativo */
+
+  /* ---- medidas ---- */
+  --orbe:64px;              /* o orbe e o trilho do grid saem os dois daqui */
 
   /* ---- espaco: escala de 4px, nada fora dela ---- */
   --e1:4px; --e2:8px; --e3:12px; --e4:16px; --e5:24px; --e6:32px; --e7:48px;
@@ -69,7 +73,11 @@ body{
   font: var(--t-corpo);
 }
 
-/* foco em tinta: passa de 15:1 em qualquer superficie, inclusive no botao laranja */
+/* foco em tinta. o outline-offset de 2px poe o anel FORA da caixa do controle, sobre o fundo
+   da pagina: ele nunca encosta no preenchimento do botao laranja. --tinta sobre --fundo da
+   16,5:1 e sobre --superficie 17,1:1. sobre superficie colorida o numero cai (3,4:1 no
+   --destaque-forte, 1,1:1 no --tinta-escura), entao quem um dia usar outline-offset negativo
+   num botao colorido precisa de anel de outra cor: --branco sobre --tinta-escura da 15,8:1 */
 :focus-visible{
   outline: 3px solid var(--tinta);
   outline-offset: 2px;
@@ -102,11 +110,10 @@ body{
 /* marca: uma fatia de pizza feita com conic-gradient */
 .marca{
   flex: none;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 1px solid var(--borda-forte);
-  background: conic-gradient(from -45deg, var(--destaque) 0 90deg, var(--destaque-leve) 90deg 360deg);
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  display: block;
 }
 
 .titulo{
@@ -156,6 +163,8 @@ body{
 }
 
 /* ================= faixa 2: a tira das 4 etapas ================= */
+/* fundo de papel, nao branco: a divisoria de 1px entre duas faixas brancas da 1,3:1 e some,
+   e as duas viravam um bloco branco unico de 148px antes de qualquer conteudo */
 #tira-etapas{
   flex: 0 0 84px;
   display: grid;
@@ -163,8 +172,8 @@ body{
   align-items: start;
   column-gap: var(--e4);
   padding: var(--e3) var(--e5) var(--e2);
-  background: var(--superficie);
-  border-bottom: 1px solid var(--borda);
+  background: var(--fundo);
+  border-bottom: 1px solid var(--borda-forte);
 }
 
 /* os 4 trilhos juntos formam uma barra de progresso atravessando a tela */
@@ -174,7 +183,7 @@ body{
   overflow: hidden;
   height: 4px;
   border-radius: 2px;
-  background: var(--borda);
+  background: var(--trilho);
   margin-bottom: var(--e2);
   transition: background-color var(--tempo) var(--curva);
 }
@@ -384,7 +393,7 @@ body{
 #cartao-estado{
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: 64px 1fr auto;
+  grid-template-columns: var(--orbe) 1fr auto;
   align-items: center;
   gap: var(--e4);
   padding: var(--e5);
@@ -395,8 +404,8 @@ body{
 
 #orbe{
   position: relative;
-  width: 64px;
-  height: 64px;
+  width: var(--orbe);
+  height: var(--orbe);
   border-radius: 50%;
   background: var(--superficie);
   display: grid;
@@ -638,8 +647,17 @@ body[data-estado="erro"] #anel{ border-color: var(--erro); }
   padding-right: var(--e2);
 }
 
+/* enquanto a caixa esta vazia o texto fica no meio do espaco, nao encostado no canto:
+   vazio centralizado parece intencional, vazio no canto superior esquerdo parece bug */
+#conversa:has(.conversa-vazia){
+  display: grid;
+  place-content: center;
+  place-items: center;
+}
+
 .conversa-vazia{
   margin: 0;
+  text-align: center;
   font: var(--t-corpo);
   color: var(--tinta-fraca);
 }
@@ -776,6 +794,12 @@ body[data-estado="conectando"] #texto-botao::after{
   min-height: 0;
   overflow-y: auto;
   padding: var(--e4) var(--e5);
+}
+
+/* mesmo motivo do #conversa: as duas linhas de espera ficam no meio da comanda */
+#comanda-itens:has(.comanda-vazia){
+  display: grid;
+  align-content: center;
 }
 
 .comanda-vazia{
@@ -923,6 +947,10 @@ body[data-estado="conectando"] #texto-botao::after{
   cursor: pointer;
   white-space: nowrap;
 }
+
+/* o summary preenche os 48px do rodape, que e o ultimo filho de um body com overflow
+   hidden: com offset positivo o arco de baixo cai fora da tela. aqui o anel vai pra dentro */
+#detalhes-tecnicos summary:focus-visible{ outline-offset: -3px; }
 
 #detalhes-tecnicos summary::-webkit-details-marker{ display: none; }
 
@@ -1081,8 +1109,8 @@ body[data-estado="conectando"] #texto-botao::after{
 
 /* ================= telas menores (o escopo eh desktop) ================= */
 @media (max-height: 820px){
+  :root{ --orbe:48px; }
   #cartao-estado{ padding: var(--e4) var(--e5); }
-  #orbe{ width: 48px; height: 48px; }
   .botao-chamada{ flex: 0 0 64px; height: 64px; }
 }
 
@@ -1096,37 +1124,54 @@ body[data-estado="conectando"] #texto-botao::after{
     grid-template-rows: auto auto;
     overflow-y: auto;
   }
-  #comanda{ order: 1; min-height: 50vh; }
-  #coluna-chamada{ order: 2; }
-  /* a tira continua no topo em qualquer largura: vira 2x2, nunca desce */
+  /* a chamada vem primeiro: a comanda vazia nao pode empurrar o botao Ligar pra baixo da
+     dobra. o min-height tambem sai — ela cresce quando tiver item de verdade dentro */
+  #coluna-chamada{ order: 1; }
+  #comanda{ order: 2; }
+  /* a tira continua no topo em qualquer largura. aqui as quatro etapas ainda cabem numa
+     linha e so o tempo do turno desce: duas linhas de etapa custariam ~100px de altura
+     em cima do botao e da conversa */
   #tira-etapas{
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(4, 1fr);
     height: auto;
     flex: 0 0 auto;
-    row-gap: var(--e3);
+    row-gap: var(--e2);
   }
   #tira-etapas .bloco-turno{ grid-column: 1 / -1; }
 }
 
 @media (max-width: 760px){
+  :root{ --orbe:48px; }
   #barra-topo{
     flex-wrap: wrap;
     height: auto;
     flex: 0 0 auto;
     padding: var(--e2) var(--e4);
   }
-  #cartao-estado{ grid-template-columns: 48px 1fr; }
+  /* so aqui a tira vira 2x2: abaixo disso quatro colunas cortam "transcrevendo" */
+  #tira-etapas{ grid-template-columns: 1fr 1fr; row-gap: var(--e3); }
+  #cartao-estado{ grid-template-columns: var(--orbe) 1fr; }
   #cartao-estado .direita{ grid-column: 2; justify-self: start; align-items: flex-start; }
   .painel-tecnico{ grid-template-columns: 1fr; }
 }
 
 /* respeita quem pediu menos animacao no sistema.
-   nao usa animation:none de proposito: o anel para no lugar, os pontinhos param
-   opacos e as barrinhas, que sao transform posto pelo js, continuam se mexendo */
+   nao usa animation:none de proposito: com duracao de .01ms o navegador salta direto pro
+   estado FINAL de cada keyframe — e o estado final nao e o estado legivel (piscar termina
+   em opacity .25, pular em .5 e expandir em opacity 0). por isso as tres regras abaixo
+   fixam o que tem que ficar desenhado: pontinhos opacos, ondas paradas e visiveis,
+   reticencias e cursor de fala parcial em opacidade cheia. as barrinhas do microfone sao
+   transform posto pelo js e continuam se mexendo */
 @media (prefers-reduced-motion: reduce){
   *{
     animation-duration: .01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
   }
+
+  .icone-pontos span{ opacity: 1; transform: none; }
+  .ondas span{ opacity: .7; transform: none; }
+  .etapa.ativa .etapa-tempo::after,
+  .fala.parcial .texto::after,
+  body[data-estado="conectando"] #texto-botao::after{ opacity: 1; }
 }

@@ -2,7 +2,7 @@
 
 Status: Parcial. As consultas de cardapio, o historico, a recomendacao, a interpretacao da forma de pagamento falada e a gravacao do pedido estao prontas em `backend/repositorio.py` e conferidas na mao contra o Postgres com os dados do `backend/seed.py`; nenhuma rota, websocket ou modulo de IA chama essas funcoes ainda, porque a orquestracao nao existe (VOZ-01).
 
-Backlog: doc/backlog.md (PED-01). Requisitos: RF05, RF07, RF08, RF09, RF11, RIA04.
+Backlog: doc/backlog.md (PED-01). Requisitos: RF05, RF07, RF08, RF09, RF11, RNF05, RIA02, RIA04.
 
 ## Objetivo
 
@@ -81,7 +81,9 @@ A categoria tambem vem da fala ("quais bebidas voces tem?"), no plural. `listar_
 
 O fallback e do chamador: cliente recem-cadastrado (RF04) nao tem pedido nenhum, `itens_mais_pedidos_do_cliente` devolve lista vazia e a recomendacao passa a usar `itens_mais_pedidos_da_casa`. O seed da base para isso: 6 clientes com 30 pedidos historicos e um produto favorito fixo por cliente, senao a recomendacao veria so itens soltos e nao teria o que recomendar. Qual produto lidera a casa depende do sorteio do seed (semente fixa, `SEMENTE = 10`) e nao esta medido aqui.
 
-### Forma de pagamento falada (pronto)
+### Forma de pagamento falada (pronto, metade do RIA02)
+
+Esta subsecao e a de gravacao respondem pela parte de PED-01 no RIA02 (confirmacao dos dados criticos): das quatro informacoes criticas que o requisito lista, duas nascem aqui — **quantidade** e **forma de pagamento**. O que o codigo garante e a barreira, nao a confirmacao falada: quantidade quebrada e pagamento ambiguo levantam `ValueError` com a pergunta pronta, em vez de chutar um valor. A confirmacao em si e a fala do atendente repetindo o dado, que depende de VOZ-01, e o acerto de 95% exigido pelo requisito e medicao de MED-01 (CPF e endereco ficam com CLI-01).
 
 Ninguem fala "cartao_credito" numa chamada. `interpretar_pagamento` traduz a frase para um dos quatro valores de `FORMAS_PAGAMENTO` (`pix`, `dinheiro`, `cartao_credito`, `cartao_debito`), os mesmos que o seed grava, e a coluna `pedido.forma_pagamento` e `VARCHAR(20)`. A ordem da decisao e: valor ja canonico, depois sinais por palavra, depois sinais ambiguos, depois erro.
 
@@ -151,11 +153,12 @@ Nao escreve em `produto` nem em `cliente` (cadastro de cliente e CLI-01, esquema
 - Produto que nao esta no cardapio nunca entra no pedido: zero candidatos para o nome falado interrompe a gravacao inteira (RIA04).
 - Produto inativo e tratado como inexistente em toda consulta da conversa: `buscar_produtos`, `itens_mais_pedidos_do_cliente` e `itens_mais_pedidos_da_casa` filtram `ativo = true`. O seed mantem "Pizza de Escarola com Bacon" desativada exatamente como caso de teste disso.
 - Nome ambiguo nunca e desempatado pelo codigo: com mais de um candidato o pedido para e a mensagem traz a lista, para o atendente perguntar.
-- Quantidade quebrada e recusada, nao truncada: `1.5` levanta erro em vez de virar `1`, porque truncar cobraria a menos calado.
+- Quantidade quebrada e recusada, nao truncada: `1.5` levanta erro em vez de virar `1`, porque truncar cobraria a menos calado. E a barreira de PED-01 para o RIA02 no campo quantidade: erro com pergunta, nunca valor assumido.
 - Quantidade tem que ser maior que zero, na aplicacao e no banco (`CHECK (quantidade > 0)` em `item_pedido`).
 - Preco e copiado no momento da venda para `item_pedido.preco_unitario`; mudanca futura no cardapio nao altera pedido antigo.
 - Dinheiro so em `Decimal`, nunca em `float`: as colunas sao `NUMERIC(10,2)` e o total e arredondado com `quantize(Decimal("0.01"))`.
-- Forma de pagamento so e gravada se cair numa das quatro de `FORMAS_PAGAMENTO`; na duvida, erro com pergunta, nunca um valor escolhido no chute.
+- Forma de pagamento so e gravada se cair numa das quatro de `FORMAS_PAGAMENTO`; na duvida, erro com pergunta, nunca um valor escolhido no chute (RIA02).
+- Nenhuma dessas funcoes monta SQL fora do `repositorio.py`, e nenhuma delas sabe da existencia do pipeline de voz: e o lado de PED-01 do RNF05, que pede o motor separado das regras de negocio. Cardapio, ambiguidade, recomendacao e forma de pagamento sao regra de negocio e vivem aqui; transcricao, modelo e sintese vivem em VOZ-01 e conversam com este item so pelas funcoes do repositorio.
 - Grava inteiro ou nao grava: um unico `commit` para pedido e itens, com `rollback` em qualquer falha. Toda validacao acontece antes do `add`, entao erro de item nem chega a abrir escrita.
 - Pedido sem nenhum item nao e gravado.
 
