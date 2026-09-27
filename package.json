@@ -10,6 +10,7 @@
     "banco:recriar": "docker compose down -v && docker compose up -d",
     "seed": "python backend/seed.py",
     "seed:recriar": "python backend/seed.py --recriar",
+    "teste": "python -m pytest tests -v",
     "deps": "python -m pip install -r backend/requirements.txt"
   }
 }

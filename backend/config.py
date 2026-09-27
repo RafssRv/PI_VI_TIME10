@@ -5,10 +5,13 @@ import os
 #   windows (powershell): $env:CPF_HMAC_SECRET = "um-segredo-bem-grande"
 #   linux / mac:          export CPF_HMAC_SECRET="um-segredo-bem-grande"
 
-# o default tem q bater com o docker-compose.yml (usuario pizzaria / senha pizzaria123 / banco pizzaria)
+# o default tem q bater com o docker-compose.yml (usuario pizzaria / senha pizzaria123 / banco pizzaria).
+# eh 127.0.0.1 e NAO localhost de proposito: no windows o localhost resolve pra ipv6 (::1) primeiro,
+# e o docker publica a porta so em ipv4, entao cada conexao ficava 30 segundos travada antes de
+# cair pro ipv4. com o ip cru, conecta em milissegundos.
 URL_DO_BANCO = os.getenv(
     "DATABASE_URL",
-    "postgresql+psycopg://pizzaria:pizzaria123@localhost:5432/pizzaria",
+    "postgresql+psycopg://pizzaria:pizzaria123@127.0.0.1:5432/pizzaria",
 )
 
 _SEGREDO_DE_DESENVOLVIMENTO = "segredo-local-so-pra-desenvolvimento-nao-use-de-verdade"

@@ -15,7 +15,6 @@ Item interno: os usuários são os cinco integrantes do time e a professora, no 
 
 | Entrada | O que é |
 | :-- | :-- |
-| `passo_a_passo.txt` | roteiro curto de instalação, na raiz do repositório |
 | `package.json` | onde estão todos os scripts (`dev`, `deps`, `banco`, `seed`, ...) |
 | `docker-compose.yml` | define o container `pizzaria-db` (postgres:16) e monta o `banco.sql` |
 | `banco.sql` | esquema do banco, aplicado no primeiro boot do container |
@@ -78,7 +77,7 @@ Com o Docker Desktop aberto:
 npm run banco
 ```
 
-Roda `docker compose up -d`. Na primeira vez o Postgres executa o `banco.sql` sozinho e cria as tabelas. Conexão: `postgresql://pizzaria:pizzaria123@localhost:5432/pizzaria`.
+Roda `docker compose up -d`. Na primeira vez o Postgres executa o `banco.sql` sozinho e cria as tabelas. Conexão: `postgresql://pizzaria:pizzaria123@127.0.0.1:5432/pizzaria`.
 
 ### 6. Conferir as tabelas (pronto)
 
@@ -252,5 +251,5 @@ O esquema das tabelas é de DAD-01. O `/ws/falar` grava `audio_cliente_streaming
 - A versão do Python não está fixada em lugar nenhum do repositório; o time trabalha com a 3.11, mas nada no código obriga. Recomendação: registrar a versão mínima no `requirements.txt` ou no README, e todo mundo usar a mesma antes de VOZ-01, que é onde a compatibilidade de pacote costuma quebrar.
 - `psycopg[binary]` e `websockets` estão sem versão no `requirements.txt`, então duas máquinas instaladas em datas diferentes podem ficar com versões diferentes. Recomendação: fixar as duas versões como já está feito para fastapi, uvicorn e sqlalchemy.
 - Não está decidido se o time compartilha um valor único de `CPF_HMAC_SECRET` ou se cada um fica com o segredo de desenvolvimento. Recomendação: cada um fica com o padrão de `dev` na máquina local, já que o banco é recriável pelo seed; um segredo combinado só faria falta se fôssemos compartilhar dump de banco.
-- O `README.md` ainda manda rodar só `docker compose up -d` e não cita `npm run deps`, `npm run dev`, o seed nem a tela na raiz. Recomendação: atualizar o README para apontar para este item, em vez de manter dois roteiros que vão divergir.
+- O `README.md` e o antigo `passo_a_passo.md` traziam roteiros próprios e desatualizados; o README passou a apontar para este item e o passo a passo foi removido. Recomendação: manter assim — roteiro de instalação em um lugar só, porque dois roteiros divergem na primeira mudança de script.
 - Não há medição de quanto tempo leva montar o ambiente do zero nem de quanto o Docker consome com o Postgres de pé. Recomendação: a medir junto com MED-01, se a banca pedir.

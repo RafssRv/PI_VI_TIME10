@@ -42,10 +42,10 @@ Nenhuma medição de latência, WER, acerto de extração ou de intenção foi f
 | RIA03 | Extrair o pedido de forma estruturada com acerto de no mínimo 90% dos diálogos de teste, considerando itens e quantidades. | VOZ-01, MED-01 | a medir — a extração não existe e não há diálogos de teste escritos | — |
 | RIA04 | Validar todo item extraído pelo modelo contra o cardápio do banco antes de incluí-lo no pedido, de modo que a ocorrência de produtos inexistentes seja nula. | PED-01 | parcial — a validação está pronta e é obrigatória: item fora do cardápio ou ambíguo levanta erro e nada vai para o banco; falta o modelo que vai alimentá-la | `backend/repositorio.py` → `salvar_pedido`, `buscar_produtos`; produto inativo de teste em `backend/seed.py` (Pizza de Escarola com Bacon) |
 | RIA05 | Classificar corretamente a intenção do cliente em no mínimo 90% dos casos, entre pedir item, tirar dúvida, alterar, confirmar, cancelar e encerrar. | VOZ-01, MED-01 | a medir — não há classificação de intenção | — |
-| RIA06 | Manter o contexto da sessão por no mínimo dez turnos, permitindo que o cliente se refira a itens já mencionados sem repeti-los. | VOZ-01 | não iniciado — não existe estado de sessão nem histórico de turnos | — |
+| RIA06 | Manter o contexto da sessão por no mínimo dez turnos, permitindo que o cliente se refira a itens já mencionados sem repeti-los. | VOZ-01, MED-01 | não iniciado — não existe estado de sessão nem histórico de turnos | — |
 | RIA07 | Medir o tempo de cada etapa do pipeline (transcrição, inferência e síntese), de modo que a soma respeite a meta de latência do RNF01. | MED-01 | não iniciado — nenhuma etapa é cronometrada no servidor, e as etapas ainda não existem | — |
 | RIA08 | Produzir resposta sintetizada inteligível, com nota média mínima de 4 em escala de 1 a 5 avaliada pelo grupo, e fator de tempo real inferior a 1. | VOZ-01, MED-01 | a medir — não há síntese para avaliar | — |
-| RIA09 | Solicitar a repetição da fala quando a confiança da transcrição ficar abaixo do limiar definido, em vez de assumir o conteúdo reconhecido. | VOZ-01 | não iniciado — o limiar ainda não foi definido e não há confiança de transcrição para comparar | — |
+| RIA09 | Solicitar a repetição da fala quando a confiança da transcrição ficar abaixo do limiar definido, em vez de assumir o conteúdo reconhecido. | VOZ-01, MED-01 | não iniciado — o limiar ainda não foi definido e não há confiança de transcrição para comparar | — |
 
 ## Requisitos afetados pela decisão de escopo
 

@@ -56,7 +56,7 @@
 // ==========================================================================================
 
 // ---------- constantes ----------
-const URL_WEBSOCKET = `ws://${location.hostname}:8000/ws/falar`;
+const URL_WEBSOCKET = `ws://${location.host}/ws/falar`;  // herda a porta do servidor que serviu a pagina
 const TAMANHO_CHUNK_MS = 250;       // de quanto em quanto tempo o gravador entrega um pedaco
 const VERSAO_PROTOCOLO = 1;
 const ESPERA_RESPOSTA_MS = 15000;   // se a resposta nao vier, reabre o microfone sozinho
@@ -65,8 +65,7 @@ const ESPERA_FIM_AUDIO_MS = 800;    // se o servidor esquecer o fim_audio, toca 
 const ESPERA_PEDIDO_SALVO_MS = 1200; // janela pro pedido_salvo atrasado entrar no resumo
 const FALA_MAXIMA_MS = 15000;       // fala contínua demais: fecha o turno na marra
 const LIMITE_LOG = 200;
-const RMS_FALA = 0.05;              // acima disso a gente considera que tem voz
-const RMS_SILENCIO = 0.02;          // abaixo disso a gente considera silencio
+const RMS_FALA = 0.05;              // acima disso e voz; tudo abaixo conta como silencio
 const MS_PARA_CONFIRMAR_FALA = 300;
 const MS_DE_SILENCIO = 1200;
 const MS_DESTAQUE_ITEM = 4000;      // quanto tempo o item novo fica em destaque na comanda
@@ -166,6 +165,7 @@ let intervaloTimer = null;
 let segundos = 0;
 let duracaoFinal = "00:00";
 
+let focoAntesDoResumo = null;  // pra devolver o foco quando o resumo fechar
 let ultimoPedido = null;
 let pedidoSalvoId = null;
 let chavesDosItens = [];       // pra saber quais itens sao novos neste turno
@@ -264,13 +264,22 @@ function resetarEtapas() {
   tempoTurno.textContent = "—";
 }
 
-function marcarEtapa(numero) {
+// opcoes.abortada = true fecha a etapa ativa SEM promover ela a "feita": serve pro fim da
+// chamada e pro erro fatal, onde a etapa nao terminou, foi interrompida no meio. sem isso a
+// etapa em que o pipeline morreu ficava verde e com tempo carimbado
+function marcarEtapa(numero, opcoes) {
+  const abortada = opcoes && opcoes.abortada === true;
+
   // fecha a anterior guardando quanto ela levou
   if (etapaAtual && caixasEtapa[etapaAtual] && etapaAtual !== numero) {
     const anterior = caixasEtapa[etapaAtual];
     anterior.classList.remove("ativa");
-    anterior.classList.add("feita");
-    anterior.querySelector(".etapa-tempo").textContent = emSegundos(Date.now() - inicioEtapa);
+    if (abortada) {
+      anterior.querySelector(".etapa-tempo").textContent = "interrompida";
+    } else {
+      anterior.classList.add("feita");
+      anterior.querySelector(".etapa-tempo").textContent = emSegundos(Date.now() - inicioEtapa);
+    }
   }
 
   if (!numero || !caixasEtapa[numero]) {
@@ -296,6 +305,9 @@ function marcarEtapaFalhou(onde) {
   const caixa = caixasEtapa[numero];
   caixa.className = "etapa falhou";
   caixa.querySelector(".etapa-tempo").textContent = "falhou";
+  // a etapa ja esta fechada em vermelho: zerar aqui impede o marcarEtapa(0) do encerrar
+  // de passar por cima desse "falhou"
+  etapaAtual = 0;
 }
 
 function emSegundos(ms) {
@@ -391,16 +403,23 @@ function tratarMensagem(evento) {
     return;
   }
 
+  // quem tira a tela do modo mudo e o "pronto", e so ele: e a unica mensagem cujo unico
+  // proposito e se apresentar. qualquer outro frame tipado que chegue antes dele e aplicado
+  // normalmente, mas nao libera o envio de texto
   if (!protocoloNovo) {
-    protocoloNovo = true;
-    escreverLog("o servidor fala o protocolo novo, saindo do modo mudo");
-    comandaAviso.hidden = true;
-    enviarTexto({
-      tipo: "iniciar_chamada",
-      versao_protocolo: VERSAO_PROTOCOLO,
-      formato_audio: formatoEmUso(),
-      chunk_ms: TAMANHO_CHUNK_MS
-    });
+    if (obj.tipo === "pronto") {
+      protocoloNovo = true;
+      escreverLog("o servidor se apresentou, saindo do modo mudo");
+      comandaAviso.hidden = true;
+      enviarTexto({
+        tipo: "iniciar_chamada",
+        versao_protocolo: VERSAO_PROTOCOLO,
+        formato_audio: formatoEmUso(),
+        chunk_ms: TAMANHO_CHUNK_MS
+      });
+    } else {
+      escreverLog("frame '" + obj.tipo + "' chegou antes do 'pronto': a tela continua muda");
+    }
   }
 
   aplicarMensagem(obj);
@@ -429,6 +448,10 @@ function aplicarMensagem(obj) {
       esperandoAudio = true;
       pedacosResposta = [];
       formatoRespostaEsperado = obj.formato || "audio/wav";
+      // o meia-duplex comeca no AVISO, nao no fim_audio: enquanto os frames da resposta
+      // chegam, o microfone nao pode continuar mandando binario pro servidor
+      pausarCaptura();
+      if (estadoAtual !== "falando") definirEstado("processando");
       armarRelogioSeguranca();   // o audio ainda vem por ai, o servidor continua vivo
       marcarEtapa(4);
       break;
@@ -445,8 +468,10 @@ function aplicarMensagem(obj) {
       break;
 
     case "erro":
-      mostrarErro(obj.mensagem || "o servidor não explicou o que deu errado.", obj.fatal === true);
+      // pinta a etapa de vermelho ANTES: se o erro for fatal, mostrarErro chama encerrar,
+      // que fecha a etapa ativa, e ai nao sobra etapa nenhuma pra marcar como falha
       marcarEtapaFalhou(obj.onde);
+      mostrarErro(obj.mensagem || "o servidor não explicou o que deu errado.", obj.fatal === true);
       break;
 
     case "chamada_encerrada": {
@@ -469,11 +494,20 @@ function aplicarMensagem(obj) {
 }
 
 function aplicarEtapa(etapa) {
+  // estado que chega com a chamada ja encerrada nao pode ressuscitar a tela: o gravador ja
+  // parou e as trilhas do microfone ja foram soltas, entao a tela diria "pode falar" com o
+  // microfone morto (acontece na janela de 1,2 s que o chamada_encerrada deixa aberta)
+  if (!estaEmChamada()) {
+    escreverLog("estado '" + etapa + "' chegou fora da chamada, ignorado");
+    return;
+  }
+
   switch (etapa) {
     case "ouvindo":
-      // meia-duplex manda: se o atendente ainda esta falando, o microfone continua fechado
-      if (estadoAtual === "falando") {
-        escreverLog("servidor pediu 'ouvindo' com a resposta tocando, ignorado");
+      // meia-duplex manda: se o atendente ainda esta falando, ou se os frames da resposta
+      // ainda estao chegando, o microfone continua fechado
+      if (estadoAtual === "falando" || esperandoAudio) {
+        escreverLog("servidor pediu 'ouvindo' com a resposta em andamento, ignorado");
         return;
       }
       // o microfone está pausado desde o fim_da_fala: sem reabrir aqui a tela diria
@@ -716,12 +750,19 @@ function abrirResumo(dados) {
   resumoLinhas.textContent = linhas.join(" · ");
 
   desenharPedido(pedido, resumoItens);
+  focoAntesDoResumo = document.activeElement;
   resumo.hidden = false;
-  resumoFechar.focus();
+  resumoLigar.focus();   // a acao primaria, nao o "Fechar"
 }
 
 function fecharResumo() {
+  if (resumo.hidden) return;
   resumo.hidden = true;
+  // sem devolver o foco ele cai no <body> e o proximo Tab recomeca do topo do documento
+  const valido = focoAntesDoResumo && focoAntesDoResumo !== document.body && document.contains(focoAntesDoResumo);
+  const alvo = valido ? focoAntesDoResumo : botaoChamada;
+  focoAntesDoResumo = null;
+  try { alvo.focus(); } catch (erro) { /* o elemento saiu da tela */ }
 }
 
 // ---------- erros ----------
@@ -908,15 +949,18 @@ function vigiarSilencio(nivel, agora) {
     return;
   }
 
-  if (nivel < RMS_SILENCIO) {
-    if (!houveFala) {
-      inicioDaFala = 0;
-      return;
-    }
-    if (!inicioDoSilencio) inicioDoSilencio = agora;
-    if (agora - inicioDoSilencio >= MS_DE_SILENCIO) {
-      fimDaFala(agora - inicioDaFala);
-    }
+  // tudo que nao passa de RMS_FALA conta como silencio. antes o silencio so contava abaixo
+  // de 0,02, e a faixa entre os dois limiares (ruido de fundo constante, ventoinha,
+  // ar-condicionado, ainda mais com o autoGainControl ligado) nao caia em ramo nenhum: o
+  // relogio do silencio nunca comecava e a chamada ficava presa em "ouvindo" pra sempre.
+  // a histerese continua valendo so pra ENTRAR em fala, que exige passar de RMS_FALA
+  if (!houveFala) {
+    inicioDaFala = 0;
+    return;
+  }
+  if (!inicioDoSilencio) inicioDoSilencio = agora;
+  if (agora - inicioDoSilencio >= MS_DE_SILENCIO) {
+    fimDaFala(agora - inicioDaFala);
   }
 }
 
@@ -947,7 +991,7 @@ function armarRelogioSeguranca() {
   relogioSeguranca = setTimeout(() => {
     escreverLog("resposta não chegou em 15 s, reabrindo o microfone");
     mostrarErro("O servidor demorou demais para responder. Pode falar de novo.", false);
-    voltarAOuvir(true);
+    voltarAOuvir("timeout");
   }, ESPERA_RESPOSTA_MS);
 }
 
@@ -961,7 +1005,7 @@ function fecharAudioResposta() {
   pedacosResposta = [];
   if (pedacos.length === 0) {
     escreverLog("fim_audio sem nenhum frame binário, nada pra tocar");
-    voltarAOuvir(true);
+    voltarAOuvir("audio_vazio");
     return;
   }
   tocarResposta(new Blob(pedacos, { type: formatoRespostaEsperado }));
@@ -984,12 +1028,12 @@ function tocarResposta(blob) {
 
   audioResposta.onended = () => {
     if (minhaFala !== idFala) return;
-    voltarAOuvir();
+    voltarAOuvir("tocou");
   };
   audioResposta.onerror = () => {
     if (minhaFala !== idFala) return;
     escreverLog("não consegui tocar a resposta do servidor");
-    voltarAOuvir();
+    voltarAOuvir("falha_audio");
   };
 
   const tocando = audioResposta.play();
@@ -997,20 +1041,36 @@ function tocarResposta(blob) {
     tocando.catch((erro) => {
       if (minhaFala !== idFala) return;   // essa fala foi trocada por outra, deixa a nova
       escreverLog("o navegador não deixou tocar a resposta: " + erro.message);
-      voltarAOuvir();
+      voltarAOuvir("falha_audio");
     });
   }
 }
 
-// so aqui o microfone volta a ouvir: fim do audio, falha ao tocar ou timeout.
-// porTimeout=true quando nenhuma resposta chegou a tocar
-function voltarAOuvir(porTimeout) {
+// so aqui o microfone volta a ouvir. o motivo diz por que, e e ele que escolhe o frame:
+//  "tocou"       -> a resposta tocou ate o fim           -> manda resposta_tocada
+//  "timeout"     -> ninguem respondeu em 15 s            -> manda timeout
+//  "falha_audio" -> chegou audio e o navegador nao tocou -> nao manda frame, so log
+//  "audio_vazio" -> veio fim_audio sem nenhum frame      -> nao manda frame, so log
+// os dois ultimos nao tem frame no protocolo, e chamar de "resposta_tocada" um turno em que
+// o cliente nao ouviu nada faria o servidor contar turno falho como turno bem-sucedido
+function voltarAOuvir(motivo) {
   clearTimeout(relogioSeguranca);
   if (!estaEmChamada()) return;
 
+  // se o turno morreu com um audio_resposta pendurado, a espera morre junto: senao
+  // esperandoAudio fica true e barra o proximo "ouvindo"
+  clearTimeout(relogioFimAudio);
+  esperandoAudio = false;
+  pedacosResposta = [];
+
   retomarCaptura();
-  // resposta_tocada só vale quando uma resposta tocou mesmo
-  enviarTexto({ tipo: porTimeout === true ? "timeout" : "resposta_tocada", turno: turno });
+  if (motivo === "tocou") {
+    enviarTexto({ tipo: "resposta_tocada", turno: turno });
+  } else if (motivo === "timeout") {
+    enviarTexto({ tipo: "timeout", turno: turno });
+  } else {
+    escreverLog("microfone reaberto sem avisar o servidor (motivo: " + motivo + ")");
+  }
 
   if (tempoInicioTurno) {
     tempoTurno.textContent = emSegundos(Date.now() - tempoInicioTurno);
@@ -1031,6 +1091,7 @@ async function ligar() {
   comandaAviso.hidden = true;
 
   turno = 0;
+  tempoInicioTurno = 0;   // sem isso a chamada nova imprime o tempo do turno da chamada velha
   pedidoSalvoId = null;
   protocoloNovo = false;
   esperandoAudio = false;
@@ -1059,7 +1120,7 @@ async function ligar() {
     await conectar();
   } catch (erro) {
     pararTimer();
-    mostrarErro("Não consegui falar com o servidor. Confira se o backend está rodando em http://localhost:8000.", true);
+    mostrarErro("Não consegui falar com o servidor. Confira se o backend está rodando (npm run dev).", true);
     return;
   }
 
@@ -1081,7 +1142,7 @@ function encerrar(motivo, estadoFinal, manterSocket) {
   pararMedicao();
   esperandoAudio = false;
   pedacosResposta = [];
-  marcarEtapa(0);
+  marcarEtapa(0, { abortada: true });   // a etapa ativa foi interrompida, nao concluida
 
   try { audioResposta.pause(); } catch (erro) { /* nem estava tocando */ }
 
@@ -1136,9 +1197,32 @@ resumoLigar.addEventListener("click", () => {
 
 resumoFechar.addEventListener("click", fecharResumo);
 
-// esc fecha o resumo, que é a unica janela modal da tela
+// o resumo é a unica janela modal da tela: esc fecha e o tab fica preso dentro dela.
+// sem a armadilha o aria-modal="true" promete um isolamento que o teclado nao entrega
 document.addEventListener("keydown", (evento) => {
-  if (evento.key === "Escape" && !resumo.hidden) fecharResumo();
+  if (resumo.hidden) return;
+
+  if (evento.key === "Escape") {
+    fecharResumo();
+    return;
+  }
+  if (evento.key !== "Tab") return;
+
+  const foco = [resumoLigar, resumoFechar];
+  const primeiro = foco[0];
+  const ultimo = foco[foco.length - 1];
+  const atual = document.activeElement;
+
+  if (foco.indexOf(atual) === -1) {
+    evento.preventDefault();
+    primeiro.focus();
+  } else if (evento.shiftKey && atual === primeiro) {
+    evento.preventDefault();
+    ultimo.focus();
+  } else if (!evento.shiftKey && atual === ultimo) {
+    evento.preventDefault();
+    primeiro.focus();
+  }
 });
 
 // se fechar a aba no meio da chamada, solta o microfone e fecha o socket direito

@@ -1,7 +1,7 @@
 # DAD-01 Modelo de dados
 
 Status: Pronto e testado contra o Postgres — esquema (`banco.sql`), models do SQLAlchemy, repositório e seed com cardápio, 6 clientes e 30 pedidos históricos; nenhuma rota do `backend/main.py` chama o repositório ainda, o consumo vai acontecer quando a orquestração existir.
-Backlog: doc/backlog.md (DAD-01). Requisitos: RF03, RF04, RF05, RF07, RF08, RF09, RF11, RNF06, RIA04.
+Backlog: doc/backlog.md (DAD-01). Requisitos: RF03, RF04, RF05, RF07, RF08, RF09, RF11, RNF05, RNF06, RIA04.
 
 ## Objetivo
 
@@ -14,7 +14,7 @@ Item interno. Nenhum usuário final toca nele diretamente: quem usa é o restant
 ## Pontos de entrada
 
 - `banco.sql` — esquema. O `docker-compose.yml` monta o arquivo em `/docker-entrypoint-initdb.d/banco.sql:ro`, então o Postgres o executa sozinho, mas **só no primeiro boot com o volume `pgdata` vazio**.
-- `backend/config.py` — `URL_DO_BANCO`, lida de `DATABASE_URL`, com default `postgresql+psycopg://pizzaria:pizzaria123@localhost:5432/pizzaria` (bate com o `docker-compose.yml`).
+- `backend/config.py` — `URL_DO_BANCO`, lida de `DATABASE_URL`, com default `postgresql+psycopg://pizzaria:pizzaria123@127.0.0.1:5432/pizzaria` (bate com o `docker-compose.yml`).
 - `backend/database.py` — `engine`, `SessionLocal`, `Base` e a dependência `get_db()`, que abre a sessão e garante o `close()` no `finally`.
 - `backend/models.py` — as classes `Cliente`, `Produto`, `Pedido` e `ItemPedido`.
 - `backend/repositorio.py` — as funções públicas listadas no Escopo.

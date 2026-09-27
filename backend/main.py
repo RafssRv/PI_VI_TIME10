@@ -118,7 +118,7 @@ async def websocket_audio(websocket: WebSocket):
                 if tipo == "iniciar_chamada":
                     # a tela avisa em que formato ela vai gravar (webm/opus, mp4/aac...).
                     # a transcricao precisa disso pra saber como abrir o arquivo
-                    formato_do_audio = controle.get("formato")
+                    formato_do_audio = controle.get("formato_audio")
                     print(f"[websocket] chamada iniciada, formato do audio: {formato_do_audio}")
 
                 elif tipo == "fim_da_fala":
