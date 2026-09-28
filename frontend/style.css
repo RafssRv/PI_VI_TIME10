@@ -1,7 +1,7 @@
 /* tela de chamada do atendente de voz.
-   alvo: desktop 1280x800, sem scroll de pagina. tema claro, papel quente, uma cor
-   quente so (#E4572E) usada com parcimonia. hierarquia por espaco e tipografia, nao
-   por caixa colorida. texto grande de proposito: uma das personas tem 71 anos. */
+   alvo: desktop 1280x800, sem scroll de pagina. tema claro, papel quente, UMA cor de
+   destaque so (#04825b, tirada da logo) usada com parcimonia. hierarquia por espaco e
+   tipografia, nao por caixa colorida. texto grande de proposito: uma das personas tem 71 anos. */
 
 :root{
   /* ---- cor ---- */
@@ -15,16 +15,15 @@
   --tinta-media:#57514A;    /* texto secundario */
   --tinta-fraca:#756E65;    /* terciario: so sobre --fundo ou --superficie */
   --tinta-escura:#2A211B;   /* botao desligar e alto-falante */
-  --destaque:#E4572E;       /* SO FORMA: trilho ativo, anel, barras */
-  --destaque-forte:#C2451C; /* superficie com texto branco e texto laranja */
-  --destaque-leve:#FBEDE7;  /* fundo de chip e do item novo */
+  --destaque:#04825b;       /* verde medio da logo: 4,7:1 no fundo e 4,8:1 com texto branco */       /* SO FORMA: trilho ativo, anel, barras */
+  --destaque-leve:#E6F1EC;  /* mesmo verde diluido: fundo de chip e do item novo */
   --ok:#1E6B45;             /* dois usos: conectado e etapa concluida */
   --erro:#B3261E;
   --erro-leve:#FCECEA;
   --aviso:#8A5A00;
   --aviso-leve:#FDF3D8;
   --branco:#FFFFFF;
-  --halo:rgba(228,87,46,.12);
+  --halo:rgba(4,130,91,.14);
   --veu:rgba(31,27,23,.55);
   --brilho:rgba(255,255,255,.55);   /* varredura do trilho ativo */
 
@@ -74,9 +73,9 @@ body{
 }
 
 /* foco em tinta. o outline-offset de 2px poe o anel FORA da caixa do controle, sobre o fundo
-   da pagina: ele nunca encosta no preenchimento do botao laranja. --tinta sobre --fundo da
-   16,5:1 e sobre --superficie 17,1:1. sobre superficie colorida o numero cai (3,4:1 no
-   --destaque-forte, 1,1:1 no --tinta-escura), entao quem um dia usar outline-offset negativo
+   da pagina: ele nunca encosta no preenchimento do botao verde. --tinta sobre --fundo da
+   16,5:1 e sobre --superficie 17,1:1. sobre superficie colorida o numero cai (3,5:1 no
+   --destaque, 1,1:1 no --tinta-escura), entao quem um dia usar outline-offset negativo
    num botao colorido precisa de anel de outra cor: --branco sobre --tinta-escura da 15,8:1 */
 :focus-visible{
   outline: 3px solid var(--tinta);
@@ -237,13 +236,14 @@ body{
 .etapa.ativa .etapa-disco{
   background: var(--destaque);
   border-color: var(--destaque);
-  color: var(--tinta);
+  /* branco e nao tinta: texto escuro sobre o verde fica em 3,5:1 e reprova */
+  color: var(--branco);
   box-shadow: 0 0 0 3px var(--destaque-leve);
 }
 
 .etapa.ativa .etapa-nome{ color: var(--tinta); }
 
-.etapa.ativa .etapa-tempo{ color: var(--destaque-forte); }
+.etapa.ativa .etapa-tempo{ color: var(--destaque); }
 
 .etapa.ativa .etapa-tempo::after{
   content: "…";
@@ -719,7 +719,7 @@ body[data-estado="erro"] #anel{ border-color: var(--erro); }
 }
 
 .botao-chamada.ligar{
-  background: var(--destaque-forte);
+  background: var(--destaque);
   color: var(--branco);
 }
 
@@ -1074,9 +1074,9 @@ body[data-estado="conectando"] #texto-botao::after{
 }
 
 .botao-resumo.forte{
-  background: var(--destaque-forte);
+  background: var(--destaque);
   color: var(--branco);
-  border-color: var(--destaque-forte);
+  border-color: var(--destaque);
 }
 
 .botao-resumo:hover{ filter: brightness(.94); }
