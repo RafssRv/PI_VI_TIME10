@@ -1,0 +1,10 @@
+# ignora os caches do python
+__pycache__/
+*.pyc
+
+# ignora os audios temporarios de teste
+temp_*
+*.ogg
+*.mp3
+*.wav
+*.webm
