@@ -1,9 +1,10 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-from config import URL_DO_BANCO
-
-# a "string de conexao" agora vem do config.py (variavel de ambiente DATABASE_URL)
+# aqui eh a "string de conexao". 
+# depois a pessoa c vai te passar qual o usuario, senha e nome do banco certinho.
+# por enquanto, deixamos um padrao local pra testar:
+URL_DO_BANCO = "postgresql+psycopg://postgres:admin@localhost:5432/pizzariadb"
 
 # o engine eh a peca q realmente vai la no postgre e conecta
 engine = create_engine(URL_DO_BANCO)
