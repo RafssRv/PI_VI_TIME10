@@ -1,0 +1,28 @@
+# caches do python
+__pycache__/
+*.pyc
+
+# ambiente virtual, se alguem usar
+.venv/
+venv/
+
+# dependencias do node (o package.json daqui so tem scripts, mas se alguem instalar algo)
+node_modules/
+
+# variaveis de ambiente (o CPF_HMAC_SECRET mora aqui, nunca no repositorio)
+.env
+.env.local
+
+# audios de teste que o websocket grava na pasta de onde o servidor roda
+temp_*
+*.ogg
+*.mp3
+*.wav
+*.webm
+
+# sistema operacional e editor
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/

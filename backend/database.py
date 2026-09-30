@@ -12,7 +12,7 @@ engine = create_engine(URL_DO_BANCO)
 # a session local eh oq a gnt vai usar em cada rota (pra abrir e fechar a conexao a cada pedido)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# o base eh a classe mae q a pessoa c vai usar pra criar os modelos (tabelas) dps
+# o base eh a classe mae q os modelos (tabelas) do models.py herdam
 Base = declarative_base()
 
 def get_db():
