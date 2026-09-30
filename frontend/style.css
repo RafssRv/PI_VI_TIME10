@@ -1,0 +1,1177 @@
+/* tela de chamada do atendente de voz.
+   alvo: desktop 1280x800, sem scroll de pagina. tema claro, papel quente, UMA cor de
+   destaque so (#04825b, tirada da logo) usada com parcimonia. hierarquia por espaco e
+   tipografia, nao por caixa colorida. texto grande de proposito: uma das personas tem 71 anos. */
+
+:root{
+  /* ---- cor ---- */
+  --fundo:#FDFBF7;          /* papel quente da pagina */
+  --superficie:#FFFFFF;     /* cartoes e faixas */
+  --comanda:#FBF4EA;        /* papel da comanda e do resumo */
+  --borda:#E8DFD2;          /* linha de 1px padrao */
+  --borda-forte:#D3C7B5;    /* anel ocioso, pontilhado, regua */
+  --trilho:#9E9080;         /* trilho da etapa em repouso: 3,0:1 sobre --fundo, 3,1:1 sobre --superficie */
+  --tinta:#1F1B17;          /* texto principal */
+  --tinta-media:#57514A;    /* texto secundario */
+  --tinta-fraca:#756E65;    /* terciario: so sobre --fundo ou --superficie */
+  --tinta-escura:#2A211B;   /* botao desligar e alto-falante */
+  --destaque:#04825b;       /* verde medio da logo: 4,7:1 no fundo e 4,8:1 com texto branco */       /* SO FORMA: trilho ativo, anel, barras */
+  --destaque-leve:#E6F1EC;  /* mesmo verde diluido: fundo de chip e do item novo */
+  --ok:#1E6B45;             /* dois usos: conectado e etapa concluida */
+  --erro:#B3261E;
+  --erro-leve:#FCECEA;
+  --aviso:#8A5A00;
+  --aviso-leve:#FDF3D8;
+  --branco:#FFFFFF;
+  --halo:rgba(4,130,91,.14);
+  --veu:rgba(31,27,23,.55);
+  --brilho:rgba(255,255,255,.55);   /* varredura do trilho ativo */
+
+  /* ---- medidas ---- */
+  --orbe:64px;              /* o orbe e o trilho do grid saem os dois daqui */
+
+  /* ---- espaco: escala de 4px, nada fora dela ---- */
+  --e1:4px; --e2:8px; --e3:12px; --e4:16px; --e5:24px; --e6:32px; --e7:48px;
+
+  /* ---- raio ---- */
+  --r-controle:8px;
+  --r-cartao:12px;
+  --r-chip:999px;
+
+  /* ---- sombra e movimento ---- */
+  --sombra: 0 1px 2px rgba(31,27,23,.04), 0 10px 30px -18px rgba(31,27,23,.28);
+  --tempo:160ms;
+  --curva:cubic-bezier(.2,.6,.2,1);
+
+  /* ---- tipografia ---- */
+  --fonte: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  --t-rotulo: 700 13px/1.2 var(--fonte);
+  --t-apoio:  400 15px/1.4 var(--fonte);
+  --t-corpo:  400 17px/1.5 var(--fonte);
+  --t-item:   500 20px/1.35 var(--fonte);
+  --t-fala:   400 21px/1.45 var(--fonte);
+  --t-titulo: 600 24px/1.25 var(--fonte);
+  --t-numero: 700 32px/1 var(--fonte);
+}
+
+*{ box-sizing: border-box; }
+
+[hidden]{ display: none !important; }
+
+html, body{ height: 100%; }
+
+body{
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--fundo);
+  color: var(--tinta);
+  font: var(--t-corpo);
+}
+
+/* foco em tinta. o outline-offset de 2px poe o anel FORA da caixa do controle, sobre o fundo
+   da pagina: ele nunca encosta no preenchimento do botao verde. --tinta sobre --fundo da
+   16,5:1 e sobre --superficie 17,1:1. sobre superficie colorida o numero cai (3,5:1 no
+   --destaque, 1,1:1 no --tinta-escura), entao quem um dia usar outline-offset negativo
+   num botao colorido precisa de anel de outra cor: --branco sobre --tinta-escura da 15,8:1 */
+:focus-visible{
+  outline: 3px solid var(--tinta);
+  outline-offset: 2px;
+}
+
+/* rotulo em caixa alta, o unico lugar onde a gente usa letter-spacing */
+.sobrancelha,
+.rotulo-chamada,
+.etapa-nome,
+.fala .quem,
+#chip-mic,
+.linha-total span,
+.item .selo-novo{
+  font: var(--t-rotulo);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+/* ================= faixa 1: barra de cima ================= */
+#barra-topo{
+  flex: 0 0 64px;
+  display: flex;
+  align-items: center;
+  gap: var(--e4);
+  padding: 0 var(--e5);
+  background: var(--superficie);
+  border-bottom: 1px solid var(--borda);
+}
+
+/* marca: uma fatia de pizza feita com conic-gradient */
+.marca{
+  flex: none;
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  display: block;
+}
+
+.titulo{
+  margin: 0;
+  font: var(--t-titulo);
+}
+
+#chip-conexao{
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--e2);
+  padding: var(--e1) var(--e3);
+  border: 1px solid var(--borda);
+  border-radius: var(--r-chip);
+  background: var(--fundo);
+  font: 600 13px/1.2 var(--fonte);
+  color: var(--tinta-media);
+  white-space: nowrap;
+}
+
+/* a palavra sempre acompanha a bolinha: cor nunca informa sozinha */
+.bolinha{
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--borda-forte);
+}
+
+.bolinha.desconectado{ background: var(--borda-forte); }
+.bolinha.conectando{ background: var(--aviso); }
+.bolinha.conectado{ background: var(--ok); }
+.bolinha.erro{ background: var(--erro); }
+
+.bloco-chamada{
+  display: flex;
+  align-items: baseline;
+  gap: var(--e2);
+  margin-left: var(--e5);
+}
+
+.rotulo-chamada{ color: var(--tinta-media); }
+
+#timer{
+  font: 600 24px/1.25 var(--fonte);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ================= faixa 2: a tira das 4 etapas ================= */
+/* fundo de papel, nao branco: a divisoria de 1px entre duas faixas brancas da 1,3:1 e some,
+   e as duas viravam um bloco branco unico de 148px antes de qualquer conteudo */
+#tira-etapas{
+  flex: 0 0 84px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr) auto;
+  align-items: start;
+  column-gap: var(--e4);
+  padding: var(--e3) var(--e5) var(--e2);
+  background: var(--fundo);
+  border-bottom: 1px solid var(--borda-forte);
+}
+
+/* os 4 trilhos juntos formam uma barra de progresso atravessando a tela */
+.etapa-trilho{
+  display: block;
+  position: relative;
+  overflow: hidden;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--trilho);
+  margin-bottom: var(--e2);
+  transition: background-color var(--tempo) var(--curva);
+}
+
+.etapa-id{
+  display: flex;
+  align-items: center;
+  gap: var(--e2);
+}
+
+.etapa-disco{
+  position: relative;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font: 700 13px/1 var(--fonte);
+  border: 1px solid var(--borda-forte);
+  background: transparent;
+  color: var(--tinta-fraca);
+  transition: background-color var(--tempo) var(--curva),
+              border-color var(--tempo) var(--curva),
+              box-shadow var(--tempo) var(--curva),
+              color var(--tempo) var(--curva);
+}
+
+.etapa-nome{ color: var(--tinta-fraca); }
+
+.etapa-tempo{
+  display: block;
+  margin-top: var(--e1);
+  font: var(--t-apoio);
+  font-variant-numeric: tabular-nums;
+  color: var(--tinta-fraca);
+}
+
+/* etapa ativa: unico disco com anel externo, e escreve "agora" */
+.etapa.ativa .etapa-trilho{ background: var(--destaque); }
+
+.etapa.ativa .etapa-trilho::after{
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, var(--brilho), transparent);
+  transform: translateX(-100%);
+  animation: varrer 1.8s infinite;
+}
+
+.etapa.ativa .etapa-disco{
+  background: var(--destaque);
+  border-color: var(--destaque);
+  /* branco e nao tinta: texto escuro sobre o verde fica em 3,5:1 e reprova */
+  color: var(--branco);
+  box-shadow: 0 0 0 3px var(--destaque-leve);
+}
+
+.etapa.ativa .etapa-nome{ color: var(--tinta); }
+
+.etapa.ativa .etapa-tempo{ color: var(--destaque); }
+
+.etapa.ativa .etapa-tempo::after{
+  content: "…";
+  animation: piscar 1.2s steps(1) infinite;
+}
+
+/* etapa concluida: o algarismo vira um visto desenhado no css */
+.etapa.feita .etapa-trilho{ background: var(--ok); }
+
+.etapa.feita .etapa-disco{
+  background: var(--ok);
+  border-color: var(--ok);
+}
+
+.etapa.feita .etapa-nome{ color: var(--tinta-media); }
+
+.etapa.feita .etapa-tempo{ color: var(--ok); }
+
+.etapa.feita .etapa-num,
+.etapa.falhou .etapa-num{ display: none; }
+
+.etapa.feita .etapa-disco::after{
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 5px;
+  width: 6px;
+  height: 11px;
+  border-right: 2px solid var(--branco);
+  border-bottom: 2px solid var(--branco);
+  transform: rotate(45deg);
+}
+
+/* etapa que falhou: o algarismo vira um x, e a palavra confirma */
+.etapa.falhou .etapa-trilho{ background: var(--erro); }
+
+.etapa.falhou .etapa-disco{
+  background: var(--erro);
+  border-color: var(--erro);
+}
+
+.etapa.falhou .etapa-nome,
+.etapa.falhou .etapa-tempo{ color: var(--erro); }
+
+.etapa.falhou .etapa-disco::before,
+.etapa.falhou .etapa-disco::after{
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 11px;
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--branco);
+}
+
+.etapa.falhou .etapa-disco::before{ transform: rotate(45deg); }
+.etapa.falhou .etapa-disco::after{ transform: rotate(-45deg); }
+
+.bloco-turno{
+  margin: 0;
+  align-self: center;
+  white-space: nowrap;
+  font: var(--t-apoio);
+  color: var(--tinta-media);
+}
+
+.bloco-turno strong{
+  font-weight: 600;
+  color: var(--tinta);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ================= faixa 3: tarja de erro ================= */
+.tarja-erro{
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--e4);
+  padding: var(--e4) var(--e5);
+  background: var(--erro-leve);
+  border-left: 4px solid var(--erro);
+  border-bottom: 1px solid var(--borda);
+}
+
+.tarja-x{
+  position: relative;
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+.tarja-x span{
+  position: absolute;
+  left: 0;
+  top: 9px;
+  width: 20px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--erro);
+}
+
+.tarja-x span:first-child{ transform: rotate(45deg); }
+.tarja-x span:last-child{ transform: rotate(-45deg); }
+
+.tarja-erro p{
+  margin: 0;
+  flex: 1;
+  font: var(--t-corpo);
+  color: var(--erro);
+}
+
+.botao-tarja{
+  flex: none;
+  min-height: 48px;
+  padding: 0 var(--e4);
+  font: 600 15px/1 var(--fonte);
+  color: var(--branco);
+  background: var(--erro);
+  border: none;
+  border-radius: var(--r-controle);
+  cursor: pointer;
+  transition: background-color var(--tempo) var(--curva), transform var(--tempo) var(--curva);
+}
+
+.botao-tarja:hover{ filter: brightness(.94); }
+.botao-tarja:active{ transform: translateY(1px); }
+
+/* ================= faixa 4: corpo ================= */
+#corpo{
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 420px;
+  gap: var(--e5);
+  padding: var(--e5);
+}
+
+#coluna-chamada{
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: var(--e4);
+}
+
+/* ---------- cartao de estado ---------- */
+#cartao-estado{
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: var(--orbe) 1fr auto;
+  align-items: center;
+  gap: var(--e4);
+  padding: var(--e5);
+  background: var(--superficie);
+  border: 1px solid var(--borda);
+  border-radius: var(--r-cartao);
+}
+
+#orbe{
+  position: relative;
+  width: var(--orbe);
+  height: var(--orbe);
+  border-radius: 50%;
+  background: var(--superficie);
+  display: grid;
+  place-items: center;
+}
+
+#anel{
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid var(--borda-forte);
+  transition: border-color var(--tempo) var(--curva);
+}
+
+.icone{ display: none; position: relative; }
+
+#rotulo-estado{
+  margin: 0;
+  font: var(--t-titulo);
+}
+
+#sublinha-estado{
+  margin: var(--e1) 0 0;
+  font: var(--t-corpo);
+  color: var(--tinta-media);
+}
+
+.direita{
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--e2);
+}
+
+/* o meia-duplex escrito na tela */
+#chip-mic{
+  display: none;
+  align-items: center;
+  gap: var(--e2);
+  padding: var(--e1) var(--e3);
+  border: 1px solid transparent;
+  border-radius: var(--r-chip);
+  white-space: nowrap;
+}
+
+#chip-mic .ponto{
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.chip-aberto, .chip-pausado{ display: none; }
+
+body[data-estado="ouvindo"] #chip-mic{
+  display: flex;
+  background: var(--destaque-leve);
+  color: var(--tinta);
+}
+body[data-estado="ouvindo"] #chip-mic .ponto{ background: var(--destaque); }
+body[data-estado="ouvindo"] .chip-aberto{ display: inline; }
+
+body[data-estado="processando"] #chip-mic,
+body[data-estado="falando"] #chip-mic{
+  display: flex;
+  background: var(--fundo);
+  border-color: var(--borda-forte);
+  color: var(--tinta-media);
+}
+body[data-estado="processando"] #chip-mic .ponto,
+body[data-estado="falando"] #chip-mic .ponto{
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--tinta-media);
+}
+body[data-estado="processando"] .chip-pausado,
+body[data-estado="falando"] .chip-pausado{ display: inline; }
+
+/* 7 barrinhas do nivel do microfone: o js escala de 1 a 5,5 (4px a 22px) */
+#barras-mic{
+  display: flex;
+  align-items: center;
+  gap: var(--e1);
+  height: 28px;
+}
+
+#barras-mic span{
+  display: block;
+  width: 4px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--borda-forte);
+  transform-origin: center;
+  transition: transform .08s linear,
+              background-color var(--tempo) var(--curva),
+              opacity var(--tempo) var(--curva);
+}
+
+body[data-estado="ouvindo"] #barras-mic span{ background: var(--destaque); }
+
+/* congeladas no minimo: prova visual de que o microfone esta fechado */
+body[data-estado="processando"] #barras-mic span,
+body[data-estado="falando"] #barras-mic span{ opacity: .4; }
+
+/* ---------- icones do orbe ---------- */
+.icone-mic{ width: 20px; height: 30px; }
+.icone-mic .mic-capsula{
+  position: absolute; left: 5px; top: 0;
+  width: 10px; height: 18px;
+  border-radius: 5px;
+  background: var(--tinta-fraca);
+}
+.icone-mic .mic-pe{
+  position: absolute; left: 9px; top: 18px;
+  width: 2px; height: 8px;
+  background: var(--tinta-fraca);
+}
+.icone-mic .mic-pe::after{
+  content: ""; position: absolute; left: -5px; top: 8px;
+  width: 12px; height: 2px;
+  background: var(--tinta-fraca);
+}
+.icone-mic .mic-risco{
+  position: absolute; left: -4px; top: 14px;
+  width: 28px; height: 2px;
+  background: var(--erro);
+  transform: rotate(-45deg);
+}
+
+/* em "ouvindo" o risco some e a capsula fica laranja */
+body[data-estado="ouvindo"] .icone-mic .mic-risco{ display: none; }
+body[data-estado="ouvindo"] .icone-mic .mic-capsula{ background: var(--destaque); }
+body[data-estado="ouvindo"] .icone-mic .mic-pe,
+body[data-estado="ouvindo"] .icone-mic .mic-pe::after{ background: var(--tinta-media); }
+
+.icone-pontos{ display: none; gap: var(--e1); }
+.icone-pontos span{
+  display: block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--tinta-media);
+  animation: pular 1.1s infinite;
+}
+.icone-pontos span:nth-child(2){ animation-delay: .18s; }
+.icone-pontos span:nth-child(3){ animation-delay: .36s; }
+
+.icone-som{ width: 32px; height: 24px; }
+.icone-som .som-caixa{
+  position: absolute; left: 0; top: 8px;
+  width: 8px; height: 8px;
+  background: var(--tinta-escura);
+}
+.icone-som .som-cone{
+  position: absolute; left: 6px; top: 2px;
+  width: 0; height: 0;
+  border-top: 10px solid transparent;
+  border-bottom: 10px solid transparent;
+  border-right: 10px solid var(--tinta-escura);
+}
+.icone-som .som-onda{
+  position: absolute; left: 20px; top: 5px;
+  width: 10px; height: 14px;
+  border: 2px solid var(--tinta-escura);
+  border-left-color: transparent;
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+  border-radius: 50%;
+}
+
+/* ondas concentricas do atendente falando */
+.ondas{ position: absolute; inset: 0; }
+.ondas span{
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--borda-forte);
+  animation: expandir 1.6s infinite ease-out;
+}
+.ondas span:nth-child(2){ animation-delay: .8s; }
+
+.icone-x{ width: 24px; height: 24px; }
+.icone-x span{
+  position: absolute; left: 0; top: 11px;
+  width: 24px; height: 2px;
+  border-radius: 1px;
+  background: var(--erro);
+}
+.icone-x span:first-child{ transform: rotate(45deg); }
+.icone-x span:last-child{ transform: rotate(-45deg); }
+
+/* qual icone aparece em cada estado */
+body[data-estado="ocioso"] .icone-mic,
+body[data-estado="encerrada"] .icone-mic,
+body[data-estado="ouvindo"] .icone-mic{ display: block; }
+body[data-estado="conectando"] .icone-pontos,
+body[data-estado="processando"] .icone-pontos{ display: flex; }
+body[data-estado="falando"] .icone-som,
+body[data-estado="falando"] .ondas{ display: block; }
+body[data-estado="erro"] .icone-x{ display: block; }
+
+/* o anel muda de cor, de forma e de animacao junto com a palavra escrita */
+body[data-estado="conectando"] #anel{
+  border-style: dashed;
+  border-color: var(--tinta-media);
+  animation: girar 2s linear infinite;
+}
+body[data-estado="ouvindo"] #anel{
+  border-color: var(--destaque);
+  box-shadow: 0 0 0 8px var(--halo);
+}
+body[data-estado="processando"] #anel{
+  border-color: var(--borda);
+  border-top-color: var(--destaque);
+  animation: girar 1s linear infinite;
+}
+body[data-estado="falando"] #anel{ border-color: var(--tinta-escura); }
+body[data-estado="erro"] #anel{ border-color: var(--erro); }
+
+/* ---------- conversa ---------- */
+#caixa-conversa{
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--e5);
+  background: var(--superficie);
+  border: 1px solid var(--borda);
+  border-radius: var(--r-cartao);
+}
+
+.sobrancelha{
+  margin: 0 0 var(--e4);
+  color: var(--tinta-media);
+}
+
+#conversa{
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: var(--e2);
+}
+
+/* enquanto a caixa esta vazia o texto fica no meio do espaco, nao encostado no canto:
+   vazio centralizado parece intencional, vazio no canto superior esquerdo parece bug */
+#conversa:has(.conversa-vazia){
+  display: grid;
+  place-content: center;
+  place-items: center;
+}
+
+.conversa-vazia{
+  margin: 0;
+  text-align: center;
+  font: var(--t-corpo);
+  color: var(--tinta-fraca);
+}
+
+.fala{ margin-bottom: var(--e5); }
+.fala:last-child{ margin-bottom: 0; }
+
+.fala .quem{
+  display: block;
+  margin-bottom: var(--e1);
+  color: var(--tinta-media);
+}
+
+.fala .texto{
+  margin: 0;
+  font: var(--t-fala);
+  max-width: 62ch;
+}
+
+/* o atendente se distingue por forma, nao por cor */
+.fala-atendente{
+  border-left: 2px solid var(--borda-forte);
+  padding-left: var(--e3);
+}
+
+.fala.parcial .texto{
+  font-style: italic;
+  color: var(--tinta-media);
+}
+
+/* cursor piscando no fim do que ainda esta sendo reconhecido */
+.fala.parcial .texto::after{
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: var(--e1);
+  vertical-align: -2px;
+  background: var(--destaque);
+  animation: piscar 1s steps(1) infinite;
+}
+
+/* ---------- botao principal ---------- */
+.botao-chamada{
+  flex: 0 0 72px;
+  height: 72px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--e3);
+  font: 600 17px/1 var(--fonte);
+  border: none;
+  border-radius: var(--r-controle);
+  cursor: pointer;
+  transition: background-color var(--tempo) var(--curva),
+              color var(--tempo) var(--curva),
+              transform var(--tempo) var(--curva);
+}
+
+.botao-chamada.ligar{
+  background: var(--destaque);
+  color: var(--branco);
+}
+
+.botao-chamada.desligar{
+  background: var(--tinta-escura);
+  color: var(--branco);
+}
+
+.botao-chamada:disabled{
+  background: var(--borda);
+  color: var(--tinta-media);
+  cursor: default;
+}
+
+.botao-chamada:hover:not(:disabled){ filter: brightness(.94); }
+.botao-chamada:active:not(:disabled){ transform: translateY(1px); }
+
+/* triangulo (ligar) e quadrado (desligar), desenhados no css */
+.botao-chamada .forma{ display: block; }
+
+.botao-chamada.ligar .forma{
+  width: 0; height: 0;
+  border-top: 8px solid transparent;
+  border-bottom: 8px solid transparent;
+  border-left: 14px solid var(--branco);
+}
+
+.botao-chamada.desligar .forma{
+  width: 14px; height: 14px;
+  background: var(--erro);
+  border-radius: 3px;
+}
+
+.botao-chamada:disabled .forma{ display: none; }
+
+/* os pontinhos do "Conectando" */
+body[data-estado="conectando"] #texto-botao::after{
+  content: "…";
+  animation: piscar 1.2s steps(1) infinite;
+}
+
+/* ---------- comanda ---------- */
+#comanda{
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--comanda);
+  border: 1px solid var(--borda);
+  border-radius: var(--r-cartao);
+  box-shadow: var(--sombra);
+}
+
+#comanda-topo{
+  flex: 0 0 auto;
+  padding: var(--e5) var(--e5) var(--e4);
+  border-bottom: 1px solid var(--borda);
+}
+
+#comanda-topo h2{
+  margin: 0;
+  font: var(--t-titulo);
+}
+
+#comanda-cliente{
+  margin: var(--e1) 0 0;
+  font: var(--t-corpo);
+  color: var(--tinta-media);
+}
+
+#comanda-itens{
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--e4) var(--e5);
+}
+
+/* mesmo motivo do #conversa: as duas linhas de espera ficam no meio da comanda */
+#comanda-itens:has(.comanda-vazia){
+  display: grid;
+  align-content: center;
+}
+
+.comanda-vazia{
+  margin: 0 0 var(--e2);
+  font: var(--t-corpo);
+  color: var(--tinta-media);
+}
+
+.comanda-vazia.fraca{ font: var(--t-apoio); }
+
+/* sem divisoria: quem organiza a linha e o pontilhado de conta */
+.item{
+  display: flex;
+  align-items: baseline;
+  gap: var(--e3);
+  padding: var(--e3) 0;
+  border-radius: var(--r-controle);
+  transition: background-color 400ms var(--curva);
+}
+
+.item .quantidade{
+  flex: none;
+  min-width: 48px;
+  padding: var(--e1) var(--e2);
+  text-align: center;
+  background: var(--destaque-leve);
+  color: var(--tinta);
+  border-radius: var(--r-chip);
+  font: 600 17px/1.35 var(--fonte);
+  font-variant-numeric: tabular-nums;
+}
+
+.item .miolo{ flex: 0 1 auto; min-width: 0; }
+
+.item .produto{ font: var(--t-item); }
+
+.item .observacao{
+  font: var(--t-apoio);
+  color: var(--tinta-media);
+}
+
+.item .pontilhado{
+  flex: 1 1 auto;
+  min-width: var(--e5);
+  border-bottom: 1px dotted var(--borda-forte);
+  transform: translateY(-4px);
+}
+
+.item .subtotal{
+  flex: none;
+  font: 500 17px/1.35 var(--fonte);
+  font-variant-numeric: tabular-nums;
+}
+
+/* item novo: o destaque sai sozinho depois de 4 s */
+.item.novo{
+  background: var(--destaque-leve);
+  border-left: 3px solid var(--destaque);
+  padding-left: var(--e3);
+  margin-left: calc(var(--e3) * -1);
+}
+
+.item .selo-novo{
+  display: inline-block;
+  margin-left: var(--e2);
+  padding: var(--e1) var(--e2);
+  background: var(--destaque-leve);
+  color: var(--tinta);
+  border: 1px solid var(--destaque);
+  border-radius: var(--r-chip);
+}
+
+#comanda-aviso{
+  flex: 0 0 auto;
+  margin: 0 var(--e5) var(--e4);
+  padding: var(--e3) var(--e4);
+  font: var(--t-corpo);
+  background: var(--aviso-leve);
+  border-left: 4px solid var(--aviso);
+  border-radius: var(--r-controle);
+  color: var(--aviso);
+}
+
+#comanda-rodape{
+  flex: 0 0 auto;
+  padding: var(--e4) var(--e5) var(--e5);
+  background: var(--comanda);
+  border-radius: 0 0 var(--r-cartao) var(--r-cartao);
+}
+
+.linha-rodape{
+  display: flex;
+  justify-content: space-between;
+  gap: var(--e4);
+  font: var(--t-corpo);
+  color: var(--tinta-media);
+}
+
+.linha-rodape strong{
+  font-weight: 600;
+  color: var(--tinta);
+}
+
+/* regua tracejada: e ela que faz a coluna da direita parecer uma conta */
+.regua{
+  height: 2px;
+  margin: var(--e3) 0;
+  background: repeating-linear-gradient(90deg, var(--borda-forte) 0 6px, transparent 6px 12px);
+}
+
+.linha-total{
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--e4);
+}
+
+.linha-total span{ color: var(--tinta-media); }
+
+.linha-total strong{
+  font: var(--t-numero);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ================= faixa 5: rodape tecnico ================= */
+#rodape-tecnico{
+  flex: 0 0 48px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--e5);
+  background: var(--superficie);
+  border-top: 1px solid var(--borda);
+  font: var(--t-apoio);
+  color: var(--tinta-media);
+}
+
+#detalhes-tecnicos summary{
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--e2);
+  min-height: 48px;
+  padding: 0 var(--e2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* o summary preenche os 48px do rodape, que e o ultimo filho de um body com overflow
+   hidden: com offset positivo o arco de baixo cai fora da tela. aqui o anel vai pra dentro */
+#detalhes-tecnicos summary:focus-visible{ outline-offset: -3px; }
+
+#detalhes-tecnicos summary::-webkit-details-marker{ display: none; }
+
+#detalhes-tecnicos .seta{
+  width: 0; height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid var(--tinta-media);
+  transition: transform var(--tempo) var(--curva);
+}
+
+#detalhes-tecnicos[open] .seta{ transform: rotate(90deg); }
+
+.painel-tecnico{
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  width: 100%;
+  height: 220px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--e4);
+  padding: var(--e4) var(--e5);
+  background: var(--superficie);
+  border-top: 1px solid var(--borda);
+  z-index: 20;
+}
+
+.painel-coluna{
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.painel-coluna h3{
+  margin: 0 0 var(--e2);
+  font: var(--t-apoio);
+  color: var(--tinta-media);
+}
+
+.painel-coluna audio{ width: 100%; }
+
+#log{
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: var(--e2);
+  background: var(--fundo);
+  border: 1px solid var(--borda);
+  border-radius: var(--r-controle);
+  font: 400 13px/1.5 var(--mono);
+  color: var(--tinta);
+}
+
+#log li{
+  padding: var(--e1) 0;
+  border-bottom: 1px solid var(--borda);
+  word-break: break-word;
+}
+
+/* ================= resumo do fim da chamada ================= */
+#resumo{
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--e5);
+  background: var(--veu);
+  z-index: 30;
+}
+
+.resumo-caixa{
+  width: 100%;
+  max-width: 640px;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: var(--e6);
+  background: var(--comanda);
+  border-radius: var(--r-cartao);
+  box-shadow: var(--sombra);
+}
+
+.resumo-caixa h2{
+  margin: 0;
+  font: var(--t-titulo);
+}
+
+#resumo-linhas{
+  margin: var(--e1) 0 0;
+  font: var(--t-apoio);
+  color: var(--tinta-media);
+}
+
+#resumo-cliente{
+  margin: var(--e1) 0 var(--e4);
+  font: var(--t-corpo);
+  color: var(--tinta-media);
+}
+
+.resumo-rodape{ margin-top: var(--e4); }
+
+.resumo-botoes{
+  display: flex;
+  gap: var(--e3);
+  margin-top: var(--e5);
+}
+
+.botao-resumo{
+  min-height: 48px;
+  padding: 0 var(--e5);
+  font: 600 17px/1 var(--fonte);
+  background: var(--superficie);
+  color: var(--tinta);
+  border: 1px solid var(--tinta);
+  border-radius: var(--r-controle);
+  cursor: pointer;
+  transition: background-color var(--tempo) var(--curva), transform var(--tempo) var(--curva);
+}
+
+.botao-resumo.forte{
+  background: var(--destaque);
+  color: var(--branco);
+  border-color: var(--destaque);
+}
+
+.botao-resumo:hover{ filter: brightness(.94); }
+.botao-resumo:active{ transform: translateY(1px); }
+
+/* ================= animacoes ================= */
+@keyframes girar{
+  from{ transform: rotate(0deg); }
+  to{ transform: rotate(360deg); }
+}
+
+@keyframes pular{
+  0%, 100%{ transform: translateY(0); opacity: .5; }
+  50%{ transform: translateY(-4px); opacity: 1; }
+}
+
+@keyframes expandir{
+  0%{ transform: scale(1); opacity: .7; }
+  100%{ transform: scale(1.45); opacity: 0; }
+}
+
+@keyframes piscar{
+  0%, 100%{ opacity: .25; }
+  50%{ opacity: 1; }
+}
+
+@keyframes varrer{
+  to{ transform: translateX(100%); }
+}
+
+/* ================= telas menores (o escopo eh desktop) ================= */
+@media (max-height: 820px){
+  :root{ --orbe:48px; }
+  #cartao-estado{ padding: var(--e4) var(--e5); }
+  .botao-chamada{ flex: 0 0 64px; height: 64px; }
+}
+
+@media (max-width: 1180px){
+  #corpo{ grid-template-columns: 1fr 380px; }
+}
+
+@media (max-width: 980px){
+  #corpo{
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+    overflow-y: auto;
+  }
+  /* a chamada vem primeiro: a comanda vazia nao pode empurrar o botao Ligar pra baixo da
+     dobra. o min-height tambem sai — ela cresce quando tiver item de verdade dentro */
+  #coluna-chamada{ order: 1; }
+  #comanda{ order: 2; }
+  /* a tira continua no topo em qualquer largura. aqui as quatro etapas ainda cabem numa
+     linha e so o tempo do turno desce: duas linhas de etapa custariam ~100px de altura
+     em cima do botao e da conversa */
+  #tira-etapas{
+    grid-template-columns: repeat(4, 1fr);
+    height: auto;
+    flex: 0 0 auto;
+    row-gap: var(--e2);
+  }
+  #tira-etapas .bloco-turno{ grid-column: 1 / -1; }
+}
+
+@media (max-width: 760px){
+  :root{ --orbe:48px; }
+  #barra-topo{
+    flex-wrap: wrap;
+    height: auto;
+    flex: 0 0 auto;
+    padding: var(--e2) var(--e4);
+  }
+  /* so aqui a tira vira 2x2: abaixo disso quatro colunas cortam "transcrevendo" */
+  #tira-etapas{ grid-template-columns: 1fr 1fr; row-gap: var(--e3); }
+  #cartao-estado{ grid-template-columns: var(--orbe) 1fr; }
+  #cartao-estado .direita{ grid-column: 2; justify-self: start; align-items: flex-start; }
+  .painel-tecnico{ grid-template-columns: 1fr; }
+}
+
+/* respeita quem pediu menos animacao no sistema.
+   nao usa animation:none de proposito: com duracao de .01ms o navegador salta direto pro
+   estado FINAL de cada keyframe — e o estado final nao e o estado legivel (piscar termina
+   em opacity .25, pular em .5 e expandir em opacity 0). por isso as tres regras abaixo
+   fixam o que tem que ficar desenhado: pontinhos opacos, ondas paradas e visiveis,
+   reticencias e cursor de fala parcial em opacidade cheia. as barrinhas do microfone sao
+   transform posto pelo js e continuam se mexendo */
+@media (prefers-reduced-motion: reduce){
+  *{
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+
+  .icone-pontos span{ opacity: 1; transform: none; }
+  .ondas span{ opacity: .7; transform: none; }
+  .etapa.ativa .etapa-tempo::after,
+  .fala.parcial .texto::after,
+  body[data-estado="conectando"] #texto-botao::after{ opacity: 1; }
+}
