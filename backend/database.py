@@ -1,10 +1,10 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-# aqui eh a "string de conexao". 
-# depois a pessoa c vai te passar qual o usuario, senha e nome do banco certinho.
-# por enquanto, deixamos um padrao local pra testar:
-URL_DO_BANCO = "postgresql+psycopg://postgres:admin@localhost:5432/pizzariadb"
+# a string de conexao vem do config.py, que le a variavel de ambiente DATABASE_URL.
+# nao cravar aqui: o default do config ja bate com o docker-compose e usa 127.0.0.1 em vez
+# de localhost (no windows o localhost tenta ipv6 primeiro e cada conexao trava 30 segundos)
+from config import URL_DO_BANCO
 
 # o engine eh a peca q realmente vai la no postgre e conecta
 engine = create_engine(URL_DO_BANCO)
