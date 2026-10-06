@@ -141,6 +141,7 @@ let fechamosOSocket = false;
 let gravador = null;
 let stream = null;
 let pedacos = [];
+let pedacosEnviados = 0;       // quantos itens de "pedacos" ja foram pro servidor
 
 let contextoAudio = null;
 let analisador = null;
@@ -823,6 +824,7 @@ async function iniciarCaptura() {
   const formato = escolherFormato();
   gravador = formato ? new MediaRecorder(stream, { mimeType: formato }) : new MediaRecorder(stream);
   pedacos = [];
+  pedacosEnviados = 0;
   const formatoReal = formatoEmUso();   // guarda agora, o gravador some quando desligar
   escreverLog("gravando em " + formatoReal);
 
@@ -832,7 +834,14 @@ async function iniciarCaptura() {
     // binario so sai com o microfone aberto: a resposta do atendente nunca volta pro backend
     if (estadoAtual !== "ouvindo") return;
     if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(evento.data);
+      // manda tambem os pedacos que ficaram pra tras, sempre na ordem. o mais importante
+      // eh o PRIMEIRO: so ele tem o cabecalho do webm, e ele costuma ficar pronto antes
+      // do websocket abrir. sem o cabecalho o servidor nao consegue abrir o audio
+      // ("Invalid data found when processing input")
+      while (pedacosEnviados < pedacos.length) {
+        socket.send(pedacos[pedacosEnviados]);
+        pedacosEnviados++;
+      }
     }
   };
 

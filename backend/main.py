@@ -6,6 +6,8 @@ import shutil
 from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 
+from turno_de_voz import atender_turno
+
 app = FastAPI(title="Backend Pizzaria - Agente de Voz", version="0.1.0")
 
 # --- health check (pra confirmar se a api ta de pe) ---
@@ -71,14 +73,19 @@ async def websocket_audio(websocket: WebSocket):
     await websocket.accept()
     print("[websocket] cliente conectou no tubo de streaming!")
 
-    # --- QUANDO A TRANSCRICAO ESTIVER PRONTA, DESCOMENTE ESTA LINHA ---
-    # await websocket.send_json({"tipo": "pronto", "versao": 1})
-    # ------------------------------------------------------------------
+    # o pipeline de voz (pasta agente) ja existe, entao o servidor se apresenta pra tela.
+    # a tela le a chave "versao_protocolo" (ver o comeco do frontend/app.js)
+    await websocket.send_json({"tipo": "pronto", "versao_protocolo": 1})
 
     # a gnt cria um arquivo e abre ele no modo "wb" (write bytes)
     # ou "ab" (append bytes). vamos de "wb" e manter ele aberto.
     caminho_audio = "audio_cliente_streaming.webm"
     formato_do_audio = None
+
+    # copia em memoria de tudo que o navegador mandou na chamada. eh daqui que sai a fala
+    # de cada turno (o cabecalho do webm so vem no primeiro pedaco, por isso guarda tudo)
+    audio_da_chamada = bytearray()
+    amostra_inicio = 0   # onde a fala anterior terminou
 
     try:
         # abrimos o arquivo uma vez so, pra ir enchendo ele de dados
@@ -97,6 +104,7 @@ async def websocket_audio(websocket: WebSocket):
                 if pedaco is not None:
                     # escreve o pedacinho no final do arquivo
                     arquivo.write(pedaco)
+                    audio_da_chamada.extend(pedaco)
                     print(f"[websocket] recebi e guardei um chunk de {len(pedaco)} bytes")
 
                     # manda um textinho pro front so pra confirmar q chegou
@@ -124,11 +132,10 @@ async def websocket_audio(websocket: WebSocket):
                 elif tipo == "fim_da_fala":
                     # o cliente parou de falar: aqui entra a transcricao do turno
                     print(f"[websocket] fim da fala do turno {controle.get('turno')}")
-                    # --- MOCK DA FASE 3 ---
-                    # texto_do_cliente = roveris_transcrever(caminho_audio, formato_do_audio)
-                    # resposta = nonato_responder(texto_do_cliente)
-                    # await websocket.send_json({"tipo": "transcricao", "quem": "cliente", ...})
-                    # ----------------------
+                    # chama o agente: whisper -> llama -> piper, e manda a resposta pra tela.
+                    # a logica do turno fica no backend/turno_de_voz.py
+                    amostra_inicio = await atender_turno(
+                        websocket, audio_da_chamada, amostra_inicio, controle.get("turno"))
 
                 elif tipo == "resposta_tocada":
                     # a tela terminou de tocar a resposta e ja reabriu o microfone
