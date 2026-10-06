@@ -65,7 +65,12 @@ const ESPERA_FIM_AUDIO_MS = 800;    // se o servidor esquecer o fim_audio, toca 
 const ESPERA_PEDIDO_SALVO_MS = 1200; // janela pro pedido_salvo atrasado entrar no resumo
 const FALA_MAXIMA_MS = 15000;       // fala contínua demais: fecha o turno na marra
 const LIMITE_LOG = 200;
-const RMS_FALA = 0.05;              // acima disso e voz; tudo abaixo conta como silencio
+// deteccao de fala: o volume minimo pra contar como voz se ajusta ao barulho da sala.
+// antes era fixo em 0,05 e quem falava num tom normal nunca fechava o turno
+const LIMIAR_MINIMO = 0.008;        // abaixo disso nunca eh voz
+const LIMIAR_MAXIMO = 0.05;         // acima disso sempre eh voz
+const FATOR_RUIDO = 3;              // voz = 3x mais alta q o barulho da sala
+const MS_TOLERANCIA_FALA = 400;     // pausa curta entre palavras nao conta como parar de falar
 const MS_PARA_CONFIRMAR_FALA = 300;
 const MS_DE_SILENCIO = 1200;
 const MS_DESTAQUE_ITEM = 4000;      // quanto tempo o item novo fica em destaque na comanda
@@ -141,7 +146,7 @@ let fechamosOSocket = false;
 let gravador = null;
 let stream = null;
 let pedacos = [];
-let pedacosEnviados = 0;       // quantos itens de "pedacos" ja foram pro servidor
+let pedacosEnviados = 0;       // quantos pedacos ja foram pro servidor
 
 let contextoAudio = null;
 let analisador = null;
@@ -151,6 +156,12 @@ let loopNivel = 0;
 let houveFala = false;
 let inicioDaFala = 0;
 let inicioDoSilencio = 0;
+let tempoDeFala = 0;           // quanto tempo de voz ja juntou (em ms)
+let ultimaVoz = 0;             // quando foi a ultima vez q teve voz
+let ultimoQuadro = 0;          // quando foi a ultima medicao
+let nivelSuave = 0;            // volume medio dos ultimos instantes
+let ruidoDeFundo = 0.01;       // barulho da sala, medido enquanto ninguem fala
+let limiarAtual = LIMIAR_MINIMO;
 
 let turno = 0;
 let tempoInicioTurno = 0;
@@ -834,10 +845,8 @@ async function iniciarCaptura() {
     // binario so sai com o microfone aberto: a resposta do atendente nunca volta pro backend
     if (estadoAtual !== "ouvindo") return;
     if (socket && socket.readyState === WebSocket.OPEN) {
-      // manda tambem os pedacos que ficaram pra tras, sempre na ordem. o mais importante
-      // eh o PRIMEIRO: so ele tem o cabecalho do webm, e ele costuma ficar pronto antes
-      // do websocket abrir. sem o cabecalho o servidor nao consegue abrir o audio
-      // ("Invalid data found when processing input")
+      // manda tambem os pedacos q ficaram pra tras, na ordem. o primeiro eh o mais
+      // importante: so ele tem o cabecalho do audio e ele fica pronto antes da conexao abrir
       while (pedacosEnviados < pedacos.length) {
         socket.send(pedacos[pedacosEnviados]);
         pedacosEnviados++;
@@ -945,12 +954,23 @@ function desenharBarras(nivel) {
   }
 }
 
-// detecta fim da fala: falou por 300 ms e depois ficou 1,2 s em silencio
+// percebe quando o cliente parou: juntou 300 ms de voz e depois ficou 1,2 s quieto
 function vigiarSilencio(nivel, agora) {
-  if (nivel > RMS_FALA) {
+  const passou = ultimoQuadro ? Math.min(agora - ultimoQuadro, 100) : 0;
+  ultimoQuadro = agora;
+
+  // usa a media dos ultimos instantes, pra uma silaba mais fraca nao parecer silencio
+  nivelSuave = nivelSuave * 0.8 + nivel * 0.2;
+
+  // o volume minimo de voz acompanha o barulho da sala
+  limiarAtual = Math.min(LIMIAR_MAXIMO, Math.max(LIMIAR_MINIMO, ruidoDeFundo * FATOR_RUIDO));
+
+  if (nivelSuave > limiarAtual) {
     if (!inicioDaFala) inicioDaFala = agora;
-    if (agora - inicioDaFala >= MS_PARA_CONFIRMAR_FALA) houveFala = true;
+    ultimaVoz = agora;
     inicioDoSilencio = 0;
+    tempoDeFala += passou;
+    if (tempoDeFala >= MS_PARA_CONFIRMAR_FALA) houveFala = true;
     if (houveFala && agora - inicioDaFala >= FALA_MAXIMA_MS) {
       escreverLog("15 s de fala contínua, fechando o turno à força");
       fimDaFala(agora - inicioDaFala);
@@ -958,13 +978,15 @@ function vigiarSilencio(nivel, agora) {
     return;
   }
 
-  // tudo que nao passa de RMS_FALA conta como silencio. antes o silencio so contava abaixo
-  // de 0,02, e a faixa entre os dois limiares (ruido de fundo constante, ventoinha,
-  // ar-condicionado, ainda mais com o autoGainControl ligado) nao caia em ramo nenhum: o
-  // relogio do silencio nunca comecava e a chamada ficava presa em "ouvindo" pra sempre.
-  // a histerese continua valendo so pra ENTRAR em fala, que exige passar de RMS_FALA
+  // silencio. se o cliente ainda nao comecou a falar, aproveita pra medir o barulho da sala
   if (!houveFala) {
-    inicioDaFala = 0;
+    const velocidade = nivelSuave < ruidoDeFundo ? 0.05 : 0.01;
+    ruidoDeFundo += (nivelSuave - ruidoDeFundo) * velocidade;
+    // pausa curta eh so espaco entre palavras, entao so zera se a pausa for longa
+    if (agora - ultimaVoz > MS_TOLERANCIA_FALA) {
+      inicioDaFala = 0;
+      tempoDeFala = 0;
+    }
     return;
   }
   if (!inicioDoSilencio) inicioDoSilencio = agora;
@@ -977,6 +999,8 @@ function fimDaFala(duracaoMs) {
   houveFala = false;
   inicioDaFala = 0;
   inicioDoSilencio = 0;
+  tempoDeFala = 0;
+  escreverLog(`fim da fala (limite de voz ${limiarAtual.toFixed(3)}, ruído de fundo ${ruidoDeFundo.toFixed(3)})`);
 
   // backend antigo nao entende fim_da_fala, entao a tela nao finge pipeline: so anota
   if (!protocoloNovo) {
@@ -1108,6 +1132,11 @@ async function ligar() {
   houveFala = false;
   inicioDaFala = 0;
   inicioDoSilencio = 0;
+  tempoDeFala = 0;
+  ultimaVoz = 0;
+  ultimoQuadro = 0;
+  nivelSuave = 0;
+  ruidoDeFundo = 0.01;
 
   if (!navigator.mediaDevices || !window.MediaRecorder) {
     mostrarErro("Este navegador não grava áudio. Use o Chrome ou o Edge.", true);

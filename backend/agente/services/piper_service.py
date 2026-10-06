@@ -3,8 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-# caminhos montados a partir da pasta "agente", e nao de onde o terminal esta.
-# assim funciona tanto rodando de dentro de agente quanto pelo servidor (que roda em backend)
+# pasta "agente". os caminhos partem daqui pra funcionar rodando de qualquer pasta
 PASTA_AGENTE = Path(__file__).resolve().parent.parent
 
 
@@ -13,8 +12,8 @@ def sintetizar_resposta(texto):
     output = PASTA_AGENTE / "audio" / "resposta.wav"
     output.parent.mkdir(exist_ok=True)
 
-    # "py -m piper" em vez de so "piper": no windows o comando piper nem sempre esta no PATH
-    # PYTHONUTF8=1 garante que os acentos do portugues cheguem certos no piper
+    # roda como "py -m piper" pq no windows o comando "piper" sozinho nem sempre eh achado.
+    # o utf-8 eh pros acentos chegarem certos
     processo = subprocess.Popen(
     [
         sys.executable,

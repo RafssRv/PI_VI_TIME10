@@ -73,8 +73,7 @@ async def websocket_audio(websocket: WebSocket):
     await websocket.accept()
     print("[websocket] cliente conectou no tubo de streaming!")
 
-    # o pipeline de voz (pasta agente) ja existe, entao o servidor se apresenta pra tela.
-    # a tela le a chave "versao_protocolo" (ver o comeco do frontend/app.js)
+    # o agente ja existe, entao o servidor se apresenta e a tela sai do modo mudo
     await websocket.send_json({"tipo": "pronto", "versao_protocolo": 1})
 
     # a gnt cria um arquivo e abre ele no modo "wb" (write bytes)
@@ -82,10 +81,10 @@ async def websocket_audio(websocket: WebSocket):
     caminho_audio = "audio_cliente_streaming.webm"
     formato_do_audio = None
 
-    # copia em memoria de tudo que o navegador mandou na chamada. eh daqui que sai a fala
-    # de cada turno (o cabecalho do webm so vem no primeiro pedaco, por isso guarda tudo)
+    # guarda todo o audio da chamada, pq so o primeiro pedaco tem o cabecalho do webm.
+    # amostra_inicio marca onde a fala anterior parou
     audio_da_chamada = bytearray()
-    amostra_inicio = 0   # onde a fala anterior terminou
+    amostra_inicio = 0
 
     try:
         # abrimos o arquivo uma vez so, pra ir enchendo ele de dados
@@ -132,8 +131,7 @@ async def websocket_audio(websocket: WebSocket):
                 elif tipo == "fim_da_fala":
                     # o cliente parou de falar: aqui entra a transcricao do turno
                     print(f"[websocket] fim da fala do turno {controle.get('turno')}")
-                    # chama o agente: whisper -> llama -> piper, e manda a resposta pra tela.
-                    # a logica do turno fica no backend/turno_de_voz.py
+                    # passa a fala pelo agente e manda a resposta pra tela (turno_de_voz.py)
                     amostra_inicio = await atender_turno(
                         websocket, audio_da_chamada, amostra_inicio, controle.get("turno"))
 

@@ -4,20 +4,20 @@ from pathlib import Path
 
 import av
 
-# pasta onde o agente guarda os audios da conversa (cliente.wav e resposta.wav)
+# pasta onde ficam os audios da conversa (cliente.wav e resposta.wav)
 PASTA_AUDIO = Path(__file__).resolve().parent.parent / "audio"
 
-# o whisper trabalha com audio mono em 16 kHz, entao a gente ja salva nesse formato
+# o whisper usa audio mono em 16 kHz, entao ja salva assim
 TAXA_AMOSTRAGEM = 16000
 
 
 def decodificar_para_pcm(audio_da_chamada):
     """
-    recebe TODOS os bytes que o navegador mandou desde o comeco da chamada (webm)
-    e devolve o audio "cru" (pcm 16 bits, mono, 16 kHz).
+    transforma o audio da chamada inteira (webm, q eh o q o navegador manda)
+    em audio "cru", q da pra recortar e salvar como wav.
 
-    por que a chamada inteira e nao so a fala atual: o cabecalho do webm so vem no
-    primeiro pedaco que o navegador manda. os pedacos seguintes sozinhos nao abrem.
+    tem q ser a chamada inteira pq so o primeiro pedaco do webm tem o cabecalho,
+    sem ele os outros pedacos nao abrem
     """
     container = av.open(io.BytesIO(audio_da_chamada))
     conversor = av.AudioResampler(format="s16", layout="mono", rate=TAXA_AMOSTRAGEM)
@@ -28,13 +28,13 @@ def decodificar_para_pcm(audio_da_chamada):
             try:
                 frames = pacote.decode()
             except av.error.FFmpegError:
-                # pacote estragado (ex.: o ultimo, cortado no meio): pula e segue com o resto
+                # pedaco estragado: pula ele e continua
                 continue
             for frame in frames:
                 for convertido in conversor.resample(frame):
                     pcm.extend(bytes(convertido.planes[0])[: convertido.samples * 2])
     except av.error.FFmpegError:
-        # o arquivo acabou no meio de um pedaco. o que deu pra ler a gente aproveita
+        # o ultimo pedaco pode vir cortado, aproveita o q deu pra ler
         pass
     finally:
         container.close()
@@ -44,14 +44,13 @@ def decodificar_para_pcm(audio_da_chamada):
 
 def salvar_fala_em_wav(audio_da_chamada, amostra_inicio):
     """
-    salva so a fala do turno atual em agente/audio/cliente.wav.
-
-    amostra_inicio = onde a fala anterior terminou (0 no primeiro turno).
-    devolve o caminho do wav e onde essa fala terminou, pra usar no proximo turno.
+    salva so a fala atual em agente/audio/cliente.wav.
+    amostra_inicio eh onde a fala anterior parou (tipo um marcador de pagina).
+    devolve o caminho do wav e onde essa fala parou, pro proximo turno
     """
     pcm = decodificar_para_pcm(audio_da_chamada)
 
-    # cada amostra tem 2 bytes (16 bits)
+    # cada amostra ocupa 2 bytes
     fala_atual = pcm[amostra_inicio * 2:]
     amostra_fim = len(pcm) // 2
 

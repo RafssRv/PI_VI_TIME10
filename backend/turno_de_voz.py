@@ -1,15 +1,11 @@
-# ponte entre a tela de chamada e o agente do rafael (pasta agente).
-#
-# um "turno" eh: o cliente fala -> a tela percebe o silencio e manda "fim_da_fala" ->
-# a gente transforma a fala em texto, gera a resposta, transforma em voz e manda de volta.
-#
-# as mensagens que vao pra tela seguem o protocolo que esta descrito no comeco do
-# frontend/app.js (estado, transcricao, audio_resposta, fim_audio, erro).
+# liga a tela de chamada no agente do rafael (pasta agente).
+# cada vez q o cliente para de falar, a gente faz um "turno":
+# fala -> texto (whisper) -> resposta (llama) -> voz (piper) -> manda pra tela tocar
 
 import asyncio
 
-# o whisper e o piper so sao carregados na primeira fala, e nao quando o servidor sobe.
-# assim o servidor continua ligando mesmo em quem ainda nao instalou essas bibliotecas
+# o agente so eh carregado na primeira fala, e nao quando o servidor liga.
+# assim o servidor sobe rapido e funciona ate pra quem nao instalou o whisper/piper
 _agente = None
 
 
@@ -32,9 +28,9 @@ def carregar_agente():
 
 async def rodar_sem_travar(websocket, turno, etapa, funcao, *argumentos):
     """
-    roda uma etapa pesada (whisper, llama, piper) numa thread separada, pra nao travar o
-    servidor. enquanto ela roda, a cada 5 s a gente avisa a tela que continua trabalhando:
-    a tela desiste sozinha se ficar 15 s sem noticia, e o llama no cpu pode passar disso.
+    roda uma etapa pesada sem travar o servidor.
+    enquanto ela roda, avisa a tela a cada 5 s q ainda ta trabalhando,
+    pq a tela desiste se ficar 15 s sem resposta (e o llama pode demorar mais q isso)
     """
     await websocket.send_json({"tipo": "estado", "etapa": etapa, "turno": turno})
 
@@ -47,7 +43,7 @@ async def rodar_sem_travar(websocket, turno, etapa, funcao, *argumentos):
 
 
 async def mandar_erro(websocket, onde, mensagem):
-    # erro nao fatal: aparece uma tarja na tela e o microfone volta a ouvir
+    # mostra um aviso na tela e libera o microfone de novo, sem derrubar a chamada
     print(f"[turno] erro em {onde}: {mensagem}")
     await websocket.send_json({"tipo": "erro", "onde": onde, "mensagem": mensagem, "fatal": False})
     await websocket.send_json({"tipo": "estado", "etapa": "ouvindo"})
@@ -55,8 +51,8 @@ async def mandar_erro(websocket, onde, mensagem):
 
 async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno):
     """
-    faz um turno completo da conversa.
-    devolve onde a fala terminou, pra o proximo turno nao repetir o mesmo audio.
+    faz um turno inteiro da conversa.
+    devolve onde essa fala terminou, pro proximo turno comecar dali
     """
     try:
         agente = carregar_agente()
@@ -74,7 +70,7 @@ async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno):
         await mandar_erro(websocket, "audio", f"Não consegui ler o áudio gravado ({erro}).")
         return amostra_inicio
 
-    # 2. whisper: fala -> texto
+    # 2. whisper: transforma a fala em texto
     try:
         texto_cliente = await rodar_sem_travar(
             websocket, turno, "transcrevendo", agente["transcrever"], str(caminho_wav))
@@ -92,7 +88,7 @@ async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno):
     await websocket.send_json({"tipo": "transcricao", "turno": turno, "quem": "cliente",
                                "texto": texto_cliente, "parcial": False})
 
-    # 3. llama: texto do cliente -> resposta do atendente
+    # 3. llama: gera a resposta do atendente
     try:
         texto_resposta = await rodar_sem_travar(
             websocket, turno, "pensando", agente["responder"], texto_cliente)
@@ -107,7 +103,7 @@ async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno):
     await websocket.send_json({"tipo": "transcricao", "turno": turno, "quem": "atendente",
                                "texto": texto_resposta, "parcial": False})
 
-    # 4. piper: resposta em texto -> agente/audio/resposta.wav
+    # 4. piper: transforma a resposta em voz (agente/audio/resposta.wav)
     try:
         caminho_resposta = await rodar_sem_travar(
             websocket, turno, "respondendo", agente["sintetizar_resposta"], texto_resposta)
@@ -115,7 +111,7 @@ async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno):
         await mandar_erro(websocket, "piper", f"Não consegui gerar a voz da resposta ({erro}).")
         return amostra_fim
 
-    # 5. manda o wav pra tela: primeiro o aviso, depois os bytes, depois o fim
+    # 5. manda o audio pra tela: avisa q vai chegar, manda o arquivo e avisa q acabou
     await websocket.send_json({"tipo": "audio_resposta", "turno": turno, "formato": "audio/wav"})
     await websocket.send_bytes(caminho_resposta.read_bytes())
     await websocket.send_json({"tipo": "fim_audio"})

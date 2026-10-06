@@ -5,9 +5,9 @@ sqlalchemy==2.0.29
 psycopg[binary]
 websockets
 
-# agente de voz (pasta backend/agente): transcricao, conversa com o ollama e voz
+# agente de voz (pasta backend/agente)
 faster-whisper
-# o av 19 tirou uma opcao que o faster-whisper usa (metadata_errors) e quebra a transcricao
+# o av 19 quebra o faster-whisper, por isso fica numa versao antes dele
 av<19
 piper-tts
 requests
