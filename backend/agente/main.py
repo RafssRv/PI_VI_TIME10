@@ -1,12 +1,19 @@
 from services.llm_service import responder
 from services.whisper_service import transcrever
+from services.piper_service import sintetizar_resposta
 
-texto=transcrever("audio/entrada.wav")
 
-print("Transcricao: ")
-print(texto)
+def processar_audio(caminho_audio):
+    texto = transcrever(caminho_audio)
 
-resposta = responder(texto)
+    print("Transcricao:")
+    print(texto)
 
-print("Resposta: ")
-print(resposta)
+    resposta = responder(texto)
+
+    sintetizar_resposta(resposta)
+
+    print("Resposta:")
+    print(resposta)
+
+    return texto, resposta
