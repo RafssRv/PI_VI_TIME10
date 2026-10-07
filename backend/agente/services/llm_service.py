@@ -2,7 +2,7 @@ import requests
 
 def responder(texto):
     resposta = requests.post(
-        "http://localhost:11434/api/generate", 
+        "http://127.0.0.1:11434/api/generate",
         json={
             "model": "llama3.2:3b",
             "prompt": texto,

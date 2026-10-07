@@ -8,7 +8,10 @@ modelo = WhisperModel(
 
 
 def transcrever(caminho_audio):
-    segmentos, info = modelo.transcribe(caminho_audio)
+    segmentos, info = modelo.transcribe(
+        caminho_audio,
+        language="pt"
+        )
 
 
     texto_completo = ""
