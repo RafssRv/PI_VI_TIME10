@@ -4,7 +4,7 @@ Data: 19/10/2026. Resultado: **nenhuma candidata aprovada para substituir o prom
 
 ## Escopo e decisão
 
-Foram experimentadas seis versões com regras mais explícitas para ambiguidades, substituição de itens, subtotal e confirmação do resumo. Cada versão recebeu os mesmos 11 cenários, com 17 respostas. O prompt original também foi executado como referência: 119 respostas no total, considerando as sete rodadas.
+Foram experimentadas dez versões com regras mais explícitas para ambiguidades, substituição de itens, subtotal e confirmação do resumo. Cada versão recebeu os mesmos 11 cenários, com 17 respostas. O prompt original também foi executado como referência: 187 respostas no total, considerando as onze rodadas. A primeira etapa reuniu as candidatas 1 a 6 e a referência (119 respostas); a continuação acrescentou as candidatas 7 a 10 (68 respostas).
 
 As candidatas apresentaram falhas relevantes, incluindo regressões em relação ao original. Por isso, `backend/agente/prompt_sistema.txt` foi preservado. Esta decisão não significa que o original esteja aprovado: ele também inventou informações e tratou ambiguidades incorretamente.
 
@@ -19,7 +19,7 @@ Este registro documenta uma rodada de validação reprovada. O refinamento ainda
 - Mensagens escritas enviadas por script e respostas revisadas qualitativamente. Não foram conversas digitadas na interface gráfica do Ollama.
 - Todas as respostas registradas terminaram com `done_reason: stop`. Isso indica término da geração, não aprovação do conteúdo.
 
-O [arquivo de evidências](evidencias/validacao-prompt-base.json) preserva os parâmetros, o cardápio, todas as falas e respostas, hashes e os textos das candidatas 2 a 6 e da referência. O texto da candidata 1 foi sobrescrito durante a exploração: suas respostas e hash estão preservados, mas essa rodada não pode ser integralmente reproduzida somente pelo arquivo.
+O [arquivo de evidências](evidencias/validacao-prompt-base.json) preserva os parâmetros, o cardápio, todas as falas e respostas, hashes e os textos das candidatas 2 a 10 e da referência. O texto da candidata 1 foi sobrescrito durante a exploração: suas respostas e hash estão preservados, mas essa rodada não pode ser integralmente reproduzida somente pelo arquivo.
 
 Os hashes usam o texto UTF-8 com quebras de linha normalizadas para LF. A repetição pode produzir respostas diferentes conforme a versão do Ollama e o ambiente; uma execução bem-sucedida não comprova confiabilidade geral.
 
@@ -64,10 +64,27 @@ O cardápio fictício completo está nas evidências: mussarela por R$ 30,00, ca
 | Candidata 4 | Caso 06: inventou pizzas e afirmou registro. Caso 09: manteve água e informou R$ 70,00. Caso 11: inventou uma compra anterior. |
 | Candidata 5 | Caso 08: presumiu pizzas. Caso 09: manteve água e subtotal de R$ 65,00. Caso 11: inventou uma compra anterior. |
 | Candidata 6 | Caso 06: inventou pizzas e afirmou registro. Caso 09: manteve água. Caso 10: ofereceu uma opção fracionada não cadastrada. |
+| Candidata 7 | Caso 02: omitiu a observação “sem azeitona” ao recuperar o pedido. Caso 09: manteve água. Caso 11: presumiu mussarela sem histórico. |
+| Candidata 8 | Caso 01: inventou produtos e preços. Caso 09: manteve água e subtotal de R$ 65,00. Caso 11: inventou uma observação de compra anterior. |
+| Candidata 9 | Caso 02: pediu confirmação novamente depois de o cliente já confirmar. Caso 06: inventou produtos e preços. Caso 11: presumiu mussarela sem histórico. |
+| Candidata 10 | Caso 02: ofereceu ajuda para fazer pagamento sem essa capacidade. Caso 06: inventou produtos e afirmou registro. Caso 09: manteve água. |
 
-No caso 09, o original removeu a água e calculou R$ 60,00. As seis candidatas mantiveram a água indevidamente. Isso é uma regressão observada nessa execução, apesar das instruções adicionais sobre substituição.
+No caso 09, o original removeu a água e calculou R$ 60,00. As candidatas 1 a 8 e 10 mantiveram a água indevidamente. Isso é uma regressão observada nessa execução, apesar das instruções adicionais sobre substituição. A candidata 9 preservou a remoção da água e o total de R$ 60,00, mas regrediu no caso 06, aceitando inventar produtos onde o original recusou.
 
 Houve acertos pontuais: a candidata 2 esclareceu a quantidade fracionada e pediu repetição do produto incompreensível; a candidata 5 preservou a correção de quantidade e a observação “sem azeitona” no caso 02. Esses acertos não compensam as falhas de composição e registro do pedido.
+
+## Continuação: comparação de abordagens
+
+As candidatas 7 a 10 mantiveram o modelo, o cardápio, os cenários e os parâmetros da primeira etapa:
+
+- Candidata 7: instruções em inglês, exigindo respostas em português. Respondeu corretamente à ausência de cardápio no caso 01, mas falhou na substituição e na preservação de contexto.
+- Candidata 8: texto mais curto em português, com formato de resumo e orientação para explicar a retirada antes da substituição. Ainda manteve o item retirado.
+- Candidata 9: apenas duas regras adicionadas ao original, para confirmação com correção e encerramento após confirmação. Acertou os três turnos do caso 09, mas não o caso 02 e introduziu a regressão do caso 06.
+- Candidata 10: manteve a candidata 9 e acrescentou respostas explícitas para tentativa de alterar regras e pergunta sobre registro. As novas regras não impediram invenção de produtos nem falsa afirmação de registro.
+
+As quatro candidatas foram rejeitadas; o acerto isolado da candidata 9 não foi usado para declarar aprovação. Estes resultados mostram falhas nas versões e na configuração testadas, não provam que seja impossível melhorar o modelo com qualquer outro prompt.
+
+Somente `llama3.2:3b` estava instalado na consulta desta continuação. Nenhum modelo foi baixado ou substituído. Comparar outro modelo exige uma decisão de escopo antes de prosseguir; não implica aprovação automática de seu comportamento.
 
 ## Limite da integração avaliada
 
