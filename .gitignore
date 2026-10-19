@@ -1,6 +1,16 @@
 # caches do python
 __pycache__/
 *.pyc
+*.pyo
+
+# ferramentas, modelos baixados e resultados locais de testes
+/.local-test/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+test-results/
+playwright-report/
 
 # ambiente virtual, se alguem usar
 .venv/
@@ -11,7 +21,9 @@ node_modules/
 
 # variaveis de ambiente (o CPF_HMAC_SECRET mora aqui, nunca no repositorio)
 .env
-.env.local
+.env.*
+!.env.example
+!.env.*.example
 
 # audios de teste que o websocket grava na pasta de onde o servidor roda
 temp_*
