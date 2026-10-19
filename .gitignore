@@ -26,3 +26,10 @@ desktop.ini
 .DS_Store
 .vscode/
 .idea/
+
+# ferramentas e evidencias locais de validacao
+.local-test/
+.pytest_cache/
+.coverage
+htmlcov/
+test-results/

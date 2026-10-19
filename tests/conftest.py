@@ -34,6 +34,23 @@ _URL_DEV = os.environ.get(
 os.environ["DATABASE_URL"] = _URL_DEV.rsplit("/", 1)[0] + "/" + BANCO_DE_TESTE
 
 
+def pytest_addoption(parser):
+    parser.addoption("--navegador", action="store_true", help="Executa testes no Chrome com microfone sintético")
+    parser.addoption("--voz-real", action="store_true", help="Executa Whisper, Ollama e Piper reais (requer modelos)")
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "navegador: testes de navegador com Playwright")
+    config.addinivalue_line("markers", "voz_real: testes com os três modelos locais")
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        for marca, opcao in (("navegador", "--navegador"), ("voz_real", "--voz-real")):
+            if marca in item.keywords and not config.getoption(opcao):
+                item.add_marker(pytest.mark.skip(reason="Use {} para executar".format(opcao)))
+
+
 def _dsn(nome_do_banco):
     """monta o dsn puro do psycopg (sem o +psycopg do sqlalchemy)."""
     base = _URL_DEV.replace("postgresql+psycopg://", "postgresql://").rsplit("/", 1)[0]
@@ -66,7 +83,7 @@ def _preparar_banco_de_teste():
         conexao.execute((RAIZ / "banco.sql").read_text(encoding="utf-8"))
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def banco_de_teste():
     """
     cria o banco, o esquema e popula UMA vez por execucao da suite.
@@ -82,6 +99,7 @@ def banco_de_teste():
 
     sessao = SessionLocal()
     try:
+        seed.random.seed(seed.SEMENTE)
         seed.limpar_banco(sessao)
         produtos = seed.inserir_produtos(sessao)
         clientes = seed.inserir_clientes(sessao)
