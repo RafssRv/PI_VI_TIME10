@@ -42,7 +42,7 @@ def decodificar_para_pcm(audio_da_chamada):
     return bytes(pcm)
 
 
-def salvar_fala_em_wav(audio_da_chamada, amostra_inicio):
+def salvar_fala_em_wav(audio_da_chamada, amostra_inicio, caminho_saida=None):
     """
     salva so a fala atual em agente/audio/cliente.wav.
     amostra_inicio eh onde a fala anterior parou (tipo um marcador de pagina).
@@ -51,11 +51,13 @@ def salvar_fala_em_wav(audio_da_chamada, amostra_inicio):
     pcm = decodificar_para_pcm(audio_da_chamada)
 
     # cada amostra ocupa 2 bytes
-    fala_atual = pcm[amostra_inicio * 2:]
     amostra_fim = len(pcm) // 2
+    if amostra_inicio < 0 or amostra_inicio >= amostra_fim:
+        raise ValueError("Nenhuma nova amostra de áudio neste turno.")
+    fala_atual = pcm[amostra_inicio * 2:]
 
-    PASTA_AUDIO.mkdir(exist_ok=True)
-    caminho = PASTA_AUDIO / "cliente.wav"
+    caminho = Path(caminho_saida) if caminho_saida is not None else PASTA_AUDIO / "cliente.wav"
+    caminho.parent.mkdir(parents=True, exist_ok=True)
 
     with wave.open(str(caminho), "wb") as arquivo:
         arquivo.setnchannels(1)

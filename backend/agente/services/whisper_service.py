@@ -1,22 +1,18 @@
+"""Carrega o modelo só na primeira transcrição, sem download no import do servidor."""
+
+import os
+from threading import Lock
+
 from faster_whisper import WhisperModel
 
-modelo = WhisperModel(
-    "base",
-    device="cpu",
-    compute_type="int8"
-)
+_modelo = None
+_lock = Lock()
 
 
 def transcrever(caminho_audio):
-    segmentos, info = modelo.transcribe(
-        caminho_audio,
-        language="pt"
-        )
-
-
-    texto_completo = ""
-
-    for segmento in segmentos:
-        texto_completo += segmento.text
-
-    return texto_completo
+    global _modelo
+    with _lock:
+        if _modelo is None:
+            _modelo = WhisperModel(os.getenv("WHISPER_MODEL", "base"), device="cpu", compute_type="int8")
+        segmentos, _ = _modelo.transcribe(caminho_audio, language="pt")
+        return "".join(segmento.text for segmento in segmentos).strip()
