@@ -1,7 +1,6 @@
 // tela de chamada do atendente de voz.
 // regra basica do protocolo: binario = audio, texto = json de controle.
-// o backend de hoje morre se receber texto (o receive_bytes estoura KeyError), entao a tela
-// nasce muda: so manda json depois que o servidor se apresentar com {"tipo":"pronto"}.
+// a tela só manda controles JSON depois que o servidor anuncia {"tipo":"pronto"}.
 //
 // ======================= PROTOCOLO DO WEBSOCKET /ws/falar (versao 1) =======================
 // toda mensagem de controle é json com a chave "tipo". texto sem "tipo" cai no log e nao
@@ -56,7 +55,7 @@
 // ==========================================================================================
 
 // ---------- constantes ----------
-const URL_WEBSOCKET = `ws://${location.host}/ws/falar`;  // herda a porta do servidor que serviu a pagina
+const URL_WEBSOCKET = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws/falar`;
 const TAMANHO_CHUNK_MS = 250;       // de quanto em quanto tempo o gravador entrega um pedaco
 const VERSAO_PROTOCOLO = 1;
 const ESPERA_RESPOSTA_MS = 15000;   // se a resposta nao vier, reabre o microfone sozinho
@@ -147,6 +146,8 @@ let gravador = null;
 let stream = null;
 let pedacos = [];
 let pedacosEnviados = 0;       // quantos pedacos ja foram pro servidor
+let fechandoTurno = false;
+let urlGravacaoAnterior = "";
 
 let contextoAudio = null;
 let analisador = null;
@@ -357,6 +358,7 @@ function conectar() {
     };
 
     meuSocket.onclose = () => {
+      if (socket !== meuSocket) return; // uma chamada antiga não altera a chamada nova
       mudarConexao("desconectado", "desconectado");
       escreverLog("websocket fechado");
       // se nem chegou a abrir, a culpa nao é de "queda no meio da chamada": rejeita e deixa
@@ -422,7 +424,9 @@ function tratarMensagem(evento) {
     if (obj.tipo === "pronto") {
       protocoloNovo = true;
       escreverLog("o servidor se apresentou, saindo do modo mudo");
-      comandaAviso.hidden = true;
+      const podeRegistrar = obj.capacidades && obj.capacidades.registro_pedidos === true;
+      comandaAviso.hidden = podeRegistrar;
+      if (!podeRegistrar) comandaAviso.textContent = "Demonstração de voz: o registro de pedidos ainda não está integrado.";
       enviarTexto({
         tipo: "iniciar_chamada",
         versao_protocolo: VERSAO_PROTOCOLO,
@@ -836,12 +840,16 @@ async function iniciarCaptura() {
   gravador = formato ? new MediaRecorder(stream, { mimeType: formato }) : new MediaRecorder(stream);
   pedacos = [];
   pedacosEnviados = 0;
+  const gravadorDaCaptura = gravador;
+  const streamDaCaptura = stream;
+  const pedacosDaCaptura = pedacos;
   const formatoReal = formatoEmUso();   // guarda agora, o gravador some quando desligar
   escreverLog("gravando em " + formatoReal);
 
   gravador.ondataavailable = (evento) => {
     if (!evento.data || evento.data.size === 0) return;
-    pedacos.push(evento.data);
+    pedacosDaCaptura.push(evento.data);
+    if (gravador !== gravadorDaCaptura) return;
     // binario so sai com o microfone aberto: a resposta do atendente nunca volta pro backend
     if (estadoAtual !== "ouvindo") return;
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -855,12 +863,15 @@ async function iniciarCaptura() {
   };
 
   gravador.onstop = () => {
-    if (pedacos.length > 0) {
-      const audioCompleto = new Blob(pedacos, { type: formatoReal });
-      player.src = URL.createObjectURL(audioCompleto);
+    if (pedacosDaCaptura.length > 0) {
+      const audioCompleto = new Blob(pedacosDaCaptura, { type: formatoReal });
+      if (urlGravacaoAnterior) URL.revokeObjectURL(urlGravacaoAnterior);
+      urlGravacaoAnterior = URL.createObjectURL(audioCompleto);
+      player.src = urlGravacaoAnterior;
       escreverLog(`gravação finalizada (${(audioCompleto.size / 1024).toFixed(1)} KB)`);
     }
-    pararTracks();
+    streamDaCaptura.getTracks().forEach((track) => track.stop());
+    if (stream === streamDaCaptura) stream = null;
   };
 
   gravador.start(TAMANHO_CHUNK_MS);
@@ -995,7 +1006,8 @@ function vigiarSilencio(nivel, agora) {
   }
 }
 
-function fimDaFala(duracaoMs) {
+async function fimDaFala(duracaoMs) {
+  if (estadoAtual !== "ouvindo" || fechandoTurno) return;
   houveFala = false;
   inicioDaFala = 0;
   inicioDoSilencio = 0;
@@ -1008,7 +1020,26 @@ function fimDaFala(duracaoMs) {
     return;
   }
 
-  pausarCaptura();   // fecha o microfone antes de qualquer outra coisa
+  // requestData entrega o final ainda retido pelo MediaRecorder. Seu evento precisa
+  // enviar o binário ANTES do controle fim_da_fala; pause() sozinho não faz isso.
+  fechandoTurno = true;
+  const gravadorDoTurno = gravador;
+  if (gravadorDoTurno && gravadorDoTurno.state === "recording") {
+    await new Promise((resolve) => {
+      const entregue = () => resolve();
+      gravadorDoTurno.addEventListener("dataavailable", entregue, { once: true });
+      try {
+        gravadorDoTurno.requestData();
+        pausarCaptura();
+      } catch (erro) {
+        gravadorDoTurno.removeEventListener("dataavailable", entregue);
+        resolve();
+      }
+    });
+  }
+  fechandoTurno = false;
+  if (estadoAtual !== "ouvindo" || gravador !== gravadorDoTurno) return;
+  pausarCaptura();
   turno++;
   tempoInicioTurno = Date.now();
   enviarTexto({ tipo: "fim_da_fala", turno: turno, duracao_ms: Math.round(duracaoMs) });
@@ -1127,6 +1158,7 @@ async function ligar() {
   tempoInicioTurno = 0;   // sem isso a chamada nova imprime o tempo do turno da chamada velha
   pedidoSalvoId = null;
   protocoloNovo = false;
+  fechandoTurno = false;
   esperandoAudio = false;
   pedacosResposta = [];
   houveFala = false;
@@ -1190,6 +1222,7 @@ function encerrar(motivo, estadoFinal, manterSocket) {
     pararTracks();
   }
   gravador = null;
+  pararTracks(); // libera imediatamente, sem esperar pelo evento onstop antigo
 
   if (motivo) enviarTexto({ tipo: "encerrar_chamada", motivo: motivo });
   if (!manterSocket) fecharSocket();
@@ -1205,7 +1238,10 @@ function fecharSocket(qual) {
     fechamosOSocket = true;
     alvo.close();   // é fechando o socket que o backend de hoje salva o arquivo
   }
-  if (socket === alvo) socket = null;
+  if (socket === alvo) {
+    socket = null;
+    mudarConexao("desconectado", "desconectado");
+  }
 }
 
 function encerrarPeloCliente() {
