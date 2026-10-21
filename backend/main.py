@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 
+from atendimento import Atendimento
 from turno_de_voz import atender_turno
 
 app = FastAPI(title="Backend Pizzaria - Agente de Voz", version="0.1.0")
@@ -86,6 +87,9 @@ async def websocket_audio(websocket: WebSocket):
     audio_da_chamada = bytearray()
     amostra_inicio = 0
 
+    # cada chamada tem o seu roteiro: em q etapa ta, quem eh o cliente, o q ja foi dito
+    atendimento = Atendimento()
+
     try:
         # abrimos o arquivo uma vez so, pra ir enchendo ele de dados
         with open(caminho_audio, "wb") as arquivo:
@@ -133,7 +137,8 @@ async def websocket_audio(websocket: WebSocket):
                     print(f"[websocket] fim da fala do turno {controle.get('turno')}")
                     # passa a fala pelo agente e manda a resposta pra tela (turno_de_voz.py)
                     amostra_inicio = await atender_turno(
-                        websocket, audio_da_chamada, amostra_inicio, controle.get("turno"))
+                        websocket, audio_da_chamada, amostra_inicio, controle.get("turno"),
+                        atendimento)
 
                 elif tipo == "resposta_tocada":
                     # a tela terminou de tocar a resposta e ja reabriu o microfone

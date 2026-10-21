@@ -14,13 +14,12 @@ def carregar_agente():
     if _agente is None:
         from agente.services.audio_service import salvar_fala_em_wav
         from agente.services.whisper_service import transcrever
-        from agente.services.llm_service import responder
         from agente.services.piper_service import sintetizar_resposta
 
+        # a resposta nao sai mais direto do llama: quem decide eh o atendimento.py
         _agente = {
             "salvar_fala_em_wav": salvar_fala_em_wav,
             "transcrever": transcrever,
-            "responder": responder,
             "sintetizar_resposta": sintetizar_resposta,
         }
     return _agente
@@ -49,9 +48,10 @@ async def mandar_erro(websocket, onde, mensagem):
     await websocket.send_json({"tipo": "estado", "etapa": "ouvindo"})
 
 
-async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno):
+async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, atendimento):
     """
     faz um turno inteiro da conversa.
+    atendimento eh o roteiro dessa chamada (atendimento.py), q lembra em q etapa ela ta.
     devolve onde essa fala terminou, pro proximo turno comecar dali
     """
     try:
@@ -88,10 +88,10 @@ async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno):
     await websocket.send_json({"tipo": "transcricao", "turno": turno, "quem": "cliente",
                                "texto": texto_cliente, "parcial": False})
 
-    # 3. llama: gera a resposta do atendente
+    # 3. atendimento: identifica/cadastra o cliente e, depois disso, conversa pelo llama
     try:
         texto_resposta = await rodar_sem_travar(
-            websocket, turno, "pensando", agente["responder"], texto_cliente)
+            websocket, turno, "pensando", atendimento.responder, texto_cliente)
     except Exception as erro:
         await mandar_erro(websocket, "ollama",
                           f"Não consegui falar com o Ollama. Ele está aberto? ({erro.__class__.__name__})")
