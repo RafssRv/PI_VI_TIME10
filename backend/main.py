@@ -68,8 +68,8 @@ async def processar_audio(audio: UploadFile = File(...)):
 @app.websocket("/ws/falar")
 async def websocket_audio(websocket: WebSocket):
     """
-    endpoint de websocket fase 3.
-    recebe chunks de audio, junta tudo num arquivo so e guarda.
+    Endpoint de WebSocket Fase 3 atualizado.
+    Recebe chunks de áudio, salva e se comunica via protocolo de eventos (JSON).
     """
     await websocket.accept()
     print("[websocket] cliente conectou no tubo de streaming!")
@@ -91,7 +91,6 @@ async def websocket_audio(websocket: WebSocket):
     atendimento = Atendimento()
 
     try:
-        # abrimos o arquivo uma vez so, pra ir enchendo ele de dados
         with open(caminho_audio, "wb") as arquivo:
             while True:
                 # receive() em vez de receive_bytes(): o receive_bytes estoura KeyError
@@ -155,10 +154,13 @@ async def websocket_audio(websocket: WebSocket):
                     print(f"[websocket] controle desconhecido, ignorei: {tipo!r}")
 
     except WebSocketDisconnect:
-        # quando o cara desligar a chamada no front (ou fechar a aba), cai aqui
-        print(f"[websocket] cliente desconectou.")
-
-    print(f"[websocket] audio completo salvo em: {caminho_audio}")
+        # Passo 6: Tratar desconexão
+        print(f"[websocket] cliente desconectou da chamada.")
+        print(f"[websocket] audio completo salvo em: {caminho_audio}")
+        
+        # --- MOCK DA IA ---
+        # Quando o cliente desliga, a IA processaria tudo. 
+        # Aqui você futuramente chamará o pipeline e o Ollama!
 
 
 # --- front-end: o proprio fastapi entrega a pasta frontend na raiz ---

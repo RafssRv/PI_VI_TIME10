@@ -4,6 +4,7 @@ python-multipart==0.0.9
 sqlalchemy==2.0.29
 psycopg[binary]
 websockets
+ollama
 
 # agente de voz (pasta backend/agente)
 faster-whisper
