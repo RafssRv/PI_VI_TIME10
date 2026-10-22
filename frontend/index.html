@@ -3,185 +3,133 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pizzaria — atendimento por voz</title>
+  <title>Pizzaria Exemplo · atendimento por voz</title>
   <link rel="icon" type="image/svg+xml" href="logo.svg">
-  <link rel="stylesheet" href="style.css">
+  <!-- o ?v=2 obriga o navegador a baixar a versao nova em vez de usar a guardada. mudou o css ou o js? aumente o numero -->
+  <link rel="stylesheet" href="style.css?v=2">
 </head>
 <body data-estado="ocioso">
 
-  <!-- faixa 1: marca, titulo, estado da conexao e duracao da chamada -->
-  <header id="barra-topo">
-    <img class="marca" src="logo.svg" alt="" aria-hidden="true">
-    <h1 class="titulo">Pizzaria — atendimento por voz</h1>
-
-    <div id="chip-conexao">
-      <span id="bolinha" class="bolinha desconectado" aria-hidden="true"></span>
-      <span id="texto-status">desconectado</span>
-    </div>
-
-    <div class="bloco-chamada">
-      <span class="rotulo-chamada">CHAMADA</span>
-      <span id="timer">00:00</span>
-    </div>
-  </header>
-
-  <!-- faixa 2: as 4 etapas do pipeline, no topo, com o tempo de cada uma -->
-  <section id="tira-etapas" aria-label="Etapas do atendimento">
-    <div class="etapa" id="etapa-1">
-      <span class="etapa-trilho" aria-hidden="true"></span>
-      <span class="etapa-id">
-        <span class="etapa-disco" aria-hidden="true"><span class="etapa-num">1</span></span>
-        <span class="etapa-nome">ouvindo</span>
-      </span>
-      <span class="etapa-tempo">aguardando</span>
-    </div>
-
-    <div class="etapa" id="etapa-2">
-      <span class="etapa-trilho" aria-hidden="true"></span>
-      <span class="etapa-id">
-        <span class="etapa-disco" aria-hidden="true"><span class="etapa-num">2</span></span>
-        <span class="etapa-nome">transcrevendo</span>
-      </span>
-      <span class="etapa-tempo">aguardando</span>
-    </div>
-
-    <div class="etapa" id="etapa-3">
-      <span class="etapa-trilho" aria-hidden="true"></span>
-      <span class="etapa-id">
-        <span class="etapa-disco" aria-hidden="true"><span class="etapa-num">3</span></span>
-        <span class="etapa-nome">pensando</span>
-      </span>
-      <span class="etapa-tempo">aguardando</span>
-    </div>
-
-    <div class="etapa" id="etapa-4">
-      <span class="etapa-trilho" aria-hidden="true"></span>
-      <span class="etapa-id">
-        <span class="etapa-disco" aria-hidden="true"><span class="etapa-num">4</span></span>
-        <span class="etapa-nome">respondendo</span>
-      </span>
-      <span class="etapa-tempo">aguardando</span>
-    </div>
-
-    <p class="bloco-turno">último turno: <strong id="tempo-turno">—</strong> · meta: 5 s</p>
-  </section>
-
-  <!-- faixa 3: tarja de erro, largura inteira, nunca so uma bolinha vermelha -->
+  <!-- aviso de erro: aparece por cima de tudo, no topo da pagina -->
   <div id="tarja-erro" class="tarja-erro" role="alert" hidden>
-    <span class="tarja-x" aria-hidden="true"><span></span><span></span></span>
     <p id="tarja-erro-texto"></p>
     <button type="button" id="tarja-erro-botao" class="botao-tarja">Tentar de novo</button>
   </div>
 
-  <!-- faixa 4: a chamada a esquerda, a comanda a direita -->
-  <main id="corpo">
+  <main id="palco">
 
-    <section id="coluna-chamada">
+    <!-- coluna 1: bastidores, o que o sistema esta fazendo (pra banca e pra testes) -->
+    <aside id="bastidores" aria-label="Por dentro da chamada">
+      <header class="bastidores-topo">
+        <h2>Por dentro da chamada</h2>
+        <div id="chip-conexao">
+          <span id="bolinha" class="bolinha desconectado" aria-hidden="true"></span>
+          <span id="texto-status">desconectado</span>
+        </div>
+      </header>
 
-      <div id="cartao-estado" aria-live="polite">
-        <div id="orbe">
-          <div id="anel" aria-hidden="true"></div>
-          <div class="ondas icone" aria-hidden="true"><span></span><span></span></div>
+      <ol id="tira-etapas">
+        <li class="etapa" id="etapa-1">
+          <span class="etapa-nome">Ouvindo</span>
+          <span class="etapa-desc">o microfone capta a sua fala</span>
+          <span class="etapa-tempo">aguardando</span>
+        </li>
+        <li class="etapa" id="etapa-2">
+          <span class="etapa-nome">Transcrevendo</span>
+          <span class="etapa-desc">o Whisper transforma a fala em texto</span>
+          <span class="etapa-tempo">aguardando</span>
+        </li>
+        <li class="etapa" id="etapa-3">
+          <span class="etapa-nome">Pensando</span>
+          <span class="etapa-desc">o Llama escreve a resposta</span>
+          <span class="etapa-tempo">aguardando</span>
+        </li>
+        <li class="etapa" id="etapa-4">
+          <span class="etapa-nome">Respondendo</span>
+          <span class="etapa-desc">o Piper transforma a resposta em voz</span>
+          <span class="etapa-tempo">aguardando</span>
+        </li>
+      </ol>
 
-          <!-- microfone: riscado em ocioso/encerrada, sem risco e laranja em ouvindo -->
-          <div class="icone-mic icone" aria-hidden="true">
-            <span class="mic-capsula"></span>
-            <span class="mic-pe"></span>
-            <span class="mic-risco"></span>
-          </div>
+      <p class="bloco-turno">Último turno <strong id="tempo-turno">—</strong> <span>meta de 5 s</span></p>
 
-          <!-- tres pontinhos (conectando / processando) -->
-          <div class="icone-pontos icone" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div class="nivel-mic">
+        <span>Microfone</span>
+        <!-- barrinhas que o app.js mexe com o nivel do microfone -->
+        <div id="barras-mic" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+      </div>
 
-          <!-- alto-falante (falando) -->
-          <div class="icone-som icone" aria-hidden="true">
-            <span class="som-caixa"></span>
-            <span class="som-cone"></span>
-            <span class="som-onda"></span>
-          </div>
+      <details id="detalhes-tecnicos">
+        <summary>Detalhes técnicos</summary>
+        <h3>Última gravação</h3>
+        <audio id="player" controls></audio>
+        <h3>Log</h3>
+        <ul id="log"></ul>
+      </details>
+    </aside>
 
-          <!-- x (erro) -->
-          <div class="icone-x icone" aria-hidden="true"><span></span><span></span></div>
+    <!-- coluna 2: o celular, a chamada em si -->
+    <section id="celular" aria-label="Chamada">
+      <div class="tela">
+        <div class="fundo" aria-hidden="true"></div>
+
+        <div class="barra-sistema" aria-hidden="true">
+          <span id="relogio">--:--</span>
+          <span class="sinal"><i></i><i></i><i></i><i></i></span>
         </div>
 
-        <div class="estado-texto">
-          <p id="rotulo-estado">Chamada não iniciada</p>
+        <div id="cartao-estado" aria-live="polite">
+          <div id="orbe" aria-hidden="true">
+            <canvas id="orbe-canvas" width="440" height="440"></canvas>
+            <div id="anel"></div>
+          </div>
+          <h1 class="empresa">Pizzaria Exemplo</h1>
+          <p class="linha-tempo"><span id="timer">00:00</span> <span id="rotulo-estado">Chamada não iniciada</span></p>
           <p id="sublinha-estado">clique em Ligar e fale normalmente</p>
         </div>
 
-        <div class="direita">
-          <!-- o meia-duplex escrito na tela: o css mostra um texto por estado -->
-          <span id="chip-mic">
-            <span class="ponto" aria-hidden="true"></span>
-            <span class="chip-aberto">MICROFONE ABERTO</span>
-            <span class="chip-pausado">MICROFONE PAUSADO</span>
-          </span>
-
-          <!-- 7 barrinhas que mexem com o nivel do microfone -->
-          <div id="barras-mic" aria-hidden="true">
-            <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        <!-- a conversa aparece como legenda ao vivo -->
+        <div id="caixa-conversa">
+          <div id="conversa" aria-live="polite">
+            <p class="conversa-vazia">A conversa aparece aqui enquanto vocês falam.</p>
           </div>
         </div>
-      </div>
 
-      <div id="caixa-conversa">
-        <p class="sobrancelha">CONVERSA</p>
-        <div id="conversa" aria-live="polite">
-          <p class="conversa-vazia">A conversa aparece aqui enquanto vocês falam.</p>
+        <div class="controles">
+          <button type="button" id="botao-chamada" class="botao-chamada ligar">
+            <span class="forma" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.6a1 1 0 0 1-.25 1z"/></svg>
+            </span>
+            <span id="texto-botao">Ligar</span>
+          </button>
         </div>
       </div>
-
-      <button type="button" id="botao-chamada" class="botao-chamada ligar">
-        <span class="forma" aria-hidden="true"></span>
-        <span id="texto-botao">Ligar</span>
-      </button>
     </section>
 
-    <!-- a comanda: papel, e o que o cliente le -->
-    <section id="comanda">
-      <div id="comanda-topo">
-        <p class="sobrancelha">COMANDA</p>
-        <h2>Seu pedido</h2>
-        <p id="comanda-cliente">Cliente: ainda não identificado</p>
-      </div>
+    <!-- coluna 3: a comanda, o pedido sendo anotado -->
+    <section id="comanda" aria-label="Comanda do pedido">
+      <div class="papel">
+        <div id="comanda-topo">
+          <h2>Comanda</h2>
+          <p id="comanda-cliente">Cliente: ainda não identificado</p>
+        </div>
 
-      <div id="comanda-itens" aria-live="polite">
-        <p class="comanda-vazia">Ainda não anotei nada.</p>
-        <p class="comanda-vazia fraca">O que você pedir vai aparecer aqui.</p>
-      </div>
+        <div id="comanda-itens" aria-live="polite">
+          <p class="comanda-vazia">Ainda não anotei nada.</p>
+          <p class="comanda-vazia fraca">O que você pedir vai aparecer aqui.</p>
+        </div>
 
+        <div id="comanda-rodape">
+          <div class="linha-rodape"><span>Pagamento</span><strong id="comanda-pagamento">a combinar</strong></div>
+          <div class="linha-rodape"><span>Entrega</span><strong id="comanda-entrega">a confirmar</strong></div>
+          <div class="linha-total"><span>Total</span><strong id="comanda-total">R$ 0,00</strong></div>
+        </div>
+      </div>
       <p id="comanda-aviso" hidden></p>
-
-      <div id="comanda-rodape">
-        <div class="linha-rodape">
-          <span>Pagamento: <strong id="comanda-pagamento">a combinar</strong></span>
-          <span>Entrega: <strong id="comanda-entrega">a confirmar</strong></span>
-        </div>
-        <div class="regua" aria-hidden="true"></div>
-        <div class="linha-total">
-          <span>TOTAL</span>
-          <strong id="comanda-total">R$ 0,00</strong>
-        </div>
-      </div>
     </section>
   </main>
-
-  <!-- faixa 5: detalhes tecnicos, log e player da ultima gravacao -->
-  <footer id="rodape-tecnico">
-    <details id="detalhes-tecnicos">
-      <summary><span class="seta" aria-hidden="true"></span>Detalhes técnicos</summary>
-      <div class="painel-tecnico">
-        <div class="painel-coluna">
-          <h3>última gravação (só para teste)</h3>
-          <audio id="player" controls></audio>
-        </div>
-        <div class="painel-coluna">
-          <h3>log</h3>
-          <ul id="log"></ul>
-        </div>
-      </div>
-    </details>
-  </footer>
 
   <!-- resumo do fim da chamada, desenhado pela mesma funcao da comanda -->
   <div id="resumo" hidden>
@@ -191,15 +139,9 @@
       <p id="resumo-cliente">Cliente: ainda não identificado</p>
       <div id="resumo-itens"></div>
       <div class="resumo-rodape">
-        <div class="linha-rodape">
-          <span>Pagamento: <strong id="resumo-pagamento">a combinar</strong></span>
-          <span>Entrega: <strong id="resumo-entrega">a confirmar</strong></span>
-        </div>
-        <div class="regua" aria-hidden="true"></div>
-        <div class="linha-total">
-          <span>TOTAL</span>
-          <strong id="resumo-total">R$ 0,00</strong>
-        </div>
+        <div class="linha-rodape"><span>Pagamento</span><strong id="resumo-pagamento">a combinar</strong></div>
+        <div class="linha-rodape"><span>Entrega</span><strong id="resumo-entrega">a confirmar</strong></div>
+        <div class="linha-total"><span>Total</span><strong id="resumo-total">R$ 0,00</strong></div>
       </div>
       <div class="resumo-botoes">
         <button type="button" id="resumo-ligar" class="botao-resumo forte">Ligar de novo</button>
@@ -211,6 +153,8 @@
   <!-- audio que o piper devolve; toca sozinho e com o microfone pausado -->
   <audio id="audio-resposta" hidden></audio>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=2"></script>
+  <!-- so visual (orbe, legenda, relogio). nao mexe na logica da chamada -->
+  <script src="visual.js?v=2"></script>
 </body>
 </html>
