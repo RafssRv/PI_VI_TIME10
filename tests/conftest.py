@@ -66,10 +66,11 @@ def _preparar_banco_de_teste():
         conexao.execute((RAIZ / "banco.sql").read_text(encoding="utf-8"))
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def banco_de_teste():
     """
-    cria o banco, o esquema e popula UMA vez por execucao da suite.
+    cria o banco, o esquema e popula UMA vez, quando um teste solicita db.
+    testes de regras em memoria nao precisam subir o postgres.
     devolve a marca d'agua: o maior id de pedido e de cliente que o seed criou. tudo acima
     disso foi um teste que gravou, e e apagado no fim dele.
     (repovoar a cada teste deixava a suite em quatro minutos e meio; assim fica em segundos.)
