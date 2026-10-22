@@ -6,5 +6,12 @@ psycopg[binary]
 websockets
 ollama
 
+# agente de voz (pasta backend/agente)
+faster-whisper
+# o av 19 quebra o faster-whisper, por isso fica numa versao antes dele
+av<19
+piper-tts
+requests
+
 # so para rodar a suite de testes (npm run teste)
 pytest
