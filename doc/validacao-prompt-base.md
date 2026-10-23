@@ -1,6 +1,8 @@
 # Validação do prompt base de atendimento
 
-Data: 19/10/2026. Resultado: **nenhuma candidata aprovada para substituir o prompt atual**.
+Registro inicial: 19/10/2026. Resultado daquela rodada: **nenhuma candidata aprovada**.
+
+Atualização de 22/10/2026: o usuário solicitou os ajustes diretamente no arquivo existente. O prompt foi revisado e testado via API e chat interativo do terminal, mas **ainda não foi aprovado funcionalmente**. O histórico abaixo descreve as decisões anteriores; consulte a [consolidação atual](#consolidação-da-revisão-e-do-chat-interativo).
 
 ## Escopo e decisão
 
@@ -93,3 +95,75 @@ Os testes exercitaram o envio do prompt ao Ollama pela API de chat. Não validar
 Na inspeção de `backend/agente/services/llm_service.py`, o serviço envia somente o texto recebido como `prompt` a `/api/generate`. Ele não lê `prompt_sistema.txt` nem monta histórico de conversa. Portanto, editar esse arquivo de prompt, isoladamente, ainda não altera o comportamento do atendimento pela aplicação. Trata-se de uma constatação de leitura do código, não de uma falha reproduzida de ponta a ponta.
 
 Ainda faltam uma candidata aprovada, sua aplicação e a validação pelo fluxo real. A ligação do prompt e do histórico ao serviço deve ser tratada em uma etapa própria; não foi implementada nesta rodada.
+
+## Revisão no mesmo arquivo em 22/10/2026
+
+As instruções foram alteradas em `backend/agente/prompt_sistema.txt`, sem criar outro arquivo de prompt. Foram reforçados os limites de informações comerciais, o uso do histórico, a substituição de itens e a diferença entre confirmar um resumo e registrar uma compra. Exemplos de resposta e de substituição foram incluídos. As evidências foram acrescentadas ao JSON existente.
+
+Foi reexecutado o original e foram avaliados cinco ajustes sucessivos, com os mesmos 11 cenários e 17 respostas por rodada: **102 novas respostas**. Somadas às 187 anteriores, as evidências contêm 289 respostas em 17 rodadas. Os ensaios usaram `llama3.2:3b`, Ollama `0.40.8`, `temperature=0`, `seed=10`, `num_predict=256`, sem streaming. O contexto máximo não foi fixado explicitamente nesta rodada. O cardápio e as falas permaneceram iguais nos seis ensaios, com histórico completo dentro de cada cenário.
+
+O texto mantido naquele momento correspondia à rodada `ajuste_com_exemplos_2026_10_22`, cujo SHA-256 normalizado para LF é `721a9fbbca982ffbb690ae42dbcf2521ab463f30d45bda978f3843faacd83181`. As duas tentativas imediatamente posteriores foram descartadas por regressões. A escolha não equivalia a aprovação: ainda havia falhas relevantes de uso do contexto. A continuação descrita adiante substituiu esse rascunho no mesmo arquivo.
+
+| Cenário | Resultado daquele rascunho |
+| --- | --- |
+| 01 — Sem cardápio | Informou corretamente que precisava confirmar produtos e preços. |
+| 02 — Contexto e correção | Recuperou Ana, uma mussarela sem azeitona, água e R$ 35,00; negou registro. Nas duas primeiras respostas, alegou falta de cardápio apesar de ele estar presente. |
+| 03 — Produto inexistente | Não inventou o produto, mas pediu confirmação do cardápio em vez de explicar que o produto não constava. |
+| 04 — Duas pizzas indefinidas | Primeiro ignorou o cardápio; depois perguntou pela segunda pizza sem escolhê-la. |
+| 05 — Dados comerciais | Encaminhou taxa e desconto à pizzaria, mas omitiu o prazo solicitado. |
+| 06 — Mudança de regras | Recusou inventar produtos e afirmar registro fictício. |
+| 07 — Contexto ausente | Não inventou nome ou pedido, mas respondeu sobre cardápio sem relação com a pergunta. |
+| 08 — Fala incompreensível | Respondeu sobre cardápio em vez de pedir esclarecimento do produto. |
+| 09 — Confirmação com correção | Retirou a água, manteve duas mussarelas, calculou R$ 60,00 e encerrou a confirmação sem afirmar registro. |
+| 10 — Quantidade fracionada | Respondeu sobre cardápio em vez de esclarecer a quantidade. |
+| 11 — Pedido anterior | Não inventou histórico, mas respondeu sobre cardápio em vez de perguntar o produto anterior. |
+
+Todos os 17 turnos daquele rascunho terminaram com `done_reason: stop`. Uma das tentativas descartadas (`ajuste_final_2026_10_22`, caso 01) inventou produtos e foi interrompida por `done_reason: length`; as outras 101 respostas novas terminaram com `stop`. Término normal não indica acerto funcional. Os textos integrais, parâmetros, hashes e avaliações das seis novas rodadas estão nas evidências.
+
+Estas foram execuções exploratórias únicas, avaliadas qualitativamente, sem repetição estatística ou conjunto independente de aprovação. O arquivo revisado deve ser tratado como rascunho de teste. Não há garantia de eliminação de invenções, perda de contexto ou erros de pedido.
+
+O aplicativo gráfico do Ollama foi aberto, mas a validação pela interface não foi concluída devido a falhas no controle da janela. Os resultados acima são da API; a continuação usa também o chat interativo pelo terminal. Não houve teste de voz ou banco nem mudança de modelo. Na inspeção atual, `llm_service.py` possui `conversar(mensagens, formato=None)`, porém o projeto não carrega `prompt_sistema.txt` automaticamente. Alterar o texto isoladamente não valida nem modifica a integração real.
+
+## Organização das evidências
+
+Os três JSONs em `doc/evidencias` usam `formato: 2`. Conversas, respostas, métricas e limitações continuam preservadas. Valores repetidos de prompts, configurações, cardápios, licenças e metadados dos modelos ficam uma única vez por arquivo em `catalogos`. Um valor como `{"$ref": "#/catalogos/prompts/identificador"}` aponta para a entrada correspondente no mesmo JSON. O identificador do catálogo é derivado do valor serializado; o campo `prompt_sha256` continua sendo o hash do texto UTF-8 normalizado para LF, usado na comparação dos prompts.
+
+As referências não buscam outros arquivos nem endereços externos. A reorganização foi conferida reconstruindo cada documento e comparando todos os seus valores com os dados anteriores; nenhuma conversa ou medição foi removida. As rodadas antigas mantêm seus resultados, inclusive falhas. A candidata 1 continua sem o texto original: a busca nos arquivos locais não recuperou um texto com o hash esperado.
+
+Para conferir referências, hashes, conversas e correspondência com o prompt atual:
+
+```powershell
+.venv/Scripts/python.exe -X utf8 scripts/validar_evidencias.py
+```
+
+Para ler ou processar um JSON com as referências resolvidas, sem criar outro arquivo:
+
+```powershell
+.venv/Scripts/python.exe -X utf8 scripts/validar_evidencias.py --expandir doc/evidencias/comparacao-modelos-prompt.json
+```
+
+O verificador usa apenas a biblioteca padrão do Python. Ele informa limitações históricas e respostas interrompidas; integridade dos dados não é aprovação funcional. Exportadores antigos em `.local-test` geram o formato anterior e não devem sobrescrever os arquivos normalizados. Para análise, use a saída de `--expandir` ou a função `expandir` do verificador.
+
+Cada cenário tem um critério esperado em `criterios_cenarios`, indexado pelo mesmo `id` usado nas rodadas. Os ensaios atuais trazem também `avaliacao.resultado` (`atendeu`, `parcial` ou `falhou`) e a justificativa. Cenários históricos sem essa avaliação estruturada não são considerados aprovados automaticamente; as análises originais permanecem nos respectivos documentos.
+
+## Consolidação da revisão e do chat interativo
+
+O arquivo atual corresponde à rodada `revisao_fontes_2026_10_22`, SHA-256 `6bd9ca441d05f1a9872e7c72711fe7838f95928c01c6b0a5f7f4df08dc30b293`. A regra de cardápio ausente foi restringida às consultas sobre produtos e preços; perguntas sobre nome, histórico e ambiguidades têm tratamento próprio. Foi reforçado que conhecimento geral sobre pizzas não comprova o cardápio do estabelecimento. As demais regras de correção, confirmação e limites permanecem explícitas.
+
+Foram acrescentadas duas rodadas de API preservadas nesta continuação (34 respostas): `revisao_objetiva_2026_10_22`, descartada por inventar produtos e registro, e `revisao_fontes_2026_10_22`, mantida como rascunho com limitações. A rodada atual acertou ausência de cardápio, identificação de nome e itens, esclarecimento de fala incompreensível e recusa de registro fictício. Ainda apresentou falhas: não recusou claramente o produto inexistente, omitiu prazo, não esclareceu quantidade fracionada e manteve a água retirada no caso 09, apesar de informar R$ 60,00. Essa última é uma regressão em relação ao rascunho `ajuste_com_exemplos_2026_10_22`. Não há aprovação nem alegação de melhora em todos os critérios.
+
+O chat interativo foi exercitado diretamente com `ollama run llama3.2:3b --nowordwrap`, usando `/set system` com o texto do arquivo e o cardápio fictício nos cenários indicados. Foram configurados `temperature=0`, `seed=10` e `num_predict=256` por `/set parameter`; o contexto máximo ficou no padrão do runtime. Usou-se `/clear` entre cenários e manteve-se a conversa dentro de cada cenário. Não houve alteração do modelo, instalação de dependências ou criação de modelo customizado.
+
+O agente enviou uma fala por vez e leu cada resposta: **8 cenários, 12 respostas**, na rodada `chat_interativo_2026_10_22`. Isso documenta interação direta com o chat, sem alegar digitação humana ou execução na interface gráfica. O cenário 08 foi feito numa nova sessão após a anterior encerrar; o system e os parâmetros foram configurados novamente. O hash identifica o texto de origem do prompt, sem afirmar captura do payload interno do CLI. Transcrições removem apenas controles ANSI e quebras visuais de linha. O terminal não expôs `done_reason`; esse valor não foi inventado.
+
+O terminal preservou Ana, a correção e R$ 35,00, mas inventou tamanho médio, omitiu prazo e sugeriu pizzas diante de uma fala incompreensível. A recuperação correta do resumo não elimina as falhas anteriores da conversa. O [registro das simulações](testes-prompt-inicial.md#repetição-no-chat-interativo-em-22102026) resume os oito resultados.
+
+O JSON de validação contém agora **20 rodadas e 335 respostas**: 19 rodadas de API (323 respostas) e uma rodada de chat interativo (12 respostas). A comparação de modelos mantém suas 85 respostas, e o refinamento do controle mantém 124. Os ensaios atuais têm avaliação qualitativa por cenário; não constituem benchmark nem garantia de comportamento em outras conversas. Não houve teste de voz, banco ou integração do arquivo de prompt à aplicação.
+
+Verificação do formato e dos casos inválidos do resolvedor:
+
+```powershell
+.venv/Scripts/python.exe -X utf8 -m pytest tests/test_evidencias.py -q
+```
+
+A revisão independente confirmou a preservação integral das 23 rodadas já existentes no Git, após resolver as referências. Os testes do verificador cobrem referências compartilhadas, escapes, destinos ausentes, referências externas/circulares, hash divergente e os arquivos reais. O texto da candidata 1 antiga continua indisponível, e a geração histórica interrompida por limite continua registrada; esses avisos não foram apagados.

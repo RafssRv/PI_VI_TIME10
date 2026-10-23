@@ -77,6 +77,8 @@ Tempos de chamada HTTP local na RTX 3060 Ti, com respostas de comprimentos difer
 
 O [arquivo de evidências](evidencias/comparacao-modelos-prompt.json) contém os cinco prompts efetivamente enviados, parâmetros, cardápio, falas, respostas integrais, métricas por turno e metadados dos modelos. Foram conferidos os hashes dos prompts, a completude das 85 respostas e a igualdade de prompts/cardápio/falas nos pares de comparação.
 
+Os dados repetidos foram centralizados em catálogos no próprio JSON, sem remover as 85 respostas ou suas métricas. Consulte o [formato e os comandos de verificação](validacao-prompt-base.md#organização-das-evidências) para resolver os campos `$ref`. Os textos de prompt desta comparação são históricos; o arquivo de prompt atual recebeu ajustes posteriores, documentados na validação do prompt base.
+
 O Qwen foi baixado para o Ollama como modelo adicional de teste. Nenhum modelo foi removido e nenhum arquivo de pesos deve ser incluído no commit. A aplicação continua configurada para Llama; este commit contém apenas a comparação e suas evidências.
 
 O resultado permite continuar investigando o Qwen dentro do orçamento de VRAM informado, mas não aprova sua adoção nem resolve as falhas do prompt. Antes de aplicar uma versão, ainda é necessário obter comportamento correto nos critérios já definidos e, em etapa posterior, validar a integração real.

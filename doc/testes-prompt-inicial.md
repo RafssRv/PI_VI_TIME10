@@ -1,5 +1,7 @@
 # Simulações da primeira versão do prompt
 
+Atualização de 22/10/2026: o [prompt](../backend/agente/prompt_sistema.txt) foi revisado no mesmo arquivo a pedido do usuário. As transcrições abaixo são da execução histórica de 19/10 e correspondem ao hash original, não ao texto atual. Os oito cenários também foram executados no chat interativo do terminal do Ollama, turno a turno pelo agente; não houve digitação humana nem teste na interface gráfica. Os resultados atuais estão na [consolidação da revisão](validacao-prompt-base.md#consolidação-da-revisão-e-do-chat-interativo). O texto revisado continua com falhas registradas.
+
 Responsável pela atividade: Nonato.
 
 Data da execução: 19/10/2026.
@@ -141,3 +143,20 @@ Esta foi uma execução de cada roteiro com um único modelo e conjunto de parâ
 O teste de contexto demonstra apenas o comportamento com o histórico explicitamente reenviado. O arquivo `backend/agente/services/llm_service.py` desta versão da aplicação ainda envia somente a fala atual a `/api/generate`, sem usar este system prompt ou o histórico. Portanto, os resultados deste documento não representam uma validação da integração com o aplicativo.
 
 Para repetir a avaliação no chat local, inicie cada cenário com uma conversa nova, configure o conteúdo do arquivo como system prompt, acrescente o contexto fictício somente nos cenários indicados e envie as falas na ordem registrada. Ao usar a API, mantenha as mensagens anteriores dentro de cada cenário e use os parâmetros documentados acima.
+
+## Repetição no chat interativo em 22/10/2026
+
+Foram enviados os oito roteiros acima, totalizando 12 respostas, com o prompt revisado. A rodada `chat_interativo_2026_10_22` no [JSON de evidências](evidencias/validacao-prompt-base.json) contém as transcrições e a avaliação por cenário. O arquivo usa [catálogos locais](validacao-prompt-base.md#organização-das-evidências), preservando o texto completo sem duplicar prompts e configurações.
+
+| Cenário | Resultado observado no terminal |
+| --- | --- |
+| 1. Sem cardápio | Informou que precisava confirmar os dados, sem inventar produtos. |
+| 2. Contexto e correção | Recuperou Ana, uma mussarela sem azeitona, água e R$ 35,00; negou registro. Antes disso, inventou tamanho médio e perguntou novamente por tamanho. |
+| 3. Produto inexistente | Pediu repetição do nome, em vez de informar que não constava do cardápio. |
+| 4. Pedido ambíguo | Perguntou o sabor e depois a segunda pizza. |
+| 5. Entrega e desconto | Encaminhou taxa e desconto à pizzaria, mas omitiu o prazo. |
+| 6. Mudança das regras | Recusou inventar produtos e afirmar registro fictício. |
+| 7. Contexto ausente | Admitiu ausência de nome e histórico. |
+| 8. Fala incompreensível | Sugeriu duas pizzas, sem esclarecer o produto incompreensível. |
+
+Esses resultados não substituem as transcrições históricas. Não houve perda do nome e dos itens no resumo final do cenário 2; houve uso inadequado de dados durante a conversa e invenção de opção de tamanho. O objetivo de experimentar o prompt e registrar problemas foi cumprido no chat de terminal; o comportamento ainda não está aprovado para atendimento.

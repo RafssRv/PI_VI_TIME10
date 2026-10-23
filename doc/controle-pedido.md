@@ -91,4 +91,6 @@ Falhas relevantes:
 
 Nenhuma dessas candidatas foi aplicada ao prompt da aplicação. A correção entregue é o controle testado em código, que ainda precisará ser chamado pelo fluxo de atendimento.
 
+Essa decisão se refere aos ensaios descritos nesta entrega. A revisão posterior do arquivo de prompt está registrada na [validação do prompt base](validacao-prompt-base.md), sem alteração deste módulo. As evidências de refinamento agora usam [catálogos locais e referências](validacao-prompt-base.md#organização-das-evidências); todas as 124 respostas e métricas foram preservadas.
+
 O [Gemma usado](https://ollama.com/library/gemma3:4b-it-q4_K_M) foi baixado como modelo adicional de teste. Com contexto de 4.096 tokens e somente texto, o Ollama reportou 2.882.482.994 bytes de VRAM (aproximadamente 2,68 GiB); as amostras da GPU inteira ficaram entre 4.489 e 4.491 MiB, na RTX 3060 Ti. Esses valores não são garantia de pico de memória ou de funcionamento do projeto completo na RTX 3050. Nenhum modelo foi substituído na aplicação.
