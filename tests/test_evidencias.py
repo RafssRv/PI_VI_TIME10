@@ -41,7 +41,7 @@ def test_hash_divergente_detecta_prompt_alterado(tmp_path):
 
 def test_evidencias_do_projeto_e_prompt_atual():
     arquivos = list((RAIZ / "doc/evidencias").glob("*.json"))
-    assert len(arquivos) == 3
+    assert len(arquivos) == 4
     for arquivo in arquivos:
         rodadas, respostas, _ = validar(arquivo)
         assert rodadas > 0 and respostas > 0
