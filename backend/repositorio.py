@@ -297,6 +297,8 @@ def salvar_pedido(db, cliente_id, itens, endereco_entrega=None, forma_pagamento=
 
         # str() antes do Decimal pq se alguem trocar a coluna por float, Decimal(float) vira dizima
         preco_unitario = Decimal(str(produto.preco))
+        if "preco_confirmado" in item and preco_unitario != item["preco_confirmado"]:
+            raise ValueError("O preço mudou; apresente um novo resumo antes de salvar.")
         total += preco_unitario * quantidade
         validados.append((produto, quantidade, preco_unitario, item.get("observacao")))
 

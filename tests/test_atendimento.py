@@ -239,7 +239,7 @@ class TestMontaOPedido:
     def test_item_vai_pro_carrinho_com_o_nome_do_cardapio(self, ana_identificada, llama):
         llama.entende([item("margherita", 2)])
         resposta = ana_identificada.responder("quero duas margheritas")
-        assert resposta == "resposta do llama"
+        assert "Como você vai pagar" in resposta
         assert ana_identificada.carrinho == [{
             "produto": "Pizza Margherita", "quantidade": 2,
             "preco": Decimal("66.90"), "observacao": None,
@@ -256,7 +256,7 @@ class TestMontaOPedido:
                       resposta="Anotei a pizza de sushi!")
         resposta = ana_identificada.responder("margherita e pizza de sushi")
         assert "Não temos pizza de sushi" in resposta
-        assert [i["produto"] for i in ana_identificada.carrinho] == ["Pizza Margherita"]
+        assert ana_identificada.carrinho == []
 
     def test_produto_desativado_vira_aviso(self, ana_identificada, llama):
         llama.entende([item("Pizza de Escarola com Bacon")])
@@ -304,6 +304,75 @@ class TestMontaOPedido:
 
 
 class TestFechaOPedido:
+    def test_sim_apos_pergunta_do_modelo_nao_escolhe_produto(self, ana_identificada, llama):
+        llama.entende([], resposta="Qual pizza você deseja?")
+        ana_identificada.responder("uma pizza")
+        assert ana_identificada.responder("sim") == "Qual pizza você deseja?"
+        assert len(llama.chamadas) == 1
+        assert ana_identificada.carrinho == []
+
+    def test_condicao_comercial_nao_e_inventada(self, ana_identificada, llama):
+        resposta = ana_identificada.responder("a entrega é grátis?")
+        assert "pizzaria precisa confirmar" in resposta
+        assert llama.chamadas == []
+
+    def test_erro_do_ollama_nao_deixa_turno_incompleto(self, ana_identificada):
+        def indisponivel(*args, **kwargs):
+            raise TimeoutError("Ollama indisponível")
+        ana_identificada._conversar = indisponivel
+        with pytest.raises(TimeoutError):
+            ana_identificada.responder("uma margherita")
+        assert ana_identificada.historico == []
+
+    @pytest.mark.parametrize("fala", ["sim, mas tire as cocas", "sim, a entrega é grátis?",
+                                      "pode trocar as cocas por água", "sim?"])
+    def test_confirmacao_com_ressalva_nao_grava(self, ana_identificada, llama, db, fala):
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        self._pedir_e_fechar(ana_identificada, llama)
+        llama.entende([item("margherita")], fechar=True)
+        ana_identificada.responder(fala)
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes
+
+    def test_observacoes_distintas_aparecem_no_resumo(self, ana_identificada, llama):
+        llama.entende([item("margherita", observacao="sem tomate"),
+                      item("margherita", observacao="sem manjericão")], fechar=True)
+        resposta = ana_identificada.responder("duas margheritas no pix, só isso")
+        assert "sem tomate" in resposta and "sem manjericão" in resposta
+        assert len(ana_identificada.carrinho) == 2
+
+    def test_troca_invalida_preserva_pedido(self, ana_identificada, llama):
+        self._pedir_e_fechar(ana_identificada, llama)
+        anterior = list(ana_identificada.carrinho)
+        llama.entende([item("pizza de sushi")], fechar=True)
+        ana_identificada.responder("não, troque por pizza de sushi")
+        assert ana_identificada.carrinho == anterior
+        assert ana_identificada.etapa == "identificado"
+        assert "Não temos" in ana_identificada.responder("sim")
+
+    def test_json_incompleto_preserva_pedido(self, ana_identificada, llama):
+        self._pedir_e_fechar(ana_identificada, llama)
+        anterior = list(ana_identificada.carrinho)
+        llama.fila.append('{"resposta": "ok"}')
+        ana_identificada.responder("não, quero corrigir")
+        assert ana_identificada.carrinho == anterior
+
+    def test_preco_alterado_exige_novo_resumo(self, ana_identificada, llama, db):
+        self._pedir_e_fechar(ana_identificada, llama)
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        produto = repositorio.buscar_produtos(db, "margherita")[0]
+        antigo = produto.preco
+        try:
+            produto.preco = Decimal("70.00")
+            db.commit()
+            resposta = ana_identificada.responder("sim")
+            assert _pedidos_da(db, ana_identificada.cliente_id) == antes
+            assert "99 reais e 80 centavos" in resposta
+            assert ana_identificada.etapa == "confirmando_pedido"
+        finally:
+            produto = repositorio.buscar_produtos(db, "margherita")[0]
+            produto.preco = antigo
+            db.commit()
+
     def _pedir_e_fechar(self, atendimento, llama, endereco=None,
                         texto="uma margherita e duas cocas no pix, é só isso"):
         llama.entende([item("margherita"), item("coca cola 2 litros", 2)],

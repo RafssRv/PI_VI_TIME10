@@ -11,6 +11,9 @@
 import json
 import re
 from decimal import Decimal
+from pathlib import Path
+
+from agente.controle_pedido import ControlePedido, ProdutoCardapio
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -67,7 +70,7 @@ ESQUEMA_DO_PEDIDO = {
                 "type": "object",
                 "properties": {
                     "produto": {"type": "string"},
-                    "quantidade": {"type": "integer"},
+                    "quantidade": {"type": "number"},
                     "observacao": {"type": ["string", "null"]},
                 },
                 "required": ["produto", "quantidade"],
@@ -99,6 +102,18 @@ def sim_ou_nao(texto):
     if palavras & PALAVRAS_DE_SIM:
         return True
     return None
+
+
+def confirmacao_explicita(texto):
+    """Somente uma afirmação completa autoriza a gravação, nunca palavras isoladas."""
+    return "?" not in texto and _normalizar(texto).strip() in {
+        "sim", "confirmo", "pode confirmar", "sim pode confirmar", "sim confirmo",
+        "correto", "esta correto", "isso mesmo", "pode ser", "ok", "okay",
+    }
+
+
+def _prompt_base():
+    return (Path(__file__).parent / "agente" / "prompt_sistema.txt").read_text(encoding="utf-8")
 
 
 def extrair_nome(texto):
@@ -166,6 +181,9 @@ class Atendimento:
         self.carrinho = []
         self.pagamento = None
         self.endereco_entrega = None
+        self._controle = None
+        self._token_resumo = None
+        self._pendencia = None
 
     def responder(self, texto):
         """recebe o q o cliente falou e devolve o q o atendente fala de volta."""
@@ -337,25 +355,42 @@ class Atendimento:
             db.close()
 
     def _montar_pedido_com(self, db, texto):
+        normalizado = _normalizar(texto).strip()
+        # Não pedir ao modelo para inventar condições que o cadastro não fornece.
+        if set(normalizado.split()) & {"taxa", "frete", "gratis", "gratuita", "gratuito",
+                                       "prazo", "desconto", "demora"}:
+            fala = "A pizzaria precisa confirmar a taxa, o prazo de entrega e se há desconto."
+            self.historico.extend([{"role": "user", "content": texto},
+                                   {"role": "assistant", "content": fala}])
+            return fala
+        if confirmacao_explicita(texto) or normalizado in {"e so isso", "so isso", "pode fechar", "terminei"}:
+            return self._fechar_pedido()
         cardapio = repositorio.listar_cardapio(db)
 
-        self.historico.append({"role": "user", "content": texto})
+        turno = {"role": "user", "content": texto}
         mensagens = [{"role": "system", "content": self._prompt_do_pedido(cardapio)}]
-        bruto = self._carregar_llama()(mensagens + self.historico, formato=ESQUEMA_DO_PEDIDO)
+        bruto = self._carregar_llama()(mensagens + self.historico + [turno], formato=ESQUEMA_DO_PEDIDO)
 
         try:
             dados = json.loads(bruto)
-            if not isinstance(dados, dict):
-                raise ValueError("o json nao eh um objeto")
+            if (not isinstance(dados, dict) or not isinstance(dados.get("itens"), list)
+                    or not isinstance(dados.get("resposta"), str)
+                    or type(dados.get("fechar")) is not bool
+                    or "endereco" not in dados
+                    or (dados["endereco"] is not None and not isinstance(dados["endereco"], str))):
+                raise ValueError("estrutura incompleta ou inválida")
         except ValueError as erro:
-            print(f"[atendimento] o llama nao devolveu um json q preste ({erro}): {bruto!r}")
-            self.historico.pop()
+            print(f"[atendimento] resposta inválida do modelo: {erro}")
             return "Desculpe, não entendi. Pode repetir?"
 
+        self.historico.append(turno)
         problemas = self._atualizar_carrinho(db, dados.get("itens") or [])
         # o pagamento sai da fala do cliente, nao do llama: testando, o modelo transformava
         # "no cartao" em "credito" sozinho, e cobrar na modalidade errada eh pior q perguntar
         problemas += self._atualizar_pagamento(texto)
+        self._pendencia = " ".join(problemas) or None
+        if self._controle:
+            self._controle.definir_pendencia(self._pendencia)
 
         endereco = str(dados.get("endereco") or "").strip()
         if len(endereco) >= 5 and _normalizar(endereco) not in ("null", "none"):
@@ -365,27 +400,34 @@ class Atendimento:
             # o q o python achou de errado vale mais q a frase do modelo, q pode ter
             # confirmado um produto q nem existe
             fala = " ".join(problemas)
-        elif dados.get("fechar") is True:
+        elif self.carrinho or dados.get("fechar") is True:
+            # Nunca deixe a frase livre do modelo anunciar itens ou totais divergentes.
             fala = self._fechar_pedido()
         else:
             fala = str(dados.get("resposta") or "").strip() or "O que mais vai querer?"
+            if "?" in fala and not self.carrinho:
+                self._pendencia = fala
+                if self._controle:
+                    self._controle.definir_pendencia(fala)
 
         self.historico.append({"role": "assistant", "content": fala})
         return fala
 
     def _atualizar_carrinho(self, db, itens):
         """
-        troca o carrinho pelo q o llama entendeu, mas so com item q existe no cardapio.
-        o q nao der pra conferir fica fora e vira pergunta pro cliente.
+        Valida o retrato completo antes de substituir o carrinho.
+        Uma falha preserva os itens anteriores e exige esclarecimento.
         """
         novo = []
         problemas = []
 
         for item in itens:
             if not isinstance(item, dict):
+                problemas.append("Pode repetir o produto e a quantidade?")
                 continue
             falado = str(item.get("produto") or "").strip()
             if not falado:
+                problemas.append("Pode repetir o nome do produto?")
                 continue
 
             candidatos = repositorio.buscar_produtos(db, falado)
@@ -397,16 +439,18 @@ class Atendimento:
                 continue
             produto = candidatos[0]
 
-            quantidade = item.get("quantidade", 1)
-            if isinstance(quantidade, float) and quantidade.is_integer():
-                quantidade = int(quantidade)
+            quantidade = item.get("quantidade")
             if isinstance(quantidade, bool) or not isinstance(quantidade, int) or quantidade <= 0:
                 problemas.append("Quantas unidades de {} você quer?".format(produto.nome))
                 continue
 
-            observacao = str(item.get("observacao") or "").strip() or None
+            if item.get("observacao") is not None and not isinstance(item["observacao"], str):
+                problemas.append("Pode repetir a observação do produto?")
+                continue
+            observacao = (item.get("observacao") or "").strip() or None
 
-            repetido = next((i for i in novo if i["produto"] == produto.nome), None)
+            repetido = next((i for i in novo if i["produto"] == produto.nome
+                             and i["observacao"] == observacao), None)
             if repetido:
                 repetido["quantidade"] += quantidade
             else:
@@ -417,7 +461,18 @@ class Atendimento:
                     "observacao": observacao,
                 })
 
-        self.carrinho = novo
+        # Uma extração incompleta nunca substitui parte do pedido anterior.
+        if not problemas:
+            controle = ControlePedido([
+                ProdutoCardapio(p.id, p.nome, Decimal(str(p.preco)))
+                for p in repositorio.listar_cardapio(db)
+            ])
+            for item in novo:
+                produto = repositorio.buscar_produtos(db, item["produto"])[0]
+                controle.adicionar(produto.id, item["quantidade"], item["observacao"] or "")
+            self.carrinho = novo
+            self._controle = controle
+        self._token_resumo = None
         return problemas
 
     def _pergunta_de_ambiguidade(self, falado, candidatos):
@@ -438,12 +493,15 @@ class Atendimento:
             self.pagamento = repositorio.interpretar_pagamento(falado)
             return []
         except ValueError:
+            self.pagamento = None
             if "cartao" in texto or "maquininha" in texto:
                 return ["No cartão de crédito ou de débito?"]
             return [FRASE_PEDE_PAGAMENTO]
 
     def _fechar_pedido(self):
         # so le o resumo quando nao falta nada: o cliente confirma o pedido inteiro de uma vez
+        if self._pendencia:
+            return self._pendencia
         if not self.carrinho:
             return "Você ainda não pediu nada. O que vai querer?"
         if not self.pagamento:
@@ -454,35 +512,39 @@ class Atendimento:
         return self._resumo_do_pedido()
 
     def _resumo_do_pedido(self):
-        itens = ["{} {}".format(i["quantidade"], i["produto"]) for i in self.carrinho]
-        total = sum(i["preco"] * i["quantidade"] for i in self.carrinho)
-        return ("Vou confirmar seu pedido: {}. Total de {}. Entrega no endereço {}, "
+        resumo = self._controle.resumir()
+        self._token_resumo = resumo.token
+        itens = ["{} {}{}".format(i.quantidade, i.nome,
+                 " (solicitação: {})".format(i.observacao) if i.observacao else "")
+                 for i in resumo.itens]
+        return ("Vou confirmar seu pedido: {}. Subtotal dos produtos de {}. Entrega no endereço {}, "
                 "pagamento {}. Posso confirmar?").format(
             _juntar(itens),
-            preco_falado(total),
+            preco_falado(resumo.subtotal),
             self.endereco_entrega or self.endereco_do_cadastro,
             PAGAMENTO_FALADO[self.pagamento],
         )
 
     def _receber_confirmacao_do_pedido(self, texto):
-        resposta = sim_ou_nao(texto)
-        if resposta is None:
-            return "Posso confirmar o pedido? Responda sim ou não."
-
-        if resposta is False:
+        if not confirmacao_explicita(texto):
+            if _normalizar(texto).strip() in {"hmm", "talvez", ""}:
+                return "Posso confirmar o pedido? Responda sim ou não."
             self.etapa = "identificado"
+            self._token_resumo = None
             # "nao, tira a coca": a mesma fala ja serve pra corrigir o pedido
-            if len(_normalizar(texto).split()) > 2:
+            if _normalizar(texto).strip() not in {"nao", "nao quero"}:
                 return self._montar_pedido(texto)
             return "Tudo bem. O que você quer mudar?"
 
         db = self._sessao()
         try:
+            self._controle.confirmar(self._token_resumo)
             pedido = repositorio.salvar_pedido(
                 db,
                 self.cliente_id,
                 [{"produto": i["produto"], "quantidade": i["quantidade"],
-                  "observacao": i["observacao"]} for i in self.carrinho],
+                  "observacao": i["observacao"], "preco_confirmado": i["preco"]}
+                 for i in self.carrinho],
                 endereco_entrega=self.endereco_entrega,
                 forma_pagamento=self.pagamento,
             )
@@ -490,9 +552,12 @@ class Atendimento:
         except ValueError as erro:
             # o cardapio mudou entre o resumo e o sim (produto desativado, por exemplo)
             print(f"[atendimento] pedido recusado pelo repositorio: {erro}")
-            self.carrinho = []
             self.etapa = "identificado"
-            return "Não consegui registrar o pedido porque o cardápio mudou. O que vai querer?"
+            problemas = self._atualizar_carrinho(db, self.carrinho)
+            self._pendencia = " ".join(problemas) or None
+            if problemas:
+                return self._pendencia
+            return "O cardápio mudou; confira os valores atualizados. " + self._fechar_pedido()
         except Exception as erro:
             # continua confirmando: se o cliente disser sim de novo, tenta gravar de novo
             print(f"[atendimento] erro ao salvar o pedido: {erro}")
@@ -518,6 +583,9 @@ class Atendimento:
             atual = "(vazio)"
 
         return "\n".join([
+            _prompt_base(),
+            "MODO INTEGRADO: o modelo extrai dados; somente o código apresenta o resumo, "
+            "pede confirmação e registra o pedido. Siga o formato JSON abaixo.",
             "Você é o atendente de telefone de uma pizzaria e está anotando o pedido de "
             "{}.".format(self.nome),
             "Responda sempre com um JSON com estes campos:",
@@ -527,16 +595,20 @@ class Atendimento:
             '- "itens": o pedido COMPLETO, já com a mudança que o cliente acabou de pedir. Parta do '
             "pedido atual abaixo, acrescente, troque ou tire o que ele disse e mantenha o resto. "
             "Use o nome exato do cardápio. Se o cliente foi vago (por exemplo só \"uma pizza\"), "
-            "escreva o que ele disse, sem escolher por ele. Exemplo: com o pedido atual "
-            "\"1 Pizza de Calabresa, 1 Borda de Cheddar\" e o cliente dizendo \"tira a borda e "
-            "põe um guaraná\", os itens ficam Pizza de Calabresa e Guarana 2 Litros.",
+            "escreva o que ele disse, sem escolher por ele. Em uma troca, retire o item "
+            "substituído antes de acrescentar o novo; não acrescente produtos de exemplos.",
             '- "endereco": só se o cliente falou um endereço de entrega diferente; senão null.',
             '- "fechar": true só quando o cliente disser que terminou o pedido (por exemplo '
             '"é só isso", "pode fechar"); senão false.',
             "Use apenas os produtos e preços do cardápio. Nunca invente produto ou preço.",
+            "Nunca arredonde quantidades fracionadas: preserve a fração para o código pedir "
+            "esclarecimento. Mantenha separadas unidades com observações diferentes. "
+            "Se houver dúvida pendente, peça esclarecimento; não considere um simples sim "
+            "como solução. Não invente taxa, prazo ou desconto.",
             "",
             "Pedido atual:",
             atual,
+            "Pendência: {}".format(self._pendencia or "nenhuma"),
             "Pagamento: {}".format(PAGAMENTO_FALADO.get(self.pagamento, "ainda não informado")),
             "Endereço de entrega: {}".format(
                 self.endereco_entrega or self.endereco_do_cadastro or "ainda não informado"),
@@ -558,6 +630,7 @@ class Atendimento:
             db.close()
 
         sistema = "\n".join([
+            _prompt_base(),
             "Você é o atendente de telefone de uma pizzaria. Fale em português do Brasil.",
             "Sua resposta será lida em voz alta: use no máximo duas frases curtas, "
             "sem listas, sem emojis e sem markdown.",
@@ -569,9 +642,10 @@ class Atendimento:
             cardapio,
         ])
 
-        self.historico.append({"role": "user", "content": texto})
-        mensagens = [{"role": "system", "content": sistema}] + self.historico
+        turno = {"role": "user", "content": texto}
+        mensagens = [{"role": "system", "content": sistema}] + self.historico + [turno]
         resposta = self._carregar_llama()(mensagens).strip()
+        self.historico.append(turno)
         self.historico.append({"role": "assistant", "content": resposta})
         return resposta
 
