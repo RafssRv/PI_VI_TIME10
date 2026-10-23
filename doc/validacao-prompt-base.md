@@ -1,5 +1,7 @@
 # Validação do prompt base de atendimento
 
+Revalidação adicional de 23/10/2026: [erros reais e transcrições ruins](erros-reais-prompt.md). Três candidatas foram reprovadas e o prompt anterior foi restaurado; as 101 respostas dessa investigação estão em arquivo de evidências separado.
+
 ## Integração do atendimento em 23/10/2026
 
 O prompt foi refinado **no mesmo arquivo** para distinguir simulação e atendimento integrado. `Atendimento` agora o carrega junto do cardápio, estado do pedido e formato JSON. Resumos, subtotais e confirmação passam pelo código e por `ControlePedido`; o LLM interpreta os itens.
