@@ -356,6 +356,51 @@ class TestFechaOPedido:
         ana_identificada.responder("não, quero corrigir")
         assert ana_identificada.carrinho == anterior
 
+    @pytest.mark.parametrize("falha", ["json_invalido", "json_incompleto", "timeout"])
+    def test_falha_na_correcao_exige_esclarecimento_antes_de_confirmar(
+        self, ana_identificada, llama, db, falha,
+    ):
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        self._pedir_e_fechar(ana_identificada, llama)
+        anterior = list(ana_identificada.carrinho)
+        historico = list(ana_identificada.historico)
+
+        def resposta_com_falha(mensagens, formato=None):
+            if falha == "timeout":
+                raise TimeoutError("Ollama indisponível")
+            return "isso não é JSON" if falha == "json_invalido" else '{"resposta": "ok"}'
+
+        ana_identificada._conversar = resposta_com_falha
+        if falha == "timeout":
+            with pytest.raises(TimeoutError):
+                ana_identificada.responder("não, tire as cocas")
+        else:
+            assert "repetir" in ana_identificada.responder("não, tire as cocas")
+
+        assert ana_identificada.carrinho == anterior
+        assert ana_identificada.historico == historico
+        for fala in ("sim", "é só isso", "sim"):
+            resposta = ana_identificada.responder(fala)
+            assert _pedidos_da(db, ana_identificada.cliente_id) == antes
+            assert "repetir" in resposta
+            assert ana_identificada.etapa == "identificado"
+        assert ana_identificada.carrinho == anterior
+
+        # Só uma correção válida permite apresentar e confirmar outro resumo.
+        ana_identificada._conversar = llama
+        llama.entende([item("margherita")])
+        resposta = ana_identificada.responder("tire as cocas")
+        assert "66 reais e 90 centavos" in resposta
+        assert ana_identificada.etapa == "confirmando_pedido"
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes
+
+        assert "registrado" in ana_identificada.responder("sim")
+        pedido = (db.query(Pedido).filter(Pedido.cliente_id == ana_identificada.cliente_id)
+                  .order_by(Pedido.id.desc()).first())
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes + 1
+        assert pedido.total == Decimal("66.90")
+        assert [(i.produto.nome, i.quantidade) for i in pedido.itens] == [("Pizza Margherita", 1)]
+
     def test_preco_alterado_exige_novo_resumo(self, ana_identificada, llama, db):
         self._pedir_e_fechar(ana_identificada, llama)
         antes = _pedidos_da(db, ana_identificada.cliente_id)

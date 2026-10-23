@@ -369,6 +369,12 @@ class Atendimento:
 
         turno = {"role": "user", "content": texto}
         mensagens = [{"role": "system", "content": self._prompt_do_pedido(cardapio)}]
+        # Uma fala ainda não interpretada impede confirmar o carrinho anterior,
+        # inclusive se o Ollama falhar ou devolver uma resposta inválida.
+        self._pendencia = "Desculpe, não entendi. Pode repetir?"
+        self._token_resumo = None
+        if self._controle:
+            self._controle.definir_pendencia(self._pendencia)
         bruto = self._carregar_llama()(mensagens + self.historico + [turno], formato=ESQUEMA_DO_PEDIDO)
 
         try:
@@ -381,7 +387,7 @@ class Atendimento:
                 raise ValueError("estrutura incompleta ou inválida")
         except ValueError as erro:
             print(f"[atendimento] resposta inválida do modelo: {erro}")
-            return "Desculpe, não entendi. Pode repetir?"
+            return self._pendencia
 
         self.historico.append(turno)
         problemas = self._atualizar_carrinho(db, dados.get("itens") or [])
