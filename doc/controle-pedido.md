@@ -1,6 +1,28 @@
 # Controle do resumo do pedido em código
 
-Entrega de 22/10/2026: controle em memória de itens, valores e confirmação, autorizado após os testes dos modelos. A ligação ao LLM, ao WebSocket e à gravação no banco fica para uma próxima etapa.
+Atualização de 23/10/2026: o controle agora é chamado por `Atendimento`, usado no WebSocket. O modelo propõe os itens; o código valida, gera o resumo e grava somente após confirmação explícita. Os ensaios reais ainda encontraram erros de interpretação, registrados na [validação integrada](validacao-prompt-base.md#integração-do-atendimento-em-23102026). Atendimento real ainda não aprovado.
+
+## Integração atual
+
+- O prompt base é carregado do mesmo arquivo, com instruções do modo integrado. A simulação isolada continua sem registrar pedidos.
+- A extração completa é validada antes de substituir o carrinho. Produto desconhecido, ambíguo, quantidade inválida ou JSON incompleto preservam os itens anteriores.
+- `ControlePedido` recebe produtos e preços do banco, separa observações diferentes e produz o subtotal e o token do resumo. O modelo não escolhe esse token nem o preço cobrado.
+- Só afirmações completas autorizam gravação. “Sim, mas...”, perguntas e alterações exigem outro resumo. Um “sim” durante esclarecimento não escolhe produto.
+- O repositório compara o preço apresentado com o preço consultado ao salvar. Se mudou, não grava e apresenta outro resumo. Indisponibilidade exige esclarecimento.
+- Perguntas com termos comerciais reconhecidos recebem resposta de ausência de dados. Isso não garante reconhecimento de toda paráfrase.
+- Falha da chamada ao Ollama não deixa mensagem isolada de usuário no histórico.
+
+Verificação em 23/10/2026: **204 testes passaram**, incluindo 58 do atendimento e os 39 do controle. PostgreSQL local na porta 55432; o `conftest.py` prepara exclusivamente `pizzaria_teste`. O ensaio com Ollama foi textual, sem validar microfone, transcrição ou reprodução.
+
+```powershell
+$env:DATABASE_URL = 'postgresql+psycopg://pizzaria:pizzaria123@127.0.0.1:55432/pizzaria'
+.venv/Scripts/python.exe -m pytest -q
+.venv/Scripts/python.exe scripts/validar_evidencias.py
+```
+
+Limite: o controle valida operações estruturadas, mas não comprova que o modelo entendeu a fala. Produto existente e quantidade inteira podem estar semanticamente errados. Corrigir essa extração permanece pendente antes de liberar atendimento real.
+
+As seções seguintes preservam a entrega isolada de 22/10; referências à integração futura descrevem aquela data.
 
 ## O que mudou e por quê
 

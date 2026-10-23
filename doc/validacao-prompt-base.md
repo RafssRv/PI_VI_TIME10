@@ -1,5 +1,41 @@
 # Validação do prompt base de atendimento
 
+## Integração do atendimento em 23/10/2026
+
+O prompt foi refinado **no mesmo arquivo** para distinguir simulação e atendimento integrado. `Atendimento` agora o carrega junto do cardápio, estado do pedido e formato JSON. Resumos, subtotais e confirmação passam pelo código e por `ControlePedido`; o LLM interpreta os itens.
+
+**Preparado para continuar os testes, ainda não aprovado para atendimento real.** A suíte passou em **204 testes**. O ensaio final com `llama3.2:3b`, temperatura 0,2, teve cinco cenários e onze turnos: três atenderam e dois falharam. Os testes de código usam respostas controladas; sua aprovação não comprova interpretação correta de linguagem natural.
+
+O agente executou roteiros por código com Ollama local e PostgreSQL `pizzaria_teste`, cliente fictício já identificado e cardápio do seed. Pedidos criados foram removidos ao fim de cada cenário. O WebSocket usa essa classe, mas transporte, áudio e interface não foram exercitados neste ensaio.
+
+### Casos manuais e critérios de aceite
+
+Use uma sessão nova por linha no ambiente de teste, após identificar um cliente fictício. Envie as falas separadamente e confira o resumo antes de confirmar. Se estiver errado, registre a falha e peça correção; não confirme uma compra real. As falas exatas estão nos casos `integracao_*` da rodada `integracao_regressao_2026_10_23` nas evidências.
+
+| Caso | Falas principais | Esperado | Resultado observado |
+| --- | --- | --- | --- |
+| Troca | Uma Margherita e uma água no Pix; “sim, mas troque a água por mais uma margherita”; “é só isso”; “sim” | Duas pizzas, nenhuma água, R$ 133,80; não salvar na correção | Falhou: extraiu três pizzas e manteve água; resumo R$ 205,70. O sim final do roteiro gravou esses itens no banco de teste. |
+| Ambiguidade | “Quero uma pizza”; “sim”; escolher Margherita | Pedir sabor, não escolher pelo sim; depois resumo R$ 66,90 | Atendeu. |
+| Fração | “Uma pizza e meia de Margherita” | Perguntar unidades inteiras, sem gravação | Atendeu. |
+| Observações | Duas Margheritas, uma sem tomate e outra sem manjericão | Duas linhas de uma unidade, R$ 133,80 | Falhou: observações separadas, mas três pizzas ao todo; R$ 200,70. Sem gravação. |
+| Entrega | Uma Margherita no Pix; “sim, a entrega é grátis?” | Não salvar; informar ausência de condições comerciais | Atendeu por tratamento no código. |
+
+Casos adicionais reproduzidos nos testes do código: JSON incompleto, troca por produto inexistente, observações distintas, confirmação interrogativa, timeout do Ollama e alteração de preço entre resumo e confirmação. Preço alterado exige resumo atualizado e nova confirmação.
+
+### Falhas encontradas e tratamento
+
+- **Confirmação indevida:** palavras como “sim” ou “pode” em qualquer frase autorizavam gravação. Corrigido com confirmação explícita da frase completa, sem pergunta ou ressalva.
+- **Perda parcial do carrinho:** extração inválida substituía o pedido por um subconjunto. Corrigido com validação integral antes de aplicar a atualização.
+- **Observações omitidas ou fundidas:** corrigido no controle e no resumo. A interpretação inicial do modelo ainda pode errar as quantidades.
+- **Preço alterado após resumo:** corrigido com comparação no repositório e nova confirmação.
+- **Condição comercial inventada:** o diagnóstico respondeu “Não, a entrega não é gratuita.” sem dados. Os termos reconhecidos agora recebem resposta determinística. Paráfrases não reconhecidas continuam exigindo avaliação.
+- **Exemplo contaminando o pedido:** o diagnóstico incluiu Guaraná sem solicitação; o exemplo com produto concreto foi retirado das instruções de integração.
+- **Extração semântica incorreta:** permanece aberta. O modelo manteve água na troca e acrescentou uma pizza nas observações. Subtotal correto dos itens extraídos não significa pedido correto do cliente.
+
+O arquivo existente de [evidências](evidencias/validacao-prompt-base.json) preserva diagnóstico e regressão final: **22 respostas adicionais**, com saída bruta, mensagens enviadas, carrinho e registros de teste. Prompts repetidos usam catálogos locais. São agora **22 rodadas e 357 respostas nesse arquivo**. O validador confere o hash atual contra a rodada integrada final. As rodadas anteriores permanecem históricas.
+
+As seções seguintes descrevem os ensaios anteriores nas respectivas datas.
+
 Registro inicial: 19/10/2026. Resultado daquela rodada: **nenhuma candidata aprovada**.
 
 Atualização de 22/10/2026: o usuário solicitou os ajustes diretamente no arquivo existente. O prompt foi revisado e testado via API e chat interativo do terminal, mas **ainda não foi aprovado funcionalmente**. O histórico abaixo descreve as decisões anteriores; consulte a [consolidação atual](#consolidação-da-revisão-e-do-chat-interativo).
