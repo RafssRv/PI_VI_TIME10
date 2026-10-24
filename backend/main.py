@@ -1,13 +1,17 @@
 from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
-import json
-import os
+import asyncio
 import shutil
 from pathlib import Path
+from time import monotonic
 from fastapi.staticfiles import StaticFiles
 
 from atendimento import Atendimento
 from turno_de_voz import atender_turno
+from protocolo import (
+    DURACAO_MAXIMA_CHAMADA_S, LIMITE_AUDIO_CHAMADA_BYTES, LIMITE_BLOCO_AUDIO_BYTES,
+    VERSAO_PROTOCOLO, ErroProtocolo, validar_controle,
+)
 
 app = FastAPI(title="Backend Pizzaria - Agente de Voz", version="0.1.0")
 
@@ -49,67 +53,49 @@ async def processar_audio(audio: UploadFile = File(...)):
     except Exception as e:
         return JSONResponse(status_code=500, content={"erro": str(e)})
 
-# --- rota 3: websocket para streaming de audio (fase 3) ---
-#
-# protocolo combinado com a tela (frontend/app.js):
-#   frame binario = pedaco de audio do cliente
-#   frame de texto = json de controle, sempre com a chave "tipo"
-#
-# tela -> servidor:  iniciar_chamada (traz o formato do audio), fim_da_fala,
-#                    resposta_tocada, encerrar_chamada
-# servidor -> tela:  pronto, estado, transcricao, audio_resposta, pedido,
-#                    pedido_salvo, erro, chamada_encerrada
-#
-# a tela nasce muda, so mandando binario, e so passa a mandar json depois que a gente
-# se apresentar com {"tipo": "pronto"}. enquanto o pipeline de voz nao existir a gente
-# NAO manda o pronto de proposito: se mandasse, a tela ficaria esperando transcricao
-# que nunca vem. quando o roveris entregar a transcricao, e so descomentar o send_json
-# la embaixo que a tela liga o protocolo novo sozinha.
+# Contrato completo em doc/protocolo-websocket.md.
 @app.websocket("/ws/falar")
 async def websocket_audio(websocket: WebSocket):
-    """
-    Endpoint de WebSocket Fase 3 atualizado.
-    Recebe chunks de áudio, salva e se comunica via protocolo de eventos (JSON).
-    """
+    """Recebe controles validados e áudio limitado por chamada."""
     await websocket.accept()
+    prazo = monotonic() + DURACAO_MAXIMA_CHAMADA_S
     print("[websocket] cliente conectou no tubo de streaming!")
-
-    # o agente ja existe, entao o servidor se apresenta e a tela sai do modo mudo
-    await websocket.send_json({"tipo": "pronto", "versao_protocolo": 1})
-
-    # a gnt cria um arquivo e abre ele no modo "wb" (write bytes)
-    # ou "ab" (append bytes). vamos de "wb" e manter ele aberto.
+    await websocket.send_json({"tipo": "pronto", "versao_protocolo": VERSAO_PROTOCOLO})
     caminho_audio = "audio_cliente_streaming.webm"
-    formato_do_audio = None
-
-    # guarda todo o audio da chamada, pq so o primeiro pedaco tem o cabecalho do webm.
-    # amostra_inicio marca onde a fala anterior parou
+    iniciada = False
+    ultimo_turno = 0
+    bytes_no_ultimo_turno = 0
+    # O cabeçalho do contêiner só vem no primeiro bloco; preserve até o limite.
     audio_da_chamada = bytearray()
     amostra_inicio = 0
-
-    # cada chamada tem o seu roteiro: em q etapa ta, quem eh o cliente, o q ja foi dito
     atendimento = Atendimento()
 
     try:
         with open(caminho_audio, "wb") as arquivo:
             while True:
-                # receive() em vez de receive_bytes(): o receive_bytes estoura KeyError
-                # quando chega um frame de TEXTO (a mensagem vem com a chave "text" e ele
-                # procura "bytes"), e esse KeyError nao eh WebSocketDisconnect, entao
-                # derrubava a conexao inteira. aqui a gente olha o que chegou e decide.
-                mensagem = await websocket.receive()
-
+                restante = prazo - monotonic()
+                if restante <= 0:
+                    raise ErroProtocolo("A chamada atingiu o tempo máximo permitido.")
+                try:
+                    mensagem = await asyncio.wait_for(websocket.receive(), timeout=restante)
+                except asyncio.TimeoutError:
+                    raise ErroProtocolo("A chamada atingiu o tempo máximo permitido.") from None
                 if mensagem["type"] == "websocket.disconnect":
                     raise WebSocketDisconnect(mensagem.get("code", 1000))
+                if monotonic() >= prazo:
+                    raise ErroProtocolo("A chamada atingiu o tempo máximo permitido.")
 
                 pedaco = mensagem.get("bytes")
                 if pedaco is not None:
-                    # escreve o pedacinho no final do arquivo
+                    if not iniciada:
+                        raise ErroProtocolo("Envie iniciar_chamada antes do áudio.")
+                    if len(pedaco) > LIMITE_BLOCO_AUDIO_BYTES:
+                        raise ErroProtocolo("O bloco de áudio ultrapassou o limite permitido.", 1009)
+                    if len(audio_da_chamada) + len(pedaco) > LIMITE_AUDIO_CHAMADA_BYTES:
+                        raise ErroProtocolo("A chamada atingiu o limite de áudio permitido.", 1009)
                     arquivo.write(pedaco)
                     audio_da_chamada.extend(pedaco)
                     print(f"[websocket] recebi e guardei um chunk de {len(pedaco)} bytes")
-
-                    # manda um textinho pro front so pra confirmar q chegou
                     await websocket.send_text("chunk guardado no backend!")
                     continue
 
@@ -117,50 +103,42 @@ async def websocket_audio(websocket: WebSocket):
                 if texto is None:
                     continue
 
-                try:
-                    controle = json.loads(texto)
-                except json.JSONDecodeError:
-                    print(f"[websocket] texto que nao eh json, ignorei: {texto[:80]!r}")
-                    continue
-
-                tipo = controle.get("tipo")
-
+                controle = validar_controle(texto)
+                tipo = controle["tipo"]
                 if tipo == "iniciar_chamada":
-                    # a tela avisa em que formato ela vai gravar (webm/opus, mp4/aac...).
-                    # a transcricao precisa disso pra saber como abrir o arquivo
-                    formato_do_audio = controle.get("formato_audio")
-                    print(f"[websocket] chamada iniciada, formato do audio: {formato_do_audio}")
-
-                elif tipo == "fim_da_fala":
-                    # o cliente parou de falar: aqui entra a transcricao do turno
-                    print(f"[websocket] fim da fala do turno {controle.get('turno')}")
-                    # passa a fala pelo agente e manda a resposta pra tela (turno_de_voz.py)
-                    amostra_inicio = await atender_turno(
-                        websocket, audio_da_chamada, amostra_inicio, controle.get("turno"),
-                        atendimento)
-
-                elif tipo == "resposta_tocada":
-                    # a tela terminou de tocar a resposta e ja reabriu o microfone
-                    print(f"[websocket] resposta do turno {controle.get('turno')} terminou de tocar")
-
-                elif tipo == "encerrar_chamada":
-                    print(f"[websocket] tela pediu pra encerrar: {controle.get('motivo')}")
-                    # fecha o socket na mao: so sair da funcao nao manda o frame de close,
-                    # e a tela ficaria esperando por um fim que nunca chega
+                    if iniciada:
+                        raise ErroProtocolo("A chamada já foi iniciada.")
+                    iniciada = True
+                    continue
+                if tipo == "encerrar_chamada":
                     await websocket.close()
                     break
+                if not iniciada:
+                    raise ErroProtocolo("Envie iniciar_chamada antes dos demais controles.")
 
+                turno = controle["turno"]
+                if tipo == "fim_da_fala":
+                    if turno <= ultimo_turno:
+                        raise ErroProtocolo("O turno precisa ser maior que o último turno processado.")
+                    if len(audio_da_chamada) == bytes_no_ultimo_turno:
+                        raise ErroProtocolo("O turno precisa conter áudio novo.")
+                    ultimo_turno = turno
+                    bytes_no_ultimo_turno = len(audio_da_chamada)
+                    # Não interromper uma gravação no banco quando o prazo vencer.
+                    # O loop encerra a recepção assim que o turno em andamento terminar.
+                    amostra_inicio = await atender_turno(
+                        websocket, audio_da_chamada, amostra_inicio, turno, atendimento)
                 else:
-                    print(f"[websocket] controle desconhecido, ignorei: {tipo!r}")
+                    # Avisos de reprodução/timeout podem chegar atrasados, mas não do futuro.
+                    if turno > ultimo_turno:
+                        raise ErroProtocolo("O aviso se refere a um turno ainda não processado.")
 
+    except ErroProtocolo as erro:
+        await websocket.send_json({"tipo": "erro", "onde": "protocolo",
+                                   "mensagem": str(erro), "fatal": True})
+        await websocket.close(code=erro.codigo)
     except WebSocketDisconnect:
-        # Passo 6: Tratar desconexão
-        print(f"[websocket] cliente desconectou da chamada.")
-        print(f"[websocket] audio completo salvo em: {caminho_audio}")
-        
-        # --- MOCK DA IA ---
-        # Quando o cliente desliga, a IA processaria tudo. 
-        # Aqui você futuramente chamará o pipeline e o Ollama!
+        print("[websocket] cliente desconectou da chamada.")
 
 
 # --- front-end: o proprio fastapi entrega a pasta frontend na raiz ---

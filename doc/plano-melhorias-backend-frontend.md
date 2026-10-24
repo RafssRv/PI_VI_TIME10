@@ -55,8 +55,8 @@ automático dos arquivos desta etapa.
 
 ### Etapa 2 — validação do WebSocket
 
-Etapa 1 commitada pelo usuário em `2fb5a34`. Trabalho seguinte na branch
-`codex/melhorias-backend-frontend`; o README staged continua separado.
+Etapa 1 commitada pelo usuário em `d2031c4`. Trabalho seguinte na branch
+`features/melhorias-backend-frontend`; o README staged continua separado.
 
 Implementados contrato de entrada, abertura única, validação de turnos e
 limites de 4 KiB por controle, 1 MiB por bloco, 20 MiB de áudio acumulado e

@@ -24,30 +24,55 @@
             // 1. conecta no nosso backend fastapi
             ws = new WebSocket(`ws://${location.host}/ws/falar`);
 
-            ws.onopen = async () => {
-                textoStatus.innerText = "status: conectado! gravando...";
+            ws.onopen = () => {
+                textoStatus.innerText = "status: aguardando o servidor...";
                 btnIniciar.disabled = true;
-                btnParar.disabled = false;
-
-                // 2. pede permissao pro microfone do usuario
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                
-                // 3. cria o gravador que vai fatiar o audio
-                mediaRecorder = new MediaRecorder(stream);
-
-                // 4. toda vez q ele tiver um pedacinho de audio, ele manda pro websocket
-                mediaRecorder.ondataavailable = (event) => {
-                    if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-                        ws.send(event.data); // mandando o chunk pro nosso python!
-                    }
-                };
-
-                // manda fatiar o audio a cada 500 milissegundos
-                mediaRecorder.start(500); 
             };
+            ws.onmessage = async (event) => {
+                let mensagem;
+                try { mensagem = JSON.parse(event.data); } catch { return; }
+                if (mensagem.tipo === "erro") {
+                    textoStatus.innerText = mensagem.mensagem;
+                    return;
+                }
+                if (mensagem.tipo !== "pronto") return;
+                const conexao = ws;
+                let stream;
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    if (conexao.readyState !== WebSocket.OPEN) {
+                        stream.getTracks().forEach(track => track.stop());
+                        return;
+                    }
 
-            ws.onmessage = (event) => {
-                console.log("o backend respondeu:", event.data);
+                    const formato = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"]
+                        .find(tipo => MediaRecorder.isTypeSupported(tipo));
+                    if (!formato) throw new Error("formato não suportado");
+                    mediaRecorder = new MediaRecorder(stream, { mimeType: formato });
+                    mediaRecorder.onstop = () => stream.getTracks().forEach(track => track.stop());
+                    conexao.send(JSON.stringify({
+                        tipo: "iniciar_chamada", versao_protocolo: 1,
+                        formato_audio: mediaRecorder.mimeType, chunk_ms: 500
+                    }));
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0 && conexao.readyState === WebSocket.OPEN) {
+                            conexao.send(event.data);
+                        }
+                    };
+
+                    mediaRecorder.start(500);
+                    textoStatus.innerText = "status: conectado! gravando...";
+                    btnParar.disabled = false;
+                } catch (erro) {
+                    if (stream) stream.getTracks().forEach(track => track.stop());
+                    textoStatus.innerText = "status: não foi possível iniciar a gravação";
+                    conexao.close();
+                }
+            };
+            ws.onclose = () => {
+                if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
+                btnIniciar.disabled = false;
+                btnParar.disabled = true;
             };
         };
 
