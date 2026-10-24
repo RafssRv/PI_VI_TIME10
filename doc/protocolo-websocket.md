@@ -2,7 +2,7 @@
 
 Endpoint: `/ws/falar`. Mensagens de texto contêm objetos JSON; mensagens
 binárias contêm blocos do áudio gravado pelo navegador. O contrato de entrada
-é validado por `backend/protocolo.py`; o ciclo da conexão fica em `backend/main.py`.
+é validado por `backend/protocolo.py`; o ciclo da conexão fica em `backend/rotas/voz.py`.
 
 ## Abertura e encerramento
 
@@ -15,7 +15,7 @@ binárias contêm blocos do áudio gravado pelo navegador. O contrato de entrada
 
 O frontend guarda os blocos capturados antes de `pronto` e os envia após
 `iniciar_chamada`, na ordem original, preservando o cabeçalho do áudio.
-A página de diagnóstico `/teste` também envia a abertura, mas só grava blocos;
+A página de diagnóstico `/teste` (somente com `AMBIENTE=dev`) também envia a abertura, mas só grava blocos;
 ela não detecta fim de fala nem executa turnos por conta própria.
 
 ## Mensagens do cliente

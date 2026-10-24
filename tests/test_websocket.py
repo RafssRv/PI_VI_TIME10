@@ -4,9 +4,8 @@ import asyncio
 import json
 
 import pytest
-from starlette.websockets import WebSocket
-
 import main
+from rotas import voz
 
 
 INICIO = {"tipo": "iniciar_chamada", "versao_protocolo": 1,
@@ -33,7 +32,7 @@ def executar(monkeypatch, tmp_path):
         await websocket.send_json({"tipo": "estado", "etapa": "ouvindo", "turno": turno})
         return inicio + 1
 
-    monkeypatch.setattr(main, "atender_turno", atender)
+    monkeypatch.setattr(voz, "atender_turno", atender)
 
     def rodar(frames, esperar=False):
         async def sessao():
@@ -51,8 +50,9 @@ def executar(monkeypatch, tmp_path):
             async def enviar(frame):
                 saidas.append(frame)
 
-            ws = WebSocket({"type": "websocket", "path": "/ws/falar"}, receber, enviar)
-            await asyncio.wait_for(main.websocket_audio(ws), timeout=1)
+            scope = {"type": "websocket", "path": "/ws/falar", "root_path": "",
+                     "query_string": b"", "headers": [], "scheme": "ws"}
+            await asyncio.wait_for(main.app(scope, receber, enviar), timeout=1)
             eventos = [json.loads(f["text"]) for f in saidas
                        if f["type"] == "websocket.send" and f.get("text", "").startswith("{")]
             fechamentos = [f["code"] for f in saidas if f["type"] == "websocket.close"]
@@ -160,37 +160,37 @@ def test_json_com_aninhamento_excessivo_nao_derruba_handler(executar):
 
 
 def test_bloco_grande_e_rejeitado_antes_de_gravar(executar, monkeypatch):
-    monkeypatch.setattr(main, "LIMITE_BLOCO_AUDIO_BYTES", 4, raising=False)
+    monkeypatch.setattr(voz, "LIMITE_BLOCO_AUDIO_BYTES", 4)
     conferir_rejeicao(executar([texto(INICIO), audio(b"12345")]), 1009)
     assert executar.arquivo.read_bytes() == b""
 
 
 def test_audio_no_limite_e_aceito_mas_excesso_acumulado_nao(executar, monkeypatch):
-    monkeypatch.setattr(main, "LIMITE_AUDIO_CHAMADA_BYTES", 5, raising=False)
+    monkeypatch.setattr(voz, "LIMITE_AUDIO_CHAMADA_BYTES", 5)
     conferir_rejeicao(executar([texto(INICIO), audio(b"123"), audio(b"45"), texto(FIM), audio(b"6")]), 1009)
     assert executar.arquivo.read_bytes() == b"12345"
 
 
 def test_bloco_no_limite_e_aceito(executar, monkeypatch):
-    monkeypatch.setattr(main, "LIMITE_BLOCO_AUDIO_BYTES", 4)
+    monkeypatch.setattr(voz, "LIMITE_BLOCO_AUDIO_BYTES", 4)
     eventos, _ = executar([texto(INICIO), audio(b"1234"), texto(FIM)])
     assert not any(e["tipo"] == "erro" for e in eventos)
     assert executar.turnos == [(b"1234", 1)]
 
 
 def test_conexao_silenciosa_expira_pelo_relogio_do_servidor(executar, monkeypatch):
-    monkeypatch.setattr(main, "DURACAO_MAXIMA_CHAMADA_S", 0.02, raising=False)
+    monkeypatch.setattr(voz, "DURACAO_MAXIMA_CHAMADA_S", 0.02)
     conferir_rejeicao(executar([], esperar=True))
 
 
 def test_duracao_inclui_processamento_sem_admitir_outro_turno(executar, monkeypatch):
-    monkeypatch.setattr(main, "DURACAO_MAXIMA_CHAMADA_S", 0.02, raising=False)
+    monkeypatch.setattr(voz, "DURACAO_MAXIMA_CHAMADA_S", 0.02)
 
     async def lento(websocket, dados, inicio, turno, atendimento):
         executar.turnos.append(turno)
         await asyncio.sleep(0.03)
         return inicio + 1
 
-    monkeypatch.setattr(main, "atender_turno", lento)
+    monkeypatch.setattr(voz, "atender_turno", lento)
     conferir_rejeicao(executar([texto(INICIO), audio(), texto(FIM), audio(), texto({**FIM, "turno": 2})]))
     assert executar.turnos == [1]

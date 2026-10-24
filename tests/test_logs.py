@@ -16,6 +16,7 @@ from fastapi import UploadFile
 from sqlalchemy.exc import StatementError
 
 import main
+from rotas import voz
 import repositorio
 import turno_de_voz
 from atendimento import Atendimento
@@ -206,9 +207,9 @@ def test_upload_nao_registra_nome_do_arquivo_ou_detalhe_da_falha(
     if falha:
         def falhar(*a, **k):
             raise OSError(DADOS)
-        monkeypatch.setattr(main.shutil, "copyfileobj", falhar)
+        monkeypatch.setattr(voz.shutil, "copyfileobj", falhar)
     arquivo = UploadFile(io.BytesIO(b"audio"), filename=CPF + ".webm")
-    resposta = asyncio.run(main.processar_audio(arquivo))
+    resposta = asyncio.run(voz.processar_audio(arquivo))
     assert resposta.status_code == (500 if falha else 200)
     if falha:
         assert not any(s in resposta.body.decode() for s in SEGREDOS)
@@ -222,7 +223,7 @@ def test_falha_inesperada_da_chamada_nao_escapa_para_traceback_do_servidor(
     async def falhar(*a, **k):
         raise erro_banco()
 
-    monkeypatch.setattr(main, "atender_turno", falhar)
+    monkeypatch.setattr(voz, "atender_turno", falhar)
     eventos, fechamentos = executar([texto(INICIO), audio(), texto(FIM)])
     assert fechamentos == [1011]
     assert eventos[-1]["tipo"] == "erro" and eventos[-1]["fatal"] is True

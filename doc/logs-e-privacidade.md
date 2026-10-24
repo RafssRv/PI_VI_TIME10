@@ -56,7 +56,7 @@ Esta alteração não apaga logs anteriores nem arquivos de áudio, e não muda
 a retenção de dados no banco. Logs dos serviços externos (PostgreSQL,
 Ollama e infraestrutura) e configurações extras de bibliotecas precisam
 de política própria. O seed continua mostrando exemplos sintéticos para
-desenvolvimento; `teste_ia.py` continua sendo um diagnóstico manual com
+desenvolvimento; `scripts/diagnostico/teste_ia.py` continua sendo um diagnóstico manual com
 resposta de exemplo. Esses scripts não executam no atendimento do servidor.
 
 `python -m pytest tests/test_logs.py -q` verifica cadastro/pedido completos,

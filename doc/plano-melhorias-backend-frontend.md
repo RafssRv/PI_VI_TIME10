@@ -17,7 +17,7 @@ o usuário revisa e executa cada commit antes da próxima etapa.
 - [x] 3. Remover dados pessoais dos logs: registrar etapa, identificador e
   categoria de falha sem transcrição ou parâmetros pessoais. Testar CPF,
   telefone/endereço e exceções que contenham esses dados.
-- [ ] 4. Reorganizar backend: extrair `backend/rotas/voz.py` e
+- [x] 4. Reorganizar backend: extrair `backend/rotas/voz.py` e
   `backend/interpretacao.py`; mover diagnósticos para `scripts/diagnostico/`;
   servir diagnóstico somente em desenvolvimento. Atualizar referências,
   executar a suíte e verificar rotas/imports.
@@ -103,3 +103,29 @@ microfone simulados. Sem nova dependência.
 
 Commit proposto: `fix(privacidade): remove dados pessoais dos logs`.
 O usuário fará esse commit antes da etapa 4 (reorganização do backend).
+
+### Etapa 4 — reorganização do backend
+
+Etapa 3 commitada pelo usuário em `ddbc81d`. README staged preservado.
+
+`main.py` monta a aplicação; upload e WebSocket ficam em `rotas/voz.py`.
+`interpretacao.py` reúne parsing de texto e validação da resposta do modelo,
+sem dependência de banco ou serviços de IA. O fluxo do atendimento e as
+validações de negócio permanecem nas classes e funções existentes.
+
+Decisão: mover também a normalização compartilhada do repositório para
+`interpretacao.py`, mantendo seu import no repositório. Isso evita uma
+dependência de banco no módulo de interpretação e mantém o mesmo algoritmo.
+
+`teste_ws.html` e `teste_ia.py` foram movidos para `scripts/diagnostico/`.
+`/teste` é registrado apenas em desenvolvimento; fora de `AMBIENTE=dev`,
+retorna 404. Os scripts de evidências existentes permanecem em `scripts/`.
+A estrutura e os comandos estão em `estrutura-backend.md`.
+
+Validação: 315 testes Python e 15 testes Node passaram. Os testes de rotas
+reproduziram o acesso indevido ao diagnóstico fora de desenvolvimento antes
+da correção. O WebSocket agora é testado pela aplicação ASGI completa.
+PostgreSQL de teste real; áudio/LLM simulados. Sem nova dependência.
+
+Commit proposto: `refactor(backend): separa rotas interpretacao e diagnosticos`.
+O usuário fará esse commit antes da etapa 5 (reorganização do frontend).

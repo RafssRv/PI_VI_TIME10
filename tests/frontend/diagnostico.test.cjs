@@ -31,7 +31,7 @@ function diagnostico(falharGravador = false) {
     if (!elementos.has(id)) elementos.set(id, {});
     return elementos.get(id);
   } };
-  const html = readFileSync(join(__dirname, "../../backend/teste_ws.html"), "utf8");
+  const html = readFileSync(join(__dirname, "../../scripts/diagnostico/teste_ws.html"), "utf8");
   vm.runInNewContext(html.match(/<script>([\s\S]*?)<\/script>/)[1], {
     document, WebSocket: Socket, MediaRecorder: Gravador,
     location: { host: "localhost:3000" },
