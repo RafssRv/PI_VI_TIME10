@@ -43,7 +43,7 @@ async def processar_audio(audio: UploadFile = File(...)):
         logger.warning("requisicao=%s etapa=upload categoria=arquivo", requisicao_id)
         return JSONResponse(status_code=500, content={"erro": "Não consegui processar o áudio enviado."})
 
-# Contrato completo em doc/protocolo-websocket.md.
+# Os controles de entrada são validados por protocolo.py.
 @router.websocket("/ws/falar")
 async def websocket_audio(websocket: WebSocket):
     """Recebe controles validados e áudio limitado por chamada."""
