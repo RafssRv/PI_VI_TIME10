@@ -1,7 +1,6 @@
 // tela de chamada do atendente de voz.
 // regra basica do protocolo: binario = audio, texto = json de controle.
-// o backend de hoje morre se receber texto (o receive_bytes estoura KeyError), entao a tela
-// nasce muda: so manda json depois que o servidor se apresentar com {"tipo":"pronto"}.
+// Aguarda "pronto", envia "iniciar_chamada" e só então libera os blocos de áudio.
 //
 // ======================= PROTOCOLO DO WEBSOCKET /ws/falar (versao 1) =======================
 // toda mensagem de controle é json com a chave "tipo". texto sem "tipo" cai no log e nao
@@ -25,7 +24,7 @@
 //      binario que chega sem esse aviso é ignorado.
 //  5 {"tipo":"fim_audio"}
 //      fecha os frames num arquivo so e toca. MANDE SEMPRE, mesmo com um frame unico.
-//  6 {"tipo":"pedido","turno":3,
+//  6 {"tipo":"pedido","turno":3,"pedido_id":null,
 //     "cliente":{"nome":"Maria Aparecida","telefone":"19998124477"},
 //     "itens":[{"produto":"Pizza Margherita","quantidade":2,"preco_unitario":"39.90",
 //               "observacao":"sem cebola"}],
@@ -34,10 +33,11 @@
 //      de cima da mensagem, nao dentro de uma chave "pedido". o item usa os mesmos nomes do
 //      banco e a tela calcula o subtotal (preco_unitario x quantidade).
 //      forma_pagamento so aceita pix | dinheiro | cartao_credito | cartao_debito (ou null).
+//      pedido_id=null indica rascunho; um número preserva a comanda já registrada.
 //  7 {"tipo":"pedido_salvo","pedido_id":42,"total":"91.80"}
 //      TEM QUE VIR ANTES do chamada_encerrada, senao o resumo diz "Pedido não salvo".
 //  8 {"tipo":"erro","onde":"transcricao","mensagem":"não entendi","fatal":false}
-//      onde so pode ser: captura | audio | transcricao | llm | ollama | sintese | piper.
+//      onde: captura | audio | transcricao | llm | ollama | sintese | piper | protocolo.
 //      fatal=true derruba a chamada, fatal=false é so uma tarja de aviso.
 //  9 {"tipo":"chamada_encerrada","motivo":"pedido_finalizado"}
 //
@@ -48,7 +48,7 @@
 //  4 {"tipo":"timeout","turno":3}                         -> ninguem respondeu em 15 s
 //  5 {"tipo":"encerrar_chamada","motivo":"cliente_desligou"}
 //  + FRAMES BINARIOS: pedacos de 250 ms do microfone, so enquanto a tela esta em "ouvindo".
-//  o "turno" que a tela manda é so conferencia: pode ecoar ou ignorar.
+//  Cada fim_da_fala precisa de áudio novo e de um turno maior que o anterior.
 //
 // DINHEIRO: sempre STRING com duas casas, feita com str(Decimal) — nunca float(). float()
 // vira 79.8 e 91, que nao é formato de dinheiro. a tela aceita numero por seguranca, mas
@@ -346,7 +346,7 @@ function conectar() {
     meuSocket.onopen = () => {
       abriu = true;
       mudarConexao("conectado", "conectado");
-      escreverLog("websocket conectado (modo mudo: só binário até o servidor se apresentar)");
+      escreverLog("websocket conectado, aguardando apresentação do servidor");
       resolve();
     };
 
@@ -429,6 +429,7 @@ function tratarMensagem(evento) {
         formato_audio: formatoEmUso(),
         chunk_ms: TAMANHO_CHUNK_MS
       });
+      enviarAudioPendente();
     } else {
       escreverLog("frame '" + obj.tipo + "' chegou antes do 'pronto': a tela continua muda");
     }
@@ -470,6 +471,9 @@ function aplicarMensagem(obj) {
 
     case "pedido":
       ultimoPedido = obj;
+      pedidoSalvoId = obj.pedido_id ?? null;
+      comandaAviso.textContent = "Este pedido ainda não foi salvo.";
+      comandaAviso.hidden = pedidoSalvoId !== null || !obj.itens?.length;
       desenharPedido(obj, comandaItens);
       break;
 
@@ -791,7 +795,9 @@ function mostrarErro(mensagem, fatal) {
   mudarConexao("erro", socket ? "erro de conexão" : "desconectado");
   encerrar(null, "erro");
   sublinhaEstado.textContent = mensagem;   // a sublinha do orbe repete o erro em texto
-  comandaAviso.textContent = "Este pedido ainda não foi salvo.";
+  comandaAviso.textContent = pedidoSalvoId !== null
+    ? "O pedido já foi salvo. A chamada foi interrompida."
+    : "Este pedido ainda não foi salvo.";
   comandaAviso.hidden = false;
 }
 
@@ -842,16 +848,7 @@ async function iniciarCaptura() {
   gravador.ondataavailable = (evento) => {
     if (!evento.data || evento.data.size === 0) return;
     pedacos.push(evento.data);
-    // binario so sai com o microfone aberto: a resposta do atendente nunca volta pro backend
-    if (estadoAtual !== "ouvindo") return;
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      // manda tambem os pedacos q ficaram pra tras, na ordem. o primeiro eh o mais
-      // importante: so ele tem o cabecalho do audio e ele fica pronto antes da conexao abrir
-      while (pedacosEnviados < pedacos.length) {
-        socket.send(pedacos[pedacosEnviados]);
-        pedacosEnviados++;
-      }
-    }
+    enviarAudioPendente();
   };
 
   gravador.onstop = () => {
@@ -865,6 +862,16 @@ async function iniciarCaptura() {
 
   gravador.start(TAMANHO_CHUNK_MS);
   prepararMedidor();
+}
+
+function enviarAudioPendente() {
+  if (!protocoloNovo || estadoAtual !== "ouvindo") return;
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  // Preserve o primeiro bloco: ele contém o cabeçalho, mesmo se capturado antes de pronto.
+  while (pedacosEnviados < pedacos.length) {
+    socket.send(pedacos[pedacosEnviados]);
+    pedacosEnviados++;
+  }
 }
 
 function pararTracks() {

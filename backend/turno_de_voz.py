@@ -90,14 +90,18 @@ async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, aten
 
     # 3. atendimento: identifica/cadastra o cliente e, depois disso, conversa pelo llama
     try:
-        texto_resposta = await rodar_sem_travar(
-            websocket, turno, "pensando", atendimento.responder, texto_cliente)
+        resultado = await rodar_sem_travar(
+            websocket, turno, "pensando", atendimento.responder_com_eventos, texto_cliente)
     except Exception as erro:
         await mandar_erro(websocket, "ollama",
                           f"Não consegui falar com o Ollama. Ele está aberto? ({erro.__class__.__name__})")
         return amostra_fim
 
-    texto_resposta = texto_resposta.strip()
+    # A gravação já terminou: a tela precisa saber mesmo se a síntese falhar depois.
+    for evento in resultado["eventos"]:
+        await websocket.send_json({**evento, "turno": turno})
+
+    texto_resposta = resultado["texto"].strip()
     print(f"[turno {turno}] atendente: {texto_resposta!r}")
 
     await websocket.send_json({"tipo": "transcricao", "turno": turno, "quem": "atendente",

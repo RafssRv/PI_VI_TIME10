@@ -199,9 +199,11 @@ class Atendimento:
         self.etapa = "inicio"
         self.cliente_id = None
         self.nome = None
+        self.telefone = None
         self.endereco_do_cadastro = None
         self.cadastro = {}
         self.historico = []
+        self._pedido_salvo = None
         self._limpar_pedido()
 
     def _limpar_pedido(self):
@@ -231,6 +233,32 @@ class Atendimento:
             "sem_cadastro": self._conversar_com_llm,
         }
         return etapas[self.etapa](texto)
+
+    def responder_com_eventos(self, texto):
+        """Devolve a fala e o estado da comanda, sem interpretar o texto da resposta."""
+        salvo_anterior = self._pedido_salvo
+        resposta = self.responder(texto)
+        eventos = []
+        if self.cliente_id is not None:
+            pedido = self._pedido_salvo or self._dados_do_pedido()
+            eventos.append({"tipo": "pedido", **deepcopy(pedido)})
+            if self._pedido_salvo is not None and self._pedido_salvo is not salvo_anterior:
+                eventos.append({"tipo": "pedido_salvo", "pedido_id": pedido["pedido_id"],
+                                "total": pedido["total"]})
+        return {"texto": resposta, "eventos": eventos}
+
+    def _dados_do_pedido(self):
+        return {
+            "pedido_id": None,
+            "cliente": {"nome": self.nome, "telefone": self.telefone},
+            "itens": [{"produto": i["produto"], "quantidade": i["quantidade"],
+                       "preco_unitario": format(i["preco"], ".2f"),
+                       "observacao": i["observacao"]} for i in self.carrinho],
+            "total": format(sum((i["preco"] * i["quantidade"] for i in self.carrinho),
+                                Decimal("0.00")), ".2f"),
+            "forma_pagamento": self.pagamento,
+            "endereco_entrega": self.endereco_entrega or self.endereco_do_cadastro,
+        }
 
     # --- banco ---
 
@@ -268,7 +296,7 @@ class Atendimento:
             db.close()
 
         if cliente:
-            self._identificar(cliente.id, cliente.nome, cliente.endereco)
+            self._identificar(cliente.id, cliente.nome, cliente.endereco, cliente.telefone)
             return "Achei seu cadastro, {}! O que vai querer hoje?".format(self._primeiro_nome())
 
         self.cadastro = {"cpf": digitos}
@@ -340,6 +368,7 @@ class Atendimento:
                 endereco=self.cadastro.get("endereco"),
             )
             cliente_id, nome, endereco = cliente.id, cliente.nome, cliente.endereco
+            telefone = cliente.telefone
         except ValueError as erro:
             # cpf q alguem cadastrou no meio tempo, nome grande demais...
             print(f"[atendimento] cadastro recusado: {erro}")
@@ -353,13 +382,14 @@ class Atendimento:
             db.close()
 
         self.cadastro = {}
-        self._identificar(cliente_id, nome, endereco)
+        self._identificar(cliente_id, nome, endereco, telefone)
         return "Pronto, {}, sua conta foi criada! O que vai querer hoje?".format(
             self._primeiro_nome())
 
-    def _identificar(self, cliente_id, nome, endereco):
+    def _identificar(self, cliente_id, nome, endereco, telefone=None):
         self.cliente_id = cliente_id
         self.nome = nome
+        self.telefone = telefone
         self.endereco_do_cadastro = endereco
         self.etapa = "identificado"
 
@@ -588,6 +618,9 @@ class Atendimento:
                 controle.adicionar(produto.id, item["quantidade"], item["observacao"] or "")
             self.carrinho = novo
             self._controle = controle
+            # Agradecimentos sem itens não apagam a última venda da comanda.
+            if novo:
+                self._pedido_salvo = None
         self._token_resumo = None
         return problemas
 
@@ -665,6 +698,12 @@ class Atendimento:
                 forma_pagamento=self.pagamento,
             )
             numero = pedido.id
+            # Preserve a comanda antes de limpar o carrinho para o próximo pedido.
+            self._pedido_salvo = {
+                **self._dados_do_pedido(), "pedido_id": numero,
+                "total": format(pedido.total, ".2f"),
+                "endereco_entrega": pedido.endereco_entrega,
+            }
         except ValueError as erro:
             # o cardapio mudou entre o resumo e o sim (produto desativado, por exemplo)
             print(f"[atendimento] pedido recusado pelo repositorio: {erro}")
