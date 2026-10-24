@@ -14,7 +14,7 @@ o usuário revisa e executa cada commit antes da próxima etapa.
 - [x] 2. Validar o protocolo em `backend/protocolo.py`: rejeitar mensagens
   inválidas, limitar bytes/duração e documentar o contrato em
   `doc/protocolo-websocket.md`. Testar entradas inválidas e limites.
-- [ ] 3. Remover dados pessoais dos logs: registrar etapa, identificador e
+- [x] 3. Remover dados pessoais dos logs: registrar etapa, identificador e
   categoria de falha sem transcrição ou parâmetros pessoais. Testar CPF,
   telefone/endereço e exceções que contenham esses dados.
 - [ ] 4. Reorganizar backend: extrair `backend/rotas/voz.py` e
@@ -75,3 +75,31 @@ simulação do pipeline/microfone; não houve chamada com modelos reais.
 
 Commit proposto: `fix(websocket): valida protocolo e limita audio por chamada`.
 O usuário fará esse commit antes da etapa 3 (dados pessoais nos logs).
+
+### Etapa 3 — dados pessoais nos logs
+
+Etapa 2 commitada pelo usuário em `59a492f`. O README staged continua
+separado e não foi modificado por esta etapa.
+
+Transcrições, respostas, nomes de arquivos recebidos e exceções brutas
+foram removidos dos logs. Cada atendimento recebe um identificador
+aleatório; os registros indicam etapa e categoria fixa da falha. Erros
+HTTP/WebSocket não devolvem detalhes internos. Uma falha inesperada na
+chamada retorna erro fatal genérico e fecha com `1011`.
+
+O fluxo legado deixa de imprimir falas; o subprocesso do Piper não herda
+stdout/stderr. O frontend deixa de copiar mensagens, campos inválidos e
+exceções para o painel de logs/console. Conversa, comanda e avisos continuam
+disponíveis na interface. A política e os limites estão documentados em
+`logs-e-privacidade.md`.
+
+Falhas tardias de tarefas em thread são observadas após desconexão ou
+cancelamento, sem traceback automático e sem interromper uma gravação.
+
+Validação: 308 testes Python e 15 testes Node passaram; sintaxe JavaScript
+e `git diff --check` passaram. Os testes de regressão reproduziram os
+vazamentos antes das correções. PostgreSQL de teste real; voz, modelo e
+microfone simulados. Sem nova dependência.
+
+Commit proposto: `fix(privacidade): remove dados pessoais dos logs`.
+O usuário fará esse commit antes da etapa 4 (reorganização do backend).

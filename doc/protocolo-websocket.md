@@ -112,10 +112,16 @@ servidor envia uma mensagem como:
 - Código WebSocket `1008`: JSON inválido, violação de campos/sequência ou prazo vencido.
 - Código `1009`: limite de bytes ultrapassado.
 - Código `1000`: encerramento normal solicitado pelo cliente.
+- Código `1011`: falha inesperada no processamento da chamada; evento de
+  erro com `onde: "servidor"` e mensagem genérica, quando a conexão permite enviar.
 
 As mensagens de rejeição não reproduzem o conteúdo recebido. O frontend
 exibe o erro fatal e encerra a captura. A confirmação de uma venda já salva
 continua válida, mesmo que a conexão termine depois.
+
+Erros de áudio, transcrição, atendimento e síntese também usam mensagens
+fixas, sem texto de exceções. A política de diagnóstico está em
+`logs-e-privacidade.md`.
 
 ## Verificação
 

@@ -9,10 +9,12 @@
 # a conversa ta e o q o cliente ja disse.
 
 import json
+import logging
 import re
 from copy import deepcopy
 from decimal import Decimal
 from pathlib import Path
+from uuid import uuid4
 
 from agente.controle_pedido import ControlePedido, ErroPedido, ProdutoCardapio
 
@@ -20,6 +22,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 import repositorio
 from repositorio import _normalizar
+
+logger = logging.getLogger(__name__)
 
 # o whisper as vezes escreve o cpf por extenso ("cinco dois nove..."), entao a gente
 # traduz as palavras de numero tbm. "meia" eh como muita gente fala o seis
@@ -193,6 +197,7 @@ def _juntar(partes, conector="e"):
 
 class Atendimento:
     def __init__(self, abrir_sessao=None, conversar=None):
+        self.id_chamada = uuid4().hex
         # os dois podem vir de fora pros testes: a sessao do banco de teste e um llama de mentira
         self._abrir_sessao = abrir_sessao
         self._conversar = conversar
@@ -289,8 +294,8 @@ class Atendimento:
         except ValueError:
             # digito verificador nao bate: quase sempre eh o whisper q ouviu um numero errado
             return "Esse CPF parece inválido. Pode repetir devagar, por favor?"
-        except Exception as erro:
-            print(f"[atendimento] erro ao buscar cliente: {erro}")
+        except Exception:
+            logger.warning("chamada=%s etapa=buscar_cliente categoria=banco", self.id_chamada)
             return FRASE_ERRO_BANCO
         finally:
             db.close()
@@ -369,14 +374,14 @@ class Atendimento:
             )
             cliente_id, nome, endereco = cliente.id, cliente.nome, cliente.endereco
             telefone = cliente.telefone
-        except ValueError as erro:
+        except ValueError:
             # cpf q alguem cadastrou no meio tempo, nome grande demais...
-            print(f"[atendimento] cadastro recusado: {erro}")
+            logger.warning("chamada=%s etapa=cadastrar_cliente categoria=validacao", self.id_chamada)
             self.cadastro = {}
             self.etapa = "aguardando_cpf"
             return "Não consegui criar a conta com esses dados. " + FRASE_PEDE_CPF
-        except Exception as erro:
-            print(f"[atendimento] erro ao cadastrar: {erro}")
+        except Exception:
+            logger.warning("chamada=%s etapa=cadastrar_cliente categoria=banco", self.id_chamada)
             return FRASE_ERRO_BANCO
         finally:
             db.close()
@@ -408,9 +413,9 @@ class Atendimento:
         db = self._sessao()
         try:
             return self._montar_pedido_com(db, texto)
-        except SQLAlchemyError as erro:
+        except SQLAlchemyError:
             # erro do llama (ollama fechado) sobe de proposito: o turno_de_voz avisa na tela
-            print(f"[atendimento] erro no banco ao montar o pedido: {erro}")
+            logger.warning("chamada=%s etapa=montar_pedido categoria=banco", self.id_chamada)
             return FRASE_ERRO_BANCO
         finally:
             db.close()
@@ -481,8 +486,8 @@ class Atendimento:
                     or "endereco" not in dados
                     or (dados["endereco"] is not None and not isinstance(dados["endereco"], str))):
                 raise ValueError("estrutura incompleta ou inválida")
-        except ValueError as erro:
-            print(f"[atendimento] resposta inválida do modelo: {erro}")
+        except ValueError:
+            logger.warning("chamada=%s etapa=interpretar_pedido categoria=modelo_invalido", self.id_chamada)
             return self._pendencia
 
         self.historico.append(turno)
@@ -704,18 +709,18 @@ class Atendimento:
                 "total": format(pedido.total, ".2f"),
                 "endereco_entrega": pedido.endereco_entrega,
             }
-        except ValueError as erro:
+        except ValueError:
             # o cardapio mudou entre o resumo e o sim (produto desativado, por exemplo)
-            print(f"[atendimento] pedido recusado pelo repositorio: {erro}")
+            logger.warning("chamada=%s etapa=salvar_pedido categoria=validacao", self.id_chamada)
             self.etapa = "identificado"
             problemas = self._atualizar_carrinho(db, self.carrinho)
             self._pendencia = " ".join(problemas) or None
             if problemas:
                 return self._pendencia
             return "O cardápio mudou; confira os valores atualizados. " + self._fechar_pedido()
-        except Exception as erro:
+        except Exception:
             # continua confirmando: se o cliente disser sim de novo, tenta gravar de novo
-            print(f"[atendimento] erro ao salvar o pedido: {erro}")
+            logger.warning("chamada=%s etapa=salvar_pedido categoria=banco", self.id_chamada)
             return FRASE_ERRO_BANCO
         finally:
             db.close()
@@ -778,8 +783,8 @@ class Atendimento:
         db = self._sessao()
         try:
             cardapio = _cardapio_em_texto(repositorio.listar_cardapio(db))
-        except SQLAlchemyError as erro:
-            print(f"[atendimento] erro ao ler o cardapio: {erro}")
+        except SQLAlchemyError:
+            logger.warning("chamada=%s etapa=ler_cardapio categoria=banco", self.id_chamada)
             cardapio = "(cardápio indisponível agora: não informe preços)"
         finally:
             db.close()

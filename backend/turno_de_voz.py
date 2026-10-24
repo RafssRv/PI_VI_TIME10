@@ -3,6 +3,9 @@
 # fala -> texto (whisper) -> resposta (llama) -> voz (piper) -> manda pra tela tocar
 
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 # o agente so eh carregado na primeira fala, e nao quando o servidor liga.
 # assim o servidor sobe rapido e funciona ate pra quem nao instalou o whisper/piper
@@ -25,6 +28,12 @@ def carregar_agente():
     return _agente
 
 
+def _observar_conclusao(tarefa):
+    # Evita o traceback automático do asyncio após perder a conexão, sem cancelar a gravação.
+    if not tarefa.cancelled():
+        tarefa.exception()
+
+
 async def rodar_sem_travar(websocket, turno, etapa, funcao, *argumentos):
     """
     roda uma etapa pesada sem travar o servidor.
@@ -34,16 +43,20 @@ async def rodar_sem_travar(websocket, turno, etapa, funcao, *argumentos):
     await websocket.send_json({"tipo": "estado", "etapa": etapa, "turno": turno})
 
     tarefa = asyncio.create_task(asyncio.to_thread(funcao, *argumentos))
-    while True:
-        try:
-            return await asyncio.wait_for(asyncio.shield(tarefa), timeout=5)
-        except asyncio.TimeoutError:
-            await websocket.send_json({"tipo": "estado", "etapa": etapa, "turno": turno})
+    try:
+        while True:
+            try:
+                return await asyncio.wait_for(asyncio.shield(tarefa), timeout=5)
+            except asyncio.TimeoutError:
+                await websocket.send_json({"tipo": "estado", "etapa": etapa, "turno": turno})
+    finally:
+        tarefa.add_done_callback(_observar_conclusao)
 
 
-async def mandar_erro(websocket, onde, mensagem):
+async def mandar_erro(websocket, onde, mensagem, chamada_id, turno, categoria):
     # mostra um aviso na tela e libera o microfone de novo, sem derrubar a chamada
-    print(f"[turno] erro em {onde}: {mensagem}")
+    logger.warning("chamada=%s turno=%s etapa=%s categoria=%s",
+                   chamada_id, turno, onde, categoria)
     await websocket.send_json({"tipo": "erro", "onde": onde, "mensagem": mensagem, "fatal": False})
     await websocket.send_json({"tipo": "estado", "etapa": "ouvindo"})
 
@@ -56,9 +69,10 @@ async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, aten
     """
     try:
         agente = carregar_agente()
-    except ImportError as erro:
+    except ImportError:
         await mandar_erro(websocket, "transcricao",
-                          f"Faltam bibliotecas do agente no servidor ({erro.name}). Rode o pip install.")
+                          "Faltam bibliotecas do agente no servidor. Rode o pip install.",
+                          atendimento.id_chamada, turno, "dependencias")
         return amostra_inicio
 
     # 1. salva a fala do cliente em agente/audio/cliente.wav
@@ -66,23 +80,27 @@ async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, aten
         caminho_wav, amostra_fim = await rodar_sem_travar(
             websocket, turno, "transcrevendo",
             agente["salvar_fala_em_wav"], bytes(audio_da_chamada), amostra_inicio)
-    except Exception as erro:
-        await mandar_erro(websocket, "audio", f"Não consegui ler o áudio gravado ({erro}).")
+    except Exception:
+        await mandar_erro(websocket, "audio", "Não consegui ler o áudio gravado.",
+                          atendimento.id_chamada, turno, "decodificacao")
         return amostra_inicio
 
     # 2. whisper: transforma a fala em texto
     try:
         texto_cliente = await rodar_sem_travar(
             websocket, turno, "transcrevendo", agente["transcrever"], str(caminho_wav))
-    except Exception as erro:
-        await mandar_erro(websocket, "transcricao", f"A transcrição falhou ({erro}).")
+    except Exception:
+        await mandar_erro(websocket, "transcricao", "A transcrição falhou.",
+                          atendimento.id_chamada, turno, "transcricao")
         return amostra_fim
 
     texto_cliente = texto_cliente.strip()
-    print(f"[turno {turno}] cliente: {texto_cliente!r}")
+    logger.info("chamada=%s turno=%s etapa=transcricao status=concluida",
+                atendimento.id_chamada, turno)
 
     if not texto_cliente:
-        await mandar_erro(websocket, "transcricao", "Não entendi. Pode repetir?")
+        await mandar_erro(websocket, "transcricao", "Não entendi. Pode repetir?",
+                          atendimento.id_chamada, turno, "fala_vazia")
         return amostra_fim
 
     await websocket.send_json({"tipo": "transcricao", "turno": turno, "quem": "cliente",
@@ -92,9 +110,10 @@ async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, aten
     try:
         resultado = await rodar_sem_travar(
             websocket, turno, "pensando", atendimento.responder_com_eventos, texto_cliente)
-    except Exception as erro:
+    except Exception:
         await mandar_erro(websocket, "ollama",
-                          f"Não consegui falar com o Ollama. Ele está aberto? ({erro.__class__.__name__})")
+                          "Não consegui concluir o atendimento. Pode tentar novamente?",
+                          atendimento.id_chamada, turno, "atendimento")
         return amostra_fim
 
     # A gravação já terminou: a tela precisa saber mesmo se a síntese falhar depois.
@@ -102,7 +121,8 @@ async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, aten
         await websocket.send_json({**evento, "turno": turno})
 
     texto_resposta = resultado["texto"].strip()
-    print(f"[turno {turno}] atendente: {texto_resposta!r}")
+    logger.info("chamada=%s turno=%s etapa=atendimento status=concluida",
+                atendimento.id_chamada, turno)
 
     await websocket.send_json({"tipo": "transcricao", "turno": turno, "quem": "atendente",
                                "texto": texto_resposta, "parcial": False})
@@ -111,8 +131,9 @@ async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, aten
     try:
         caminho_resposta = await rodar_sem_travar(
             websocket, turno, "respondendo", agente["sintetizar_resposta"], texto_resposta)
-    except Exception as erro:
-        await mandar_erro(websocket, "piper", f"Não consegui gerar a voz da resposta ({erro}).")
+    except Exception:
+        await mandar_erro(websocket, "piper", "Não consegui gerar a voz da resposta.",
+                          atendimento.id_chamada, turno, "sintese")
         return amostra_fim
 
     # 5. manda o audio pra tela: avisa q vai chegar, manda o arquivo e avisa q acabou

@@ -1,9 +1,11 @@
 from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 import asyncio
+import logging
 import shutil
 from pathlib import Path
 from time import monotonic
+from uuid import uuid4
 from fastapi.staticfiles import StaticFiles
 
 from atendimento import Atendimento
@@ -14,6 +16,7 @@ from protocolo import (
 )
 
 app = FastAPI(title="Backend Pizzaria - Agente de Voz", version="0.1.0")
+logger = logging.getLogger(__name__)
 
 # --- health check (pra confirmar se a api ta de pe) ---
 @app.get("/health")
@@ -35,14 +38,15 @@ async def processar_audio(audio: UploadFile = File(...)):
     endpoint http padrao (fase 2).
     recebe o arquivo de audio inteiro, salva temporariamente e devolve de volta.
     """
+    requisicao_id = uuid4().hex
     try:
-        print(f"[http] audio recebido do front: {audio.filename}")
+        logger.info("requisicao=%s etapa=upload status=recebido", requisicao_id)
 
         caminho_temporario = f"temp_{audio.filename}"
         with open(caminho_temporario, "wb") as buffer:
             shutil.copyfileobj(audio.file, buffer)
 
-        print(f"[http] arquivo salvo no disco como: {caminho_temporario}")
+        logger.info("requisicao=%s etapa=upload status=salvo", requisicao_id)
 
         return FileResponse(
             path=caminho_temporario,
@@ -50,8 +54,9 @@ async def processar_audio(audio: UploadFile = File(...)):
             filename=f"resposta_da_ia_{audio.filename}"
         )
 
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"erro": str(e)})
+    except Exception:
+        logger.warning("requisicao=%s etapa=upload categoria=arquivo", requisicao_id)
+        return JSONResponse(status_code=500, content={"erro": "Não consegui processar o áudio enviado."})
 
 # Contrato completo em doc/protocolo-websocket.md.
 @app.websocket("/ws/falar")
@@ -59,7 +64,8 @@ async def websocket_audio(websocket: WebSocket):
     """Recebe controles validados e áudio limitado por chamada."""
     await websocket.accept()
     prazo = monotonic() + DURACAO_MAXIMA_CHAMADA_S
-    print("[websocket] cliente conectou no tubo de streaming!")
+    atendimento = Atendimento()
+    logger.info("chamada=%s etapa=conexao status=aberta", atendimento.id_chamada)
     await websocket.send_json({"tipo": "pronto", "versao_protocolo": VERSAO_PROTOCOLO})
     caminho_audio = "audio_cliente_streaming.webm"
     iniciada = False
@@ -68,7 +74,6 @@ async def websocket_audio(websocket: WebSocket):
     # O cabeçalho do contêiner só vem no primeiro bloco; preserve até o limite.
     audio_da_chamada = bytearray()
     amostra_inicio = 0
-    atendimento = Atendimento()
 
     try:
         with open(caminho_audio, "wb") as arquivo:
@@ -95,7 +100,7 @@ async def websocket_audio(websocket: WebSocket):
                         raise ErroProtocolo("A chamada atingiu o limite de áudio permitido.", 1009)
                     arquivo.write(pedaco)
                     audio_da_chamada.extend(pedaco)
-                    print(f"[websocket] recebi e guardei um chunk de {len(pedaco)} bytes")
+                    logger.debug("chamada=%s etapa=audio bytes=%s", atendimento.id_chamada, len(pedaco))
                     await websocket.send_text("chunk guardado no backend!")
                     continue
 
@@ -134,11 +139,23 @@ async def websocket_audio(websocket: WebSocket):
                         raise ErroProtocolo("O aviso se refere a um turno ainda não processado.")
 
     except ErroProtocolo as erro:
+        logger.warning("chamada=%s turno=%s etapa=protocolo categoria=validacao",
+                       atendimento.id_chamada, ultimo_turno)
         await websocket.send_json({"tipo": "erro", "onde": "protocolo",
                                    "mensagem": str(erro), "fatal": True})
         await websocket.close(code=erro.codigo)
     except WebSocketDisconnect:
-        print("[websocket] cliente desconectou da chamada.")
+        logger.info("chamada=%s etapa=conexao status=encerrada", atendimento.id_chamada)
+    except Exception:
+        # Exceções de drivers/modelos podem conter a fala ou parâmetros SQL.
+        logger.warning("chamada=%s turno=%s etapa=chamada categoria=inesperada",
+                       atendimento.id_chamada, ultimo_turno)
+        try:
+            await websocket.send_json({"tipo": "erro", "onde": "servidor",
+                                       "mensagem": "Não consegui continuar a chamada.", "fatal": True})
+            await websocket.close(code=1011)
+        except Exception:
+            logger.warning("chamada=%s etapa=conexao categoria=envio_erro", atendimento.id_chamada)
 
 
 # --- front-end: o proprio fastapi entrega a pasta frontend na raiz ---

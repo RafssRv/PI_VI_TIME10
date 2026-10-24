@@ -25,6 +25,9 @@ def sintetizar_resposta(texto):
         str(output)
     ],
     stdin=subprocess.PIPE,
+    # Diagnósticos do processo podem repetir o texto recebido; mantenha só o código de saída.
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
     text=True,
     encoding="utf-8",
     env={**os.environ, "PYTHONUTF8": "1"}

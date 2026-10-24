@@ -216,7 +216,7 @@ function escreverLog(mensagem) {
 function definirEstado(nome, sublinha) {
   const dados = ESTADOS[nome];
   if (!dados) {
-    escreverLog("estado desconhecido pedido pela tela: " + nome);
+    escreverLog("estado desconhecido pedido pela tela");
     return;
   }
 
@@ -409,9 +409,10 @@ function tratarMensagem(evento) {
     obj = null;
   }
 
-  // texto que nao eh json com "tipo" cai no log e para por aqui (ex.: "chunk guardado no backend!")
+  // Texto fora do protocolo pode conter dados da conversa; não copiar para o log.
   if (!obj || typeof obj !== "object" || !obj.tipo) {
-    escreverLog("backend: " + evento.data);
+    escreverLog(evento.data === "chunk guardado no backend!"
+      ? "backend: chunk guardado no backend!" : "mensagem sem protocolo recebida do backend");
     return;
   }
 
@@ -431,7 +432,7 @@ function tratarMensagem(evento) {
       });
       enviarAudioPendente();
     } else {
-      escreverLog("frame '" + obj.tipo + "' chegou antes do 'pronto': a tela continua muda");
+      escreverLog("frame chegou antes do 'pronto': a tela continua muda");
     }
   }
 
@@ -442,7 +443,7 @@ function tratarMensagem(evento) {
 function aplicarMensagem(obj) {
   switch (obj.tipo) {
     case "pronto":
-      escreverLog("servidor pronto, protocolo versão " + obj.versao_protocolo);
+      escreverLog("servidor pronto");
       break;
 
     case "estado":
@@ -480,7 +481,7 @@ function aplicarMensagem(obj) {
     case "pedido_salvo":
       pedidoSalvoId = obj.pedido_id;
       comandaAviso.hidden = true;
-      escreverLog(`pedido ${obj.pedido_id} salvo no banco, total ${obj.total}`);
+      escreverLog("pedido salvo no banco");
       break;
 
     case "erro":
@@ -491,7 +492,7 @@ function aplicarMensagem(obj) {
       break;
 
     case "chamada_encerrada": {
-      escreverLog("servidor encerrou a chamada: " + (obj.motivo || "sem motivo"));
+      escreverLog("servidor encerrou a chamada");
       // o socket fica aberto mais um instante: se o backend salvar o pedido DEPOIS de avisar
       // que a chamada acabou, o pedido_salvo atrasado ainda entra no resumo
       encerrar(null, "encerrada", true);
@@ -505,7 +506,7 @@ function aplicarMensagem(obj) {
     }
 
     default:
-      escreverLog("mensagem desconhecida do backend: " + JSON.stringify(obj));
+      escreverLog("mensagem desconhecida do backend");
   }
 }
 
@@ -514,7 +515,7 @@ function aplicarEtapa(etapa) {
   // parou e as trilhas do microfone ja foram soltas, entao a tela diria "pode falar" com o
   // microfone morto (acontece na janela de 1,2 s que o chamada_encerrada deixa aberta)
   if (!estaEmChamada()) {
-    escreverLog("estado '" + etapa + "' chegou fora da chamada, ignorado");
+    escreverLog("estado chegou fora da chamada, ignorado");
     return;
   }
 
@@ -554,7 +555,7 @@ function aplicarEtapa(etapa) {
       marcarEtapa(0);
       break;
     default:
-      escreverLog("etapa desconhecida: " + etapa);
+      escreverLog("etapa desconhecida");
   }
 }
 
@@ -585,7 +586,7 @@ function criarFala(quem, parcial) {
 
 function mostrarTranscricao(quem, texto, parcial) {
   if (quem !== "cliente" && quem !== "atendente") {
-    escreverLog("transcrição com 'quem' desconhecido: " + quem);
+    escreverLog("transcrição com 'quem' desconhecido");
     return;
   }
 
@@ -623,7 +624,7 @@ function mostrarTranscricao(quem, texto, parcial) {
 function formatarDinheiro(valor) {
   const numero = typeof valor === "string" ? Number(valor.trim()) : Number(valor);
   if (valor === null || valor === undefined || valor === "" || !Number.isFinite(numero)) {
-    escreverLog("valor de dinheiro fora do formato esperado: " + valor);
+    escreverLog("valor de dinheiro fora do formato esperado");
     return "—";
   }
   const partes = numero.toFixed(2).split(".");
@@ -642,7 +643,7 @@ function calcularSubtotal(item) {
 function formatarPagamento(valor) {
   if (!valor) return "a combinar";
   if (PAGAMENTOS[valor]) return PAGAMENTOS[valor];
-  escreverLog("forma de pagamento que o banco não aceita: " + valor);
+  escreverLog("forma de pagamento que o banco não aceita");
   return "a combinar";
 }
 
@@ -787,7 +788,7 @@ function mostrarErro(mensagem, fatal) {
   tarjaErroTexto.textContent = mensagem;
   tarjaErroBotao.textContent = erroEhFatal ? "Tentar de novo" : "Fechar aviso";
   tarjaErro.hidden = false;
-  escreverLog((erroEhFatal ? "erro fatal: " : "aviso: ") + mensagem);
+  escreverLog(erroEhFatal ? "erro fatal na chamada" : "aviso na chamada");
 
   if (!erroEhFatal) return;
 
@@ -910,7 +911,7 @@ function prepararMedidor() {
     dadosNivel = new Uint8Array(analisador.fftSize);
     fonte.connect(analisador);
   } catch (erro) {
-    escreverLog("não consegui medir o nível do microfone: " + erro.message);
+    escreverLog("não consegui medir o nível do microfone");
     analisador = null;
   }
   if (!loopNivel) medirNivel();
@@ -1080,7 +1081,7 @@ function tocarResposta(blob) {
   if (tocando && tocando.catch) {
     tocando.catch((erro) => {
       if (minhaFala !== idFala) return;   // essa fala foi trocada por outra, deixa a nova
-      escreverLog("o navegador não deixou tocar a resposta: " + erro.message);
+      escreverLog("o navegador não deixou tocar a resposta");
       voltarAOuvir("falha_audio");
     });
   }
@@ -1109,7 +1110,7 @@ function voltarAOuvir(motivo) {
   } else if (motivo === "timeout") {
     enviarTexto({ tipo: "timeout", turno: turno });
   } else {
-    escreverLog("microfone reaberto sem avisar o servidor (motivo: " + motivo + ")");
+    escreverLog("microfone reaberto sem avisar o servidor");
   }
 
   if (tempoInicioTurno) {
