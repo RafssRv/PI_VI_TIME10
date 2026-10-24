@@ -10,10 +10,11 @@
 
 import json
 import re
+from copy import deepcopy
 from decimal import Decimal
 from pathlib import Path
 
-from agente.controle_pedido import ControlePedido, ProdutoCardapio
+from agente.controle_pedido import ControlePedido, ErroPedido, ProdutoCardapio
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -81,6 +82,34 @@ ESQUEMA_DO_PEDIDO = {
     },
     "required": ["resposta", "itens", "endereco", "fechar"],
 }
+
+PEDIDO_DE_TROCA = re.compile(
+    r"\b(?:troca|trocar|troque|troquem|substitua|substituir|substitui)\b"
+    r"|\b(?:em vez de|no lugar de)\b"
+)
+QUANTIDADES_DA_TROCA = {
+    "zero": 0, "um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3,
+    "quatro": 4, "cinco": 5, "seis": 6, "sete": 7, "oito": 8, "nove": 9, "dez": 10,
+}
+
+
+def _item_da_troca(texto):
+    texto = re.sub(r"^(?:a|o|as|os|mais)\s+", "", texto)
+    partes = texto.split(maxsplit=1)
+    quantidade = QUANTIDADES_DA_TROCA.get(partes[0])
+    if partes[0].isdigit():
+        quantidade = int(partes[0])
+    if quantidade is not None:
+        return quantidade, partes[1] if len(partes) > 1 else ""
+    return None, texto
+
+
+def _nome_na_troca(texto):
+    # Mesma comparação para o nome falado e o cadastrado, sem completar produtos.
+    return " ".join(
+        "mineral" if p == "minerais" else p.removesuffix("s")
+        for p in _normalizar(texto).split() if p != "de"
+    )
 
 
 def extrair_digitos(texto):
@@ -184,6 +213,8 @@ class Atendimento:
         self._controle = None
         self._token_resumo = None
         self._pendencia = None
+        self._troca_pendente = False
+        self._pendencia_antes_da_troca = None
 
     def responder(self, texto):
         """recebe o q o cliente falou e devolve o q o atendente fala de volta."""
@@ -356,6 +387,41 @@ class Atendimento:
 
     def _montar_pedido_com(self, db, texto):
         normalizado = _normalizar(texto).strip()
+        if self._troca_pendente:
+            if normalizado in {"cancele a troca", "cancelar a troca", "desisti da troca"}:
+                self._troca_pendente = False
+                self._pendencia = self._pendencia_antes_da_troca
+                self._pendencia_antes_da_troca = None
+                if self._controle:
+                    self._controle.definir_pendencia(self._pendencia)
+                fala = self._fechar_pedido()
+                self.historico.extend([{"role": "user", "content": texto},
+                                       {"role": "assistant", "content": fala}])
+                return fala
+            if not PEDIDO_DE_TROCA.search(normalizado):
+                return self._pendencia
+        if PEDIDO_DE_TROCA.search(normalizado):
+            if not self._troca_pendente:
+                self._pendencia_antes_da_troca = self._pendencia
+            self._troca_pendente = True
+            self._pendencia = "Pode repetir a troca, informando os produtos e as quantidades?"
+            self._token_resumo = None
+            if self._controle:
+                self._controle.definir_pendencia(self._pendencia)
+            problemas = self._trocar_itens(db, texto)
+            self._troca_pendente = bool(problemas)
+            if problemas:
+                self._pendencia = (" ".join(problemas) +
+                                   ' Repita a troca completa ou diga "cancele a troca".')
+            else:
+                self._pendencia = self._pendencia_antes_da_troca
+                self._pendencia_antes_da_troca = None
+            if self._controle:
+                self._controle.definir_pendencia(self._pendencia)
+            fala = self._pendencia or self._fechar_pedido()
+            self.historico.extend([{"role": "user", "content": texto},
+                                   {"role": "assistant", "content": fala}])
+            return fala
         # Não pedir ao modelo para inventar condições que o cadastro não fornece.
         if set(normalizado.split()) & {"taxa", "frete", "gratis", "gratuita", "gratuito",
                                        "prazo", "desconto", "demora"}:
@@ -418,6 +484,50 @@ class Atendimento:
 
         self.historico.append({"role": "assistant", "content": fala})
         return fala
+
+    def _trocar_itens(self, db, texto):
+        # shortcut: uma troca explícita por fala, sem novas observações ou outras
+        # alterações. Fora desse formato, esclareça antes de ampliar a gramática.
+        if re.search(r"[-+−]\s*\d", texto):
+            return ["Informe quantidades inteiras positivas, sem sinais."]
+        texto = re.sub(r"\s+por favor$", "", _normalizar(texto))
+        partes = re.fullmatch(
+            r"(?:(?:sim|nao)\s+mas\s+|sim\s+)?"
+            r"(?:(?:pode|quero|gostaria de)\s+)?"
+            r"(?:troque|trocar|troca|substitua|substituir)\s+(.+?)\s+por\s+(.+)", texto,
+        )
+        if not partes or not self._controle or not self._controle.itens:
+            return ["Pode dizer qual produto deseja trocar e por qual produto, com as quantidades?"]
+        retirar, origem = _item_da_troca(partes[1])
+        acrescentar, destino = _item_da_troca(partes[2])
+        origem, destino = _nome_na_troca(origem), _nome_na_troca(destino)
+        itens = [i for i in self._controle.itens
+                 if origem and f" {origem} " in f" {_nome_na_troca(i.nome)} "]
+        if len(itens) != 1:
+            return ["Qual item do pedido você deseja trocar? Informe também a quantidade."]
+        item = itens[0]
+        if retirar is None:
+            if item.quantidade != 1:
+                return ["Quantas unidades de {} deseja trocar?".format(item.nome)]
+            retirar = 1
+        produtos = [p for p in repositorio.listar_cardapio(db)
+                    if destino and f" {destino} " in f" {_nome_na_troca(p.nome)} "]
+        if not produtos:
+            return ["Não temos esse produto no cardápio ou a troca contém mais de uma alteração. "
+                    "Pode repetir uma troca por vez, com os nomes e as quantidades?"]
+        if len(produtos) > 1:
+            return [self._pergunta_de_ambiguidade(destino, produtos)]
+        if acrescentar is None:
+            return ["Quantas unidades de {} deseja acrescentar na troca?".format(produtos[0].nome)]
+        controle = deepcopy(self._controle)
+        try:
+            controle.substituir(item.id, retirar, produtos[0].id, acrescentar)
+        except ErroPedido as erro:
+            return [str(erro)]
+        return self._atualizar_carrinho(db, [
+            {"produto": i.nome, "quantidade": i.quantidade, "observacao": i.observacao}
+            for i in controle.itens
+        ])
 
     def _atualizar_carrinho(self, db, itens):
         """

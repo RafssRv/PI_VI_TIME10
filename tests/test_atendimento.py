@@ -304,6 +304,117 @@ class TestMontaOPedido:
 
 
 class TestFechaOPedido:
+    @pytest.mark.parametrize("fala", [
+        "Sim, mas troque a água por mais uma margherita.",
+        "Pode trocar 1 água mineral por 1 Pizza Margherita?",
+        "Substitua uma água por uma margherita, por favor.",
+    ])
+    def test_troca_explicita_retira_agua_e_soma_so_a_nova_pizza(
+        self, ana_identificada, llama, db, fala,
+    ):
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        llama.entende([item("margherita"), item("água mineral")])
+        ana_identificada.responder("Uma margherita e uma água no pix, é só isso")
+
+        def nao_deve_reconstruir_carrinho(*args, **kwargs):
+            raise AssertionError("A troca explícita não precisa da interpretação do LLM")
+
+        ana_identificada._conversar = nao_deve_reconstruir_carrinho
+        resposta = ana_identificada.responder(fala)
+        assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == [
+            ("Pizza Margherita", 2)]
+        assert "133 reais e 80 centavos" in resposta
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes
+        assert "registrado" in ana_identificada.responder("sim")
+        pedido = (db.query(Pedido).filter(Pedido.cliente_id == ana_identificada.cliente_id)
+                  .order_by(Pedido.id.desc()).first())
+        assert pedido.total == Decimal("133.80")
+        assert [(i.produto.nome, i.quantidade) for i in pedido.itens] == [("Pizza Margherita", 2)]
+
+    def test_troca_parcial_preserva_resto_e_nao_transfere_observacao(self, ana_identificada, llama):
+        llama.entende([item("margherita", 2, "sem tomate"), item("água mineral", 3)])
+        ana_identificada.responder("Duas margheritas sem tomate e três águas no pix")
+        resposta = ana_identificada.responder("Troque duas águas por uma margherita")
+        assert [(i["produto"], i["quantidade"], i["observacao"])
+                for i in ana_identificada.carrinho] == [
+            ("Pizza Margherita", 2, "sem tomate"), ("Agua Mineral 500ml", 1, None),
+            ("Pizza Margherita", 1, None)]
+        assert "205 reais e 70 centavos" in resposta
+
+    @pytest.mark.parametrize("fala", [
+        "Troque quatro cocas por uma água", "Troque uma coca e meia por uma água",
+        "Troque uma coca por meia água", "Troque uma coca por zero águas",
+        "Troque uma coca por uma pizza de sushi", "Troque uma coca por uma pizza",
+        "Troque uma coca por uma água e acrescente uma margherita",
+        "Troque a água por uma margherita", "Troque as cocas por uma água",
+        "Troque uma coca por água", "Troque por uma água",
+        "Não troque uma coca por uma água", "Se for possível, troque uma coca por uma água",
+        "Troque -1 coca por uma água", "Troque uma coca por -1 água",
+    ])
+    def test_troca_nao_esclarecida_preserva_carrinho_e_bloqueia_confirmacao(
+        self, ana_identificada, llama, db, fala,
+    ):
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        self._pedir_e_fechar(ana_identificada, llama)
+        anterior = list(ana_identificada.carrinho)
+        ana_identificada.responder(fala)
+        assert ana_identificada.carrinho == anterior
+        ana_identificada.responder("sim")
+        ana_identificada.responder("sim")
+        assert ana_identificada.etapa == "identificado"
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes
+
+    def test_troca_com_origem_ambigua_preserva_observacoes(self, ana_identificada, llama):
+        llama.entende([item("margherita", observacao="sem tomate"),
+                      item("margherita", observacao="sem manjericão")])
+        ana_identificada.responder("Duas margheritas com observações diferentes no pix")
+        anterior = list(ana_identificada.carrinho)
+        resposta = ana_identificada.responder("Troque uma margherita por uma água")
+        assert ana_identificada.carrinho == anterior
+        assert "qual" in resposta.lower()
+        assert ana_identificada.responder("sim") == resposta
+
+    def test_troca_sem_pedido_nao_vira_inclusao(self, ana_identificada):
+        resposta = ana_identificada.responder("Troque uma água por uma margherita")
+        assert ana_identificada.carrinho == []
+        assert "trocar" in resposta
+
+    def test_troca_pendente_exige_frase_completa_para_nao_apagar_pedido(self, ana_identificada, llama):
+        self._pedir_e_fechar(ana_identificada, llama)
+        anterior = list(ana_identificada.carrinho)
+        ana_identificada.responder("Troque as cocas por uma água")
+        ana_identificada.responder("duas")
+        ana_identificada.responder("sim")
+        assert ana_identificada.carrinho == anterior
+        assert ana_identificada.etapa == "identificado"
+        resposta = ana_identificada.responder("Troque duas cocas por uma água")
+        assert "71 reais e 90 centavos" in resposta
+        assert ana_identificada.etapa == "confirmando_pedido"
+
+    def test_desistir_da_troca_preserva_itens_e_exige_nova_confirmacao(self, ana_identificada, llama, db):
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        self._pedir_e_fechar(ana_identificada, llama)
+        anterior = list(ana_identificada.carrinho)
+        ana_identificada.responder("Troque as cocas por uma água")
+        resposta = ana_identificada.responder("cancele a troca")
+        assert ana_identificada.carrinho == anterior
+        assert "96 reais e 70 centavos" in resposta
+        assert ana_identificada.etapa == "confirmando_pedido"
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes
+
+    @pytest.mark.parametrize("ultima_fala", ["cancele a troca", "troque uma coca por uma água"])
+    def test_troca_nao_apaga_duvida_anterior(self, ana_identificada, llama, db, ultima_fala):
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        self._pedir_e_fechar(ana_identificada, llama)
+        llama.entende([item("margherita"), item("coca cola 2 litros", 2), item("borda")])
+        pendencia = ana_identificada.responder("acrescente uma borda")
+        assert "Catupiry ou Borda de Cheddar" in pendencia
+        ana_identificada.responder("quero trocar")
+        assert ana_identificada.responder(ultima_fala) == pendencia
+        assert ana_identificada.responder("sim") == pendencia
+        assert ana_identificada.etapa == "identificado"
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes
+
     def test_sim_apos_pergunta_do_modelo_nao_escolhe_produto(self, ana_identificada, llama):
         llama.entende([], resposta="Qual pizza você deseja?")
         ana_identificada.responder("uma pizza")
@@ -343,8 +454,7 @@ class TestFechaOPedido:
     def test_troca_invalida_preserva_pedido(self, ana_identificada, llama):
         self._pedir_e_fechar(ana_identificada, llama)
         anterior = list(ana_identificada.carrinho)
-        llama.entende([item("pizza de sushi")], fechar=True)
-        ana_identificada.responder("não, troque por pizza de sushi")
+        ana_identificada.responder("sim, mas troque a margherita por uma pizza de sushi")
         assert ana_identificada.carrinho == anterior
         assert ana_identificada.etapa == "identificado"
         assert "Não temos" in ana_identificada.responder("sim")
