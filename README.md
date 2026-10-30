@@ -5,8 +5,8 @@
 **Ninguém deveria perder um pedido por falta de atendente.**<br>
 O cliente fala e a IA ouve, entende, consulta e responde em voz, tudo local.
 
-**Estado atual:** protótipo com banco, tela de chamada, transcrição, atendimento com LLM e síntese de voz conectados no código.<br>
-Os testes textuais de integração ainda mostram erros de interpretação. **O atendimento não está aprovado para uso real.**
+**Estado atual:** protótipo com banco, interface de chamada, transcrição, atendimento com LLM e síntese de voz integrados no código.<br>
+Os testes automatizados não substituem a validação do atendimento completo com microfone e modelos reais.
 
 <img align="absmiddle" alt="ouvir: faster-whisper" src="https://img.shields.io/badge/ouvir-faster--whisper-E4572E?style=flat-square&labelColor=24292F">
 →
@@ -84,7 +84,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 npm run deps     # dependências Python do backend
 ollama pull llama3.2:3b
-npm run banco    # sobe o PostgreSQL no Docker
+npm run banco    # sobe o Postgres no Docker (precisa do Docker Desktop aberto)
 npm run seed     # popula cardápio, 6 clientes e 30 pedidos de histórico
 npm run dev      # sobe o banco e o servidor na porta 3000
 ```
@@ -120,8 +120,20 @@ python -m pytest tests/test_controle_pedido.py tests/test_evidencias.py -q
 ```
 
 O verificador de evidências confere referências, hashes e registros. Sua aprovação não significa aprovação funcional do atendente. Para repetir uma rodada textual com Ollama, use `python scripts/revalidar_prompt.py arquivo.json rodada saida.json`, informando uma evidência existente, o identificador da rodada e um arquivo de saída novo.
+Permita o uso do microfone no navegador. As configurações `DATABASE_URL`, `AMBIENTE` e `CPF_HMAC_SECRET` estão em [backend/config.py](backend/config.py). Fora de `AMBIENTE=dev`, defina `CPF_HMAC_SECRET`; mantenha o mesmo segredo entre a carga dos dados e a execução do servidor.
 
-## Documentação
+## Testes
+
+Com o ambiente virtual ativo e o PostgreSQL disponível:
+
+```powershell
+npm run teste
+python scripts/validar_evidencias.py
+```
+
+A suíte recria o esquema do banco `pizzaria_teste`; não use esse banco para dados que deseja preservar. O verificador de evidências confere a integridade dos registros, sem aprovar o comportamento do modelo.
+
+## Arquivos utilizados
 
 - [System prompt do atendente](backend/agente/prompt_sistema.txt).
 - [Dados de evidência utilizados pelos testes e pelo verificador](doc/evidencias/).
