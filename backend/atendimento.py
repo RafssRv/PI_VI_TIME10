@@ -5,48 +5,28 @@
 # q entendeu do pedido, o python confere tudo contra o cardapio, le o resumo pro cliente e so
 # grava quando ele confirma. o modelo nunca encosta no banco (nada de sql escrito por ele).
 #
-# uma instancia por chamada (o main.py cria uma por websocket), pq ela guarda em q etapa
+# uma instancia por chamada (a rota de voz cria uma por websocket), pq ela guarda em q etapa
 # a conversa ta e o q o cliente ja disse.
 
-import json
+import logging
 import re
 from copy import deepcopy
 from decimal import Decimal
 from pathlib import Path
+from uuid import uuid4
 
 from agente.controle_pedido import ControlePedido, ErroPedido, ProdutoCardapio
 
 from sqlalchemy.exc import SQLAlchemyError
 
 import repositorio
-from repositorio import _normalizar
-
-# o whisper as vezes escreve o cpf por extenso ("cinco dois nove..."), entao a gente
-# traduz as palavras de numero tbm. "meia" eh como muita gente fala o seis
-NUMEROS_FALADOS = {
-    "zero": "0", "um": "1", "uma": "1", "dois": "2", "duas": "2", "tres": "3",
-    "quatro": "4", "cinco": "5", "seis": "6", "meia": "6", "sete": "7", "oito": "8",
-    "nove": "9",
-}
-
-PALAVRAS_DE_NAO = {"nao", "dispenso", "negativo", "nunca"}
-PALAVRAS_DE_SIM = {
-    "sim", "quero", "claro", "pode", "ok", "okay", "isso", "bora", "aceito", "gostaria",
-    "desejo", "vamos", "certeza", "beleza", "manda", "certo", "correto", "exato",
-}
-
-# o que a pessoa fala antes do dado em si: "meu nome e joao", "moro na rua x"
-PREFIXO_NOME = re.compile(
-    r"^\s*(?:o\s+)?(?:meu\s+nome\s+(?:completo\s+)?(?:é|e)|(?:eu\s+)?me\s+chamo|"
-    r"(?:eu\s+)?sou\s+(?:o|a)?|é)\s+",
-    re.IGNORECASE,
+from interpretacao import (
+    ESQUEMA_DO_PEDIDO, PEDIDO_DE_TROCA, _item_da_troca, _nome_na_troca, _normalizar,
+    confirmacao_explicita, extrair_digitos, extrair_endereco, extrair_nome,
+    interpretar_resposta, sim_ou_nao,
 )
-PREFIXO_ENDERECO = re.compile(
-    r"^\s*(?:o\s+)?(?:meu\s+endere[çc]o\s+(?:é|e)|(?:eu\s+)?moro\s+(?:na|no|em)|"
-    r"fica\s+(?:na|no|em)|é\s+(?:na|no))\s+",
-    re.IGNORECASE,
-)
-PARTICULAS_DO_NOME = {"da", "de", "do", "das", "dos", "e"}
+
+logger = logging.getLogger(__name__)
 
 FRASE_PEDE_CPF = "Para começar, me diga o seu CPF, por favor."
 FRASE_ERRO_BANCO = "Tive um problema para consultar o sistema. Pode repetir, por favor?"
@@ -59,108 +39,8 @@ PAGAMENTO_FALADO = {
     "cartao_debito": "no cartão de débito",
 }
 
-# o q o llama tem q devolver a cada fala do cliente depois da identificacao.
-# o ollama obriga a resposta a seguir esse schema, entao sempre vem um json q da pra ler
-ESQUEMA_DO_PEDIDO = {
-    "type": "object",
-    "properties": {
-        "resposta": {"type": "string"},
-        "itens": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "produto": {"type": "string"},
-                    "quantidade": {"type": "number"},
-                    "observacao": {"type": ["string", "null"]},
-                },
-                "required": ["produto", "quantidade"],
-            },
-        },
-        "endereco": {"type": ["string", "null"]},
-        "fechar": {"type": "boolean"},
-    },
-    "required": ["resposta", "itens", "endereco", "fechar"],
-}
-
-PEDIDO_DE_TROCA = re.compile(
-    r"\b(?:troca|trocar|troque|troquem|substitua|substituir|substitui)\b"
-    r"|\b(?:em vez de|no lugar de)\b"
-)
-QUANTIDADES_DA_TROCA = {
-    "zero": 0, "um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3,
-    "quatro": 4, "cinco": 5, "seis": 6, "sete": 7, "oito": 8, "nove": 9, "dez": 10,
-}
-
-
-def _item_da_troca(texto):
-    texto = re.sub(r"^(?:a|o|as|os|mais)\s+", "", texto)
-    partes = texto.split(maxsplit=1)
-    quantidade = QUANTIDADES_DA_TROCA.get(partes[0])
-    if partes[0].isdigit():
-        quantidade = int(partes[0])
-    if quantidade is not None:
-        return quantidade, partes[1] if len(partes) > 1 else ""
-    return None, texto
-
-
-def _nome_na_troca(texto):
-    # Mesma comparação para o nome falado e o cadastrado, sem completar produtos.
-    return " ".join(
-        "mineral" if p == "minerais" else p.removesuffix("s")
-        for p in _normalizar(texto).split() if p != "de"
-    )
-
-
-def extrair_digitos(texto):
-    """junta todos os digitos da fala, escritos com numero ou por extenso."""
-    digitos = []
-    for palavra in _normalizar(texto).split():
-        if palavra.isdigit():
-            digitos.append(palavra)
-        elif palavra in NUMEROS_FALADOS:
-            digitos.append(NUMEROS_FALADOS[palavra])
-    return "".join(digitos)
-
-
-def sim_ou_nao(texto):
-    """True, False ou None quando nao deu pra entender. o nao ganha: "nao quero" eh nao."""
-    palavras = set(_normalizar(texto).split())
-    if palavras & PALAVRAS_DE_NAO:
-        return False
-    if palavras & PALAVRAS_DE_SIM:
-        return True
-    return None
-
-
-def confirmacao_explicita(texto):
-    """Somente uma afirmação completa autoriza a gravação, nunca palavras isoladas."""
-    return "?" not in texto and _normalizar(texto).strip() in {
-        "sim", "confirmo", "pode confirmar", "sim pode confirmar", "sim confirmo",
-        "correto", "esta correto", "isso mesmo", "pode ser", "ok", "okay",
-    }
-
-
 def _prompt_base():
     return (Path(__file__).parent / "agente" / "prompt_sistema.txt").read_text(encoding="utf-8")
-
-
-def extrair_nome(texto):
-    """tira o "meu nome e" da frente e a pontuacao, e capitaliza. None se nao sobrou nome."""
-    nome = PREFIXO_NOME.sub("", texto or "", count=1)
-    nome = re.sub(r"[^\w\s'-]|\d|_", " ", nome)
-    palavras = nome.split()
-    if sum(len(p) for p in palavras) < 2:
-        return None
-    return " ".join(
-        p.lower() if i > 0 and p.lower() in PARTICULAS_DO_NOME else p.capitalize()
-        for i, p in enumerate(palavras)
-    )
-
-
-def extrair_endereco(texto):
-    endereco = PREFIXO_ENDERECO.sub("", texto or "", count=1).strip(" .,!?")
-    return endereco if len(endereco) >= 5 else None
 
 
 def formatar_telefone(digitos):
@@ -193,15 +73,18 @@ def _juntar(partes, conector="e"):
 
 class Atendimento:
     def __init__(self, abrir_sessao=None, conversar=None):
+        self.id_chamada = uuid4().hex
         # os dois podem vir de fora pros testes: a sessao do banco de teste e um llama de mentira
         self._abrir_sessao = abrir_sessao
         self._conversar = conversar
         self.etapa = "inicio"
         self.cliente_id = None
         self.nome = None
+        self.telefone = None
         self.endereco_do_cadastro = None
         self.cadastro = {}
         self.historico = []
+        self._pedido_salvo = None
         self._limpar_pedido()
 
     def _limpar_pedido(self):
@@ -232,6 +115,32 @@ class Atendimento:
         }
         return etapas[self.etapa](texto)
 
+    def responder_com_eventos(self, texto):
+        """Devolve a fala e o estado da comanda, sem interpretar o texto da resposta."""
+        salvo_anterior = self._pedido_salvo
+        resposta = self.responder(texto)
+        eventos = []
+        if self.cliente_id is not None:
+            pedido = self._pedido_salvo or self._dados_do_pedido()
+            eventos.append({"tipo": "pedido", **deepcopy(pedido)})
+            if self._pedido_salvo is not None and self._pedido_salvo is not salvo_anterior:
+                eventos.append({"tipo": "pedido_salvo", "pedido_id": pedido["pedido_id"],
+                                "total": pedido["total"]})
+        return {"texto": resposta, "eventos": eventos}
+
+    def _dados_do_pedido(self):
+        return {
+            "pedido_id": None,
+            "cliente": {"nome": self.nome, "telefone": self.telefone},
+            "itens": [{"produto": i["produto"], "quantidade": i["quantidade"],
+                       "preco_unitario": format(i["preco"], ".2f"),
+                       "observacao": i["observacao"]} for i in self.carrinho],
+            "total": format(sum((i["preco"] * i["quantidade"] for i in self.carrinho),
+                                Decimal("0.00")), ".2f"),
+            "forma_pagamento": self.pagamento,
+            "endereco_entrega": self.endereco_entrega or self.endereco_do_cadastro,
+        }
+
     # --- banco ---
 
     def _sessao(self):
@@ -261,14 +170,14 @@ class Atendimento:
         except ValueError:
             # digito verificador nao bate: quase sempre eh o whisper q ouviu um numero errado
             return "Esse CPF parece inválido. Pode repetir devagar, por favor?"
-        except Exception as erro:
-            print(f"[atendimento] erro ao buscar cliente: {erro}")
+        except Exception:
+            logger.warning("chamada=%s etapa=buscar_cliente categoria=banco", self.id_chamada)
             return FRASE_ERRO_BANCO
         finally:
             db.close()
 
         if cliente:
-            self._identificar(cliente.id, cliente.nome, cliente.endereco)
+            self._identificar(cliente.id, cliente.nome, cliente.endereco, cliente.telefone)
             return "Achei seu cadastro, {}! O que vai querer hoje?".format(self._primeiro_nome())
 
         self.cadastro = {"cpf": digitos}
@@ -340,26 +249,28 @@ class Atendimento:
                 endereco=self.cadastro.get("endereco"),
             )
             cliente_id, nome, endereco = cliente.id, cliente.nome, cliente.endereco
-        except ValueError as erro:
+            telefone = cliente.telefone
+        except ValueError:
             # cpf q alguem cadastrou no meio tempo, nome grande demais...
-            print(f"[atendimento] cadastro recusado: {erro}")
+            logger.warning("chamada=%s etapa=cadastrar_cliente categoria=validacao", self.id_chamada)
             self.cadastro = {}
             self.etapa = "aguardando_cpf"
             return "Não consegui criar a conta com esses dados. " + FRASE_PEDE_CPF
-        except Exception as erro:
-            print(f"[atendimento] erro ao cadastrar: {erro}")
+        except Exception:
+            logger.warning("chamada=%s etapa=cadastrar_cliente categoria=banco", self.id_chamada)
             return FRASE_ERRO_BANCO
         finally:
             db.close()
 
         self.cadastro = {}
-        self._identificar(cliente_id, nome, endereco)
+        self._identificar(cliente_id, nome, endereco, telefone)
         return "Pronto, {}, sua conta foi criada! O que vai querer hoje?".format(
             self._primeiro_nome())
 
-    def _identificar(self, cliente_id, nome, endereco):
+    def _identificar(self, cliente_id, nome, endereco, telefone=None):
         self.cliente_id = cliente_id
         self.nome = nome
+        self.telefone = telefone
         self.endereco_do_cadastro = endereco
         self.etapa = "identificado"
 
@@ -378,9 +289,9 @@ class Atendimento:
         db = self._sessao()
         try:
             return self._montar_pedido_com(db, texto)
-        except SQLAlchemyError as erro:
+        except SQLAlchemyError:
             # erro do llama (ollama fechado) sobe de proposito: o turno_de_voz avisa na tela
-            print(f"[atendimento] erro no banco ao montar o pedido: {erro}")
+            logger.warning("chamada=%s etapa=montar_pedido categoria=banco", self.id_chamada)
             return FRASE_ERRO_BANCO
         finally:
             db.close()
@@ -444,15 +355,9 @@ class Atendimento:
         bruto = self._carregar_llama()(mensagens + self.historico + [turno], formato=ESQUEMA_DO_PEDIDO)
 
         try:
-            dados = json.loads(bruto)
-            if (not isinstance(dados, dict) or not isinstance(dados.get("itens"), list)
-                    or not isinstance(dados.get("resposta"), str)
-                    or type(dados.get("fechar")) is not bool
-                    or "endereco" not in dados
-                    or (dados["endereco"] is not None and not isinstance(dados["endereco"], str))):
-                raise ValueError("estrutura incompleta ou inválida")
-        except ValueError as erro:
-            print(f"[atendimento] resposta inválida do modelo: {erro}")
+            dados = interpretar_resposta(bruto)
+        except ValueError:
+            logger.warning("chamada=%s etapa=interpretar_pedido categoria=modelo_invalido", self.id_chamada)
             return self._pendencia
 
         self.historico.append(turno)
@@ -588,6 +493,9 @@ class Atendimento:
                 controle.adicionar(produto.id, item["quantidade"], item["observacao"] or "")
             self.carrinho = novo
             self._controle = controle
+            # Agradecimentos sem itens não apagam a última venda da comanda.
+            if novo:
+                self._pedido_salvo = None
         self._token_resumo = None
         return problemas
 
@@ -665,18 +573,24 @@ class Atendimento:
                 forma_pagamento=self.pagamento,
             )
             numero = pedido.id
-        except ValueError as erro:
+            # Preserve a comanda antes de limpar o carrinho para o próximo pedido.
+            self._pedido_salvo = {
+                **self._dados_do_pedido(), "pedido_id": numero,
+                "total": format(pedido.total, ".2f"),
+                "endereco_entrega": pedido.endereco_entrega,
+            }
+        except ValueError:
             # o cardapio mudou entre o resumo e o sim (produto desativado, por exemplo)
-            print(f"[atendimento] pedido recusado pelo repositorio: {erro}")
+            logger.warning("chamada=%s etapa=salvar_pedido categoria=validacao", self.id_chamada)
             self.etapa = "identificado"
             problemas = self._atualizar_carrinho(db, self.carrinho)
             self._pendencia = " ".join(problemas) or None
             if problemas:
                 return self._pendencia
             return "O cardápio mudou; confira os valores atualizados. " + self._fechar_pedido()
-        except Exception as erro:
+        except Exception:
             # continua confirmando: se o cliente disser sim de novo, tenta gravar de novo
-            print(f"[atendimento] erro ao salvar o pedido: {erro}")
+            logger.warning("chamada=%s etapa=salvar_pedido categoria=banco", self.id_chamada)
             return FRASE_ERRO_BANCO
         finally:
             db.close()
@@ -739,8 +653,8 @@ class Atendimento:
         db = self._sessao()
         try:
             cardapio = _cardapio_em_texto(repositorio.listar_cardapio(db))
-        except SQLAlchemyError as erro:
-            print(f"[atendimento] erro ao ler o cardapio: {erro}")
+        except SQLAlchemyError:
+            logger.warning("chamada=%s etapa=ler_cardapio categoria=banco", self.id_chamada)
             cardapio = "(cardápio indisponível agora: não informe preços)"
         finally:
             db.close()

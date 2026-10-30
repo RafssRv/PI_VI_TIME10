@@ -1,7 +1,6 @@
 // tela de chamada do atendente de voz.
 // regra basica do protocolo: binario = audio, texto = json de controle.
-// o backend de hoje morre se receber texto (o receive_bytes estoura KeyError), entao a tela
-// nasce muda: so manda json depois que o servidor se apresentar com {"tipo":"pronto"}.
+// Aguarda "pronto", envia "iniciar_chamada" e só então libera os blocos de áudio.
 //
 // ======================= PROTOCOLO DO WEBSOCKET /ws/falar (versao 1) =======================
 // toda mensagem de controle é json com a chave "tipo". texto sem "tipo" cai no log e nao
@@ -25,7 +24,7 @@
 //      binario que chega sem esse aviso é ignorado.
 //  5 {"tipo":"fim_audio"}
 //      fecha os frames num arquivo so e toca. MANDE SEMPRE, mesmo com um frame unico.
-//  6 {"tipo":"pedido","turno":3,
+//  6 {"tipo":"pedido","turno":3,"pedido_id":null,
 //     "cliente":{"nome":"Maria Aparecida","telefone":"19998124477"},
 //     "itens":[{"produto":"Pizza Margherita","quantidade":2,"preco_unitario":"39.90",
 //               "observacao":"sem cebola"}],
@@ -34,10 +33,11 @@
 //      de cima da mensagem, nao dentro de uma chave "pedido". o item usa os mesmos nomes do
 //      banco e a tela calcula o subtotal (preco_unitario x quantidade).
 //      forma_pagamento so aceita pix | dinheiro | cartao_credito | cartao_debito (ou null).
+//      pedido_id=null indica rascunho; um número preserva a comanda já registrada.
 //  7 {"tipo":"pedido_salvo","pedido_id":42,"total":"91.80"}
 //      TEM QUE VIR ANTES do chamada_encerrada, senao o resumo diz "Pedido não salvo".
 //  8 {"tipo":"erro","onde":"transcricao","mensagem":"não entendi","fatal":false}
-//      onde so pode ser: captura | audio | transcricao | llm | ollama | sintese | piper.
+//      onde: captura | audio | transcricao | llm | ollama | sintese | piper | protocolo.
 //      fatal=true derruba a chamada, fatal=false é so uma tarja de aviso.
 //  9 {"tipo":"chamada_encerrada","motivo":"pedido_finalizado"}
 //
@@ -48,7 +48,7 @@
 //  4 {"tipo":"timeout","turno":3}                         -> ninguem respondeu em 15 s
 //  5 {"tipo":"encerrar_chamada","motivo":"cliente_desligou"}
 //  + FRAMES BINARIOS: pedacos de 250 ms do microfone, so enquanto a tela esta em "ouvindo".
-//  o "turno" que a tela manda é so conferencia: pode ecoar ou ignorar.
+//  Cada fim_da_fala precisa de áudio novo e de um turno maior que o anterior.
 //
 // DINHEIRO: sempre STRING com duas casas, feita com str(Decimal) — nunca float(). float()
 // vira 79.8 e 91, que nao é formato de dinheiro. a tela aceita numero por seguranca, mas
@@ -216,7 +216,7 @@ function escreverLog(mensagem) {
 function definirEstado(nome, sublinha) {
   const dados = ESTADOS[nome];
   if (!dados) {
-    escreverLog("estado desconhecido pedido pela tela: " + nome);
+    escreverLog("estado desconhecido pedido pela tela");
     return;
   }
 
@@ -346,7 +346,7 @@ function conectar() {
     meuSocket.onopen = () => {
       abriu = true;
       mudarConexao("conectado", "conectado");
-      escreverLog("websocket conectado (modo mudo: só binário até o servidor se apresentar)");
+      escreverLog("websocket conectado, aguardando apresentação do servidor");
       resolve();
     };
 
@@ -409,9 +409,10 @@ function tratarMensagem(evento) {
     obj = null;
   }
 
-  // texto que nao eh json com "tipo" cai no log e para por aqui (ex.: "chunk guardado no backend!")
+  // Texto fora do protocolo pode conter dados da conversa; não copiar para o log.
   if (!obj || typeof obj !== "object" || !obj.tipo) {
-    escreverLog("backend: " + evento.data);
+    escreverLog(evento.data === "chunk guardado no backend!"
+      ? "backend: chunk guardado no backend!" : "mensagem sem protocolo recebida do backend");
     return;
   }
 
@@ -429,8 +430,9 @@ function tratarMensagem(evento) {
         formato_audio: formatoEmUso(),
         chunk_ms: TAMANHO_CHUNK_MS
       });
+      enviarAudioPendente();
     } else {
-      escreverLog("frame '" + obj.tipo + "' chegou antes do 'pronto': a tela continua muda");
+      escreverLog("frame chegou antes do 'pronto': a tela continua muda");
     }
   }
 
@@ -441,7 +443,7 @@ function tratarMensagem(evento) {
 function aplicarMensagem(obj) {
   switch (obj.tipo) {
     case "pronto":
-      escreverLog("servidor pronto, protocolo versão " + obj.versao_protocolo);
+      escreverLog("servidor pronto");
       break;
 
     case "estado":
@@ -470,13 +472,16 @@ function aplicarMensagem(obj) {
 
     case "pedido":
       ultimoPedido = obj;
+      pedidoSalvoId = obj.pedido_id ?? null;
+      comandaAviso.textContent = "Este pedido ainda não foi salvo.";
+      comandaAviso.hidden = pedidoSalvoId !== null || !obj.itens?.length;
       desenharPedido(obj, comandaItens);
       break;
 
     case "pedido_salvo":
       pedidoSalvoId = obj.pedido_id;
       comandaAviso.hidden = true;
-      escreverLog(`pedido ${obj.pedido_id} salvo no banco, total ${obj.total}`);
+      escreverLog("pedido salvo no banco");
       break;
 
     case "erro":
@@ -487,7 +492,7 @@ function aplicarMensagem(obj) {
       break;
 
     case "chamada_encerrada": {
-      escreverLog("servidor encerrou a chamada: " + (obj.motivo || "sem motivo"));
+      escreverLog("servidor encerrou a chamada");
       // o socket fica aberto mais um instante: se o backend salvar o pedido DEPOIS de avisar
       // que a chamada acabou, o pedido_salvo atrasado ainda entra no resumo
       encerrar(null, "encerrada", true);
@@ -501,7 +506,7 @@ function aplicarMensagem(obj) {
     }
 
     default:
-      escreverLog("mensagem desconhecida do backend: " + JSON.stringify(obj));
+      escreverLog("mensagem desconhecida do backend");
   }
 }
 
@@ -510,7 +515,7 @@ function aplicarEtapa(etapa) {
   // parou e as trilhas do microfone ja foram soltas, entao a tela diria "pode falar" com o
   // microfone morto (acontece na janela de 1,2 s que o chamada_encerrada deixa aberta)
   if (!estaEmChamada()) {
-    escreverLog("estado '" + etapa + "' chegou fora da chamada, ignorado");
+    escreverLog("estado chegou fora da chamada, ignorado");
     return;
   }
 
@@ -550,7 +555,7 @@ function aplicarEtapa(etapa) {
       marcarEtapa(0);
       break;
     default:
-      escreverLog("etapa desconhecida: " + etapa);
+      escreverLog("etapa desconhecida");
   }
 }
 
@@ -581,7 +586,7 @@ function criarFala(quem, parcial) {
 
 function mostrarTranscricao(quem, texto, parcial) {
   if (quem !== "cliente" && quem !== "atendente") {
-    escreverLog("transcrição com 'quem' desconhecido: " + quem);
+    escreverLog("transcrição com 'quem' desconhecido");
     return;
   }
 
@@ -619,7 +624,7 @@ function mostrarTranscricao(quem, texto, parcial) {
 function formatarDinheiro(valor) {
   const numero = typeof valor === "string" ? Number(valor.trim()) : Number(valor);
   if (valor === null || valor === undefined || valor === "" || !Number.isFinite(numero)) {
-    escreverLog("valor de dinheiro fora do formato esperado: " + valor);
+    escreverLog("valor de dinheiro fora do formato esperado");
     return "—";
   }
   const partes = numero.toFixed(2).split(".");
@@ -638,7 +643,7 @@ function calcularSubtotal(item) {
 function formatarPagamento(valor) {
   if (!valor) return "a combinar";
   if (PAGAMENTOS[valor]) return PAGAMENTOS[valor];
-  escreverLog("forma de pagamento que o banco não aceita: " + valor);
+  escreverLog("forma de pagamento que o banco não aceita");
   return "a combinar";
 }
 
@@ -783,7 +788,7 @@ function mostrarErro(mensagem, fatal) {
   tarjaErroTexto.textContent = mensagem;
   tarjaErroBotao.textContent = erroEhFatal ? "Tentar de novo" : "Fechar aviso";
   tarjaErro.hidden = false;
-  escreverLog((erroEhFatal ? "erro fatal: " : "aviso: ") + mensagem);
+  escreverLog(erroEhFatal ? "erro fatal na chamada" : "aviso na chamada");
 
   if (!erroEhFatal) return;
 
@@ -791,7 +796,9 @@ function mostrarErro(mensagem, fatal) {
   mudarConexao("erro", socket ? "erro de conexão" : "desconectado");
   encerrar(null, "erro");
   sublinhaEstado.textContent = mensagem;   // a sublinha do orbe repete o erro em texto
-  comandaAviso.textContent = "Este pedido ainda não foi salvo.";
+  comandaAviso.textContent = pedidoSalvoId !== null
+    ? "O pedido já foi salvo. A chamada foi interrompida."
+    : "Este pedido ainda não foi salvo.";
   comandaAviso.hidden = false;
 }
 
@@ -842,16 +849,7 @@ async function iniciarCaptura() {
   gravador.ondataavailable = (evento) => {
     if (!evento.data || evento.data.size === 0) return;
     pedacos.push(evento.data);
-    // binario so sai com o microfone aberto: a resposta do atendente nunca volta pro backend
-    if (estadoAtual !== "ouvindo") return;
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      // manda tambem os pedacos q ficaram pra tras, na ordem. o primeiro eh o mais
-      // importante: so ele tem o cabecalho do audio e ele fica pronto antes da conexao abrir
-      while (pedacosEnviados < pedacos.length) {
-        socket.send(pedacos[pedacosEnviados]);
-        pedacosEnviados++;
-      }
-    }
+    enviarAudioPendente();
   };
 
   gravador.onstop = () => {
@@ -865,6 +863,16 @@ async function iniciarCaptura() {
 
   gravador.start(TAMANHO_CHUNK_MS);
   prepararMedidor();
+}
+
+function enviarAudioPendente() {
+  if (!protocoloNovo || estadoAtual !== "ouvindo") return;
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  // Preserve o primeiro bloco: ele contém o cabeçalho, mesmo se capturado antes de pronto.
+  while (pedacosEnviados < pedacos.length) {
+    socket.send(pedacos[pedacosEnviados]);
+    pedacosEnviados++;
+  }
 }
 
 function pararTracks() {
@@ -903,7 +911,7 @@ function prepararMedidor() {
     dadosNivel = new Uint8Array(analisador.fftSize);
     fonte.connect(analisador);
   } catch (erro) {
-    escreverLog("não consegui medir o nível do microfone: " + erro.message);
+    escreverLog("não consegui medir o nível do microfone");
     analisador = null;
   }
   if (!loopNivel) medirNivel();
@@ -1073,7 +1081,7 @@ function tocarResposta(blob) {
   if (tocando && tocando.catch) {
     tocando.catch((erro) => {
       if (minhaFala !== idFala) return;   // essa fala foi trocada por outra, deixa a nova
-      escreverLog("o navegador não deixou tocar a resposta: " + erro.message);
+      escreverLog("o navegador não deixou tocar a resposta");
       voltarAOuvir("falha_audio");
     });
   }
@@ -1102,7 +1110,7 @@ function voltarAOuvir(motivo) {
   } else if (motivo === "timeout") {
     enviarTexto({ tipo: "timeout", turno: turno });
   } else {
-    escreverLog("microfone reaberto sem avisar o servidor (motivo: " + motivo + ")");
+    escreverLog("microfone reaberto sem avisar o servidor");
   }
 
   if (tempoInicioTurno) {

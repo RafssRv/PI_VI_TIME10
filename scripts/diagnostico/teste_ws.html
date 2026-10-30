@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Teste WebSocket Pizzaria</title>
+</head>
+<body>
+    <h2>Teste de Streaming (Fase 3)</h2>
+    
+    <button id="btn-iniciar">começar a falar</button>
+    <button id="btn-parar" disabled>parar e desligar</button>
+    
+    <p id="status">status: esperando...</p>
+
+    <script>
+        let ws;
+        let mediaRecorder;
+
+        const btnIniciar = document.getElementById('btn-iniciar');
+        const btnParar = document.getElementById('btn-parar');
+        const textoStatus = document.getElementById('status');
+
+        btnIniciar.onclick = async () => {
+            // 1. conecta no nosso backend fastapi
+            ws = new WebSocket(`ws://${location.host}/ws/falar`);
+
+            ws.onopen = () => {
+                textoStatus.innerText = "status: aguardando o servidor...";
+                btnIniciar.disabled = true;
+            };
+            ws.onmessage = async (event) => {
+                let mensagem;
+                try { mensagem = JSON.parse(event.data); } catch { return; }
+                if (mensagem.tipo === "erro") {
+                    textoStatus.innerText = mensagem.mensagem;
+                    return;
+                }
+                if (mensagem.tipo !== "pronto") return;
+                const conexao = ws;
+                let stream;
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    if (conexao.readyState !== WebSocket.OPEN) {
+                        stream.getTracks().forEach(track => track.stop());
+                        return;
+                    }
+
+                    const formato = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"]
+                        .find(tipo => MediaRecorder.isTypeSupported(tipo));
+                    if (!formato) throw new Error("formato não suportado");
+                    mediaRecorder = new MediaRecorder(stream, { mimeType: formato });
+                    mediaRecorder.onstop = () => stream.getTracks().forEach(track => track.stop());
+                    conexao.send(JSON.stringify({
+                        tipo: "iniciar_chamada", versao_protocolo: 1,
+                        formato_audio: mediaRecorder.mimeType, chunk_ms: 500
+                    }));
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0 && conexao.readyState === WebSocket.OPEN) {
+                            conexao.send(event.data);
+                        }
+                    };
+
+                    mediaRecorder.start(500);
+                    textoStatus.innerText = "status: conectado! gravando...";
+                    btnParar.disabled = false;
+                } catch (erro) {
+                    if (stream) stream.getTracks().forEach(track => track.stop());
+                    textoStatus.innerText = "status: não foi possível iniciar a gravação";
+                    conexao.close();
+                }
+            };
+            ws.onclose = () => {
+                if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
+                btnIniciar.disabled = false;
+                btnParar.disabled = true;
+            };
+        };
+
+        btnParar.onclick = () => {
+            // para de gravar e fecha a ligacao (tubo)
+            mediaRecorder.stop();
+            ws.close();
+            
+            textoStatus.innerText = "status: chamada encerrada. olha la o terminal do python!";
+            btnIniciar.disabled = false;
+            btnParar.disabled = true;
+        };
+    </script>
+</body>
+</html>
