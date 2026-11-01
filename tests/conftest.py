@@ -59,11 +59,11 @@ def _preparar_banco_de_teste():
         if not existe:
             conexao.execute('create database "{}"'.format(BANCO_DE_TESTE))
 
-    # esquema do zero a cada execucao: o banco.sql e a unica fonte da verdade
+    # esquema do zero a cada execucao: database/banco.sql e a unica fonte da verdade
     with psycopg.connect(_dsn(BANCO_DE_TESTE), autocommit=True) as conexao:
         conexao.execute("drop schema public cascade")
         conexao.execute("create schema public")
-        conexao.execute((RAIZ / "banco.sql").read_text(encoding="utf-8"))
+        conexao.execute((RAIZ / "database/banco.sql").read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="session")

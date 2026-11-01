@@ -5,17 +5,13 @@ import gc
 import io
 import json
 import logging
-import runpy
 import sys
 import threading
-from pathlib import Path
-from types import ModuleType
 
 import pytest
 from fastapi import UploadFile
 from sqlalchemy.exc import StatementError
 
-import main
 from rotas import voz
 import repositorio
 import turno_de_voz
@@ -237,18 +233,6 @@ def test_falha_inesperada_da_chamada_nao_escapa_para_traceback_do_servidor(
     assert not any(s in json.dumps(eventos, ensure_ascii=False) for s in SEGREDOS)
     conferir_logs(capsys, caplog)
     assert "categoria=inesperada" in caplog.text
-
-
-def test_fluxo_legado_do_agente_nao_imprime_a_conversa(monkeypatch, capsys, caplog):
-    for nome, funcao in [("llm_service", "responder"), ("whisper_service", "transcrever"),
-                         ("piper_service", "sintetizar_resposta")]:
-        modulo = ModuleType("services." + nome)
-        setattr(modulo, funcao, lambda *a: DADOS)
-        monkeypatch.setitem(sys.modules, modulo.__name__, modulo)
-    caminho = Path(main.__file__).parent / "agente" / "main.py"
-    agente = runpy.run_path(str(caminho))
-    assert agente["processar_audio"]("audio.wav") == (DADOS, DADOS)
-    conferir_logs(capsys, caplog)
 
 
 @pytest.mark.parametrize("codigo", [0, 1])

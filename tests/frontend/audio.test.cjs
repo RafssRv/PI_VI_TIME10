@@ -58,7 +58,7 @@ function tela() {
     enviados,
   });
   const executar = (codigo) => vm.runInContext(codigo, contexto);
-  executar(readFileSync(join(__dirname, "../frontend/app.js"), "utf8"));
+  executar(readFileSync(join(__dirname, "../../frontend/app.js"), "utf8"));
   executar('socket = { readyState: 1, send: (valor) => enviados.push(valor) }; protocoloNovo = true; definirEstado("ouvindo");');
   return { executar, enviados, eventosGravador, temporizadores, elementos, track };
 }
