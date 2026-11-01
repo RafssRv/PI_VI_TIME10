@@ -10,7 +10,8 @@ import pytest
 
 import repositorio
 from models import Pedido
-from atendimento import Atendimento, extrair_digitos, extrair_nome, sim_ou_nao
+from atendimento import Atendimento
+from interpretacao import extrair_digitos, extrair_nome, sim_ou_nao
 
 # valido no digito verificador e fora do seed (o mesmo q o seed sugere pra testar o rf04)
 CPF_NOVO = "11122233396"

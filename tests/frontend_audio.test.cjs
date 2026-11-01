@@ -63,21 +63,30 @@ function tela() {
   return { executar, enviados, eventosGravador, temporizadores, elementos, track };
 }
 
-test("fim_da_fala chega depois do ultimo audio do gravador", async () => {
-  const t = tela();
-  await t.executar("iniciarCaptura()");
-  t.executar('gravador.emitir("cabecalho-e-inicio")');
-  const fechamento = t.executar("fimDaFala(2000)");
-  assert.equal(t.track.enabled, false);
-  while (t.eventosGravador.length) {
-    t.eventosGravador.shift()();
-    await new Promise(setImmediate);
-  }
-  await fechamento;
-  const fluxo = await Promise.all(t.enviados.map((valor) =>
-    typeof valor === "string" ? JSON.parse(valor).tipo : valor.text()));
-  assert.deepEqual(fluxo, ["cabecalho-e-inicio", "final-da-fala", "fim_da_fala"]);
-});
+for (const prontoNoInicio of [true, false]) {
+  test(`fim_da_fala chega depois do ultimo audio; pronto inicial: ${prontoNoInicio}`, async () => {
+    const t = tela();
+    if (!prontoNoInicio) t.executar("protocoloNovo = false");
+    await t.executar("iniciarCaptura()");
+    t.executar('gravador.emitir("cabecalho-e-inicio")');
+    if (!prontoNoInicio) {
+      assert.equal(t.enviados.length, 0);
+      t.executar('tratarMensagem({ data: JSON.stringify({ tipo: "pronto", versao_protocolo: 1 }) })');
+    }
+    const fechamento = t.executar("fimDaFala(2000)");
+    assert.equal(t.track.enabled, false);
+    while (t.eventosGravador.length) {
+      t.eventosGravador.shift()();
+      await new Promise(setImmediate);
+    }
+    await fechamento;
+    const fluxo = await Promise.all(t.enviados.map((valor) =>
+      typeof valor === "string" ? JSON.parse(valor).tipo : valor.text()));
+    const esperado = ["cabecalho-e-inicio", "final-da-fala", "fim_da_fala"];
+    if (!prontoNoInicio) esperado.unshift("iniciar_chamada");
+    assert.deepEqual(fluxo, esperado);
+  });
+}
 
 test("resposta aguarda fim_audio mesmo com intervalo entre os frames", () => {
   const t = tela();

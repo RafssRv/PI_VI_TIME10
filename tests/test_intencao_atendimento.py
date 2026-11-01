@@ -40,7 +40,7 @@ def conversa(monkeypatch):
         SimpleNamespace(id=4, nome="Coca-Cola 2 Litros", preco=Decimal("12.50"),
                         categoria="Bebida", descricao="Refrigerante", ativo=True),
     ]
-    cliente = SimpleNamespace(id=10, nome="Ana Silva", endereco="Rua das Flores, 10")
+    cliente = SimpleNamespace(id=10, nome="Ana Silva", telefone=None, endereco="Rua das Flores, 10")
     gravados = []
 
     def buscar_produtos(db, nome):
@@ -49,8 +49,11 @@ def conversa(monkeypatch):
         return exatos or [p for p in produtos if termo and termo in repositorio._normalizar(p.nome)]
 
     def salvar_pedido(db, cliente_id, itens, **dados):
+        dados["endereco_entrega"] = dados.get("endereco_entrega") or cliente.endereco
         pedido = SimpleNamespace(id=len(gravados) + 1, cliente_id=cliente_id,
-                                 itens=deepcopy(itens), **dados)
+                                 itens=deepcopy(itens),
+                                 total=sum((i["preco_confirmado"] * i["quantidade"] for i in itens),
+                                           Decimal("0.00")), **dados)
         gravados.append(pedido)
         return pedido
 
