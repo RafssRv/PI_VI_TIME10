@@ -7,10 +7,10 @@ from pathlib import Path
 PASTA_AGENTE = Path(__file__).resolve().parent.parent
 
 
-def sintetizar_resposta(texto):
+def sintetizar_resposta(texto, caminho=None):
     modelo = PASTA_AGENTE / "models" / "piper" / "pt_BR-cadu-medium.onnx"
-    output = PASTA_AGENTE / "audio" / "resposta.wav"
-    output.parent.mkdir(exist_ok=True)
+    output = Path(caminho) if caminho is not None else PASTA_AGENTE / "audio" / "resposta.wav"
+    output.parent.mkdir(parents=True, exist_ok=True)
 
     # roda como "py -m piper" pq no windows o comando "piper" sozinho nem sempre eh achado.
     # o utf-8 eh pros acentos chegarem certos

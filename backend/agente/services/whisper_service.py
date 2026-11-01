@@ -1,7 +1,9 @@
+import os
+
 from faster_whisper import WhisperModel
 
 modelo = WhisperModel(
-    "base",
+    os.environ.get("WHISPER_MODEL", "base"),
     device="cpu",
     compute_type="int8"
 )

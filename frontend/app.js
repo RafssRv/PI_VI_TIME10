@@ -61,7 +61,6 @@ const TAMANHO_CHUNK_MS = 250;       // de quanto em quanto tempo o gravador entr
 const VERSAO_PROTOCOLO = 1;
 const ESPERA_RESPOSTA_MS = 15000;   // se a resposta nao vier, reabre o microfone sozinho
 const ESPERA_SOCKET_MS = 5000;      // tempo pro websocket abrir
-const ESPERA_FIM_AUDIO_MS = 800;    // se o servidor esquecer o fim_audio, toca o que chegou
 const ESPERA_PEDIDO_SALVO_MS = 1200; // janela pro pedido_salvo atrasado entrar no resumo
 const FALA_MAXIMA_MS = 15000;       // fala contínua demais: fecha o turno na marra
 const LIMITE_LOG = 200;
@@ -168,7 +167,6 @@ let tempoInicioTurno = 0;
 let relogioSeguranca = 0;
 let esperandoAudio = false;
 let pedacosResposta = [];      // frames binarios do piper ate chegar o fim_audio
-let relogioFimAudio = 0;
 let formatoRespostaEsperado = "audio/wav";
 let urlRespostaAnterior = "";
 let idFala = 0;                // numera cada reproducao: so a fala atual reabre o microfone
@@ -390,12 +388,11 @@ function enviarTexto(obj) {
 function tratarMensagem(evento) {
   // binario: so vale quando a gente avisou que vinha audio de resposta.
   // o piper pode mandar a resposta em varios pedacos, entao a gente junta todos e so toca
-  // no fim_audio (o relogio abaixo é a rede pra servidor que esquece de mandar o fim_audio)
+  // no fim_audio: uma pausa da rede nao significa que o arquivo acabou.
   if (typeof evento.data !== "string") {
     if (esperandoAudio) {
       pedacosResposta.push(evento.data);
-      clearTimeout(relogioFimAudio);
-      relogioFimAudio = setTimeout(fecharAudioResposta, ESPERA_FIM_AUDIO_MS);
+      armarRelogioSeguranca();
     } else {
       escreverLog("chegou binário sem aviso de audio_resposta, ignorado");
     }
@@ -844,14 +841,7 @@ async function iniciarCaptura() {
     pedacos.push(evento.data);
     // binario so sai com o microfone aberto: a resposta do atendente nunca volta pro backend
     if (estadoAtual !== "ouvindo") return;
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      // manda tambem os pedacos q ficaram pra tras, na ordem. o primeiro eh o mais
-      // importante: so ele tem o cabecalho do audio e ele fica pronto antes da conexao abrir
-      while (pedacosEnviados < pedacos.length) {
-        socket.send(pedacos[pedacosEnviados]);
-        pedacosEnviados++;
-      }
-    }
+    enviarPedacosPendentes();
   };
 
   gravador.onstop = () => {
@@ -865,6 +855,15 @@ async function iniciarCaptura() {
 
   gravador.start(TAMANHO_CHUNK_MS);
   prepararMedidor();
+}
+
+function enviarPedacosPendentes() {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  // Inclui o cabecalho e a cauda solicitada antes de fechar o turno, na ordem.
+  while (pedacosEnviados < pedacos.length) {
+    socket.send(pedacos[pedacosEnviados]);
+    pedacosEnviados++;
+  }
 }
 
 function pararTracks() {
@@ -995,7 +994,8 @@ function vigiarSilencio(nivel, agora) {
   }
 }
 
-function fimDaFala(duracaoMs) {
+async function fimDaFala(duracaoMs) {
+  if (estadoAtual !== "ouvindo") return;
   houveFala = false;
   inicioDaFala = 0;
   inicioDoSilencio = 0;
@@ -1008,7 +1008,27 @@ function fimDaFala(duracaoMs) {
     return;
   }
 
-  pausarCaptura();   // fecha o microfone antes de qualquer outra coisa
+  const gravadorDoTurno = gravador;
+  const socketDoTurno = socket;
+  definirEstado("processando");
+  // pause() nao entrega o ultimo chunk. Espera a pausa e pede a cauda antes do controle.
+  const pausa = new Promise((resolve) => {
+    gravadorDoTurno.addEventListener("pause", resolve, { once: true });
+  });
+  pausarCaptura();
+  await pausa;
+  if (gravador !== gravadorDoTurno || socket !== socketDoTurno || !estaEmChamada()) return;
+  try {
+    await new Promise((resolve, reject) => {
+      gravadorDoTurno.addEventListener("dataavailable", resolve, { once: true });
+      try { gravadorDoTurno.requestData(); } catch (erro) { reject(erro); }
+    });
+  } catch (erro) {
+    mostrarErro("Nao consegui terminar a gravacao. Ligue novamente.", true);
+    return;
+  }
+  if (gravador !== gravadorDoTurno || socket !== socketDoTurno || !estaEmChamada()) return;
+  enviarPedacosPendentes();
   turno++;
   tempoInicioTurno = Date.now();
   enviarTexto({ tipo: "fim_da_fala", turno: turno, duracao_ms: Math.round(duracaoMs) });
@@ -1030,7 +1050,6 @@ function armarRelogioSeguranca() {
 
 // junta os frames binarios num arquivo so e manda tocar
 function fecharAudioResposta() {
-  clearTimeout(relogioFimAudio);
   if (!esperandoAudio) return;
   esperandoAudio = false;
 
@@ -1092,7 +1111,6 @@ function voltarAOuvir(motivo) {
 
   // se o turno morreu com um audio_resposta pendurado, a espera morre junto: senao
   // esperandoAudio fica true e barra o proximo "ouvindo"
-  clearTimeout(relogioFimAudio);
   esperandoAudio = false;
   pedacosResposta = [];
 
@@ -1176,7 +1194,6 @@ async function ligar() {
 // manterSocket = true deixa o websocket aberto mais um pouco (quem fecha é quem chamou)
 function encerrar(motivo, estadoFinal, manterSocket) {
   clearTimeout(relogioSeguranca);
-  clearTimeout(relogioFimAudio);
   pararMedicao();
   esperandoAudio = false;
   pedacosResposta = [];

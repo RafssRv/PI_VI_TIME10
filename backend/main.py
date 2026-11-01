@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 from pathlib import Path
+from tempfile import TemporaryFile
 from fastapi.staticfiles import StaticFiles
 
 from atendimento import Atendimento
@@ -77,9 +78,7 @@ async def websocket_audio(websocket: WebSocket):
     # o agente ja existe, entao o servidor se apresenta e a tela sai do modo mudo
     await websocket.send_json({"tipo": "pronto", "versao_protocolo": 1})
 
-    # a gnt cria um arquivo e abre ele no modo "wb" (write bytes)
-    # ou "ab" (append bytes). vamos de "wb" e manter ele aberto.
-    caminho_audio = "audio_cliente_streaming.webm"
+    # A gravacao temporaria pertence a esta chamada, sem sobrescrever evidencias antigas.
     formato_do_audio = None
 
     # guarda todo o audio da chamada, pq so o primeiro pedaco tem o cabecalho do webm.
@@ -91,7 +90,7 @@ async def websocket_audio(websocket: WebSocket):
     atendimento = Atendimento()
 
     try:
-        with open(caminho_audio, "wb") as arquivo:
+        with TemporaryFile() as arquivo:
             while True:
                 # receive() em vez de receive_bytes(): o receive_bytes estoura KeyError
                 # quando chega um frame de TEXTO (a mensagem vem com a chave "text" e ele
@@ -156,7 +155,7 @@ async def websocket_audio(websocket: WebSocket):
     except WebSocketDisconnect:
         # Passo 6: Tratar desconexão
         print(f"[websocket] cliente desconectou da chamada.")
-        print(f"[websocket] audio completo salvo em: {caminho_audio}")
+        print("[websocket] gravacao temporaria da chamada liberada.")
         
         # --- MOCK DA IA ---
         # Quando o cliente desliga, a IA processaria tudo. 

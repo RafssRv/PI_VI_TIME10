@@ -3,6 +3,9 @@
 # fala -> texto (whisper) -> resposta (llama) -> voz (piper) -> manda pra tela tocar
 
 import asyncio
+import hashlib
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 # o agente so eh carregado na primeira fala, e nao quando o servidor liga.
 # assim o servidor sobe rapido e funciona ate pra quem nao instalou o whisper/piper
@@ -54,6 +57,14 @@ async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, aten
     atendimento eh o roteiro dessa chamada (atendimento.py), q lembra em q etapa ela ta.
     devolve onde essa fala terminou, pro proximo turno comecar dali
     """
+    atendimento.turno_voz = turno
+    # Cada turno tem seus proprios arquivos, inclusive em chamadas simultaneas.
+    with TemporaryDirectory(prefix="pizzaria-turno-") as pasta:
+        return await _atender_turno(
+            websocket, audio_da_chamada, amostra_inicio, turno, atendimento, Path(pasta))
+
+
+async def _atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, atendimento, pasta):
     try:
         agente = carregar_agente()
     except ImportError as erro:
@@ -65,7 +76,7 @@ async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, aten
     try:
         caminho_wav, amostra_fim = await rodar_sem_travar(
             websocket, turno, "transcrevendo",
-            agente["salvar_fala_em_wav"], bytes(audio_da_chamada), amostra_inicio)
+            agente["salvar_fala_em_wav"], bytes(audio_da_chamada), amostra_inicio, pasta / "cliente.wav")
     except Exception as erro:
         await mandar_erro(websocket, "audio", f"Não consegui ler o áudio gravado ({erro}).")
         return amostra_inicio
@@ -82,20 +93,21 @@ async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, aten
     print(f"[turno {turno}] cliente: {texto_cliente!r}")
 
     if not texto_cliente:
-        await mandar_erro(websocket, "transcricao", "Não entendi. Pode repetir?")
-        return amostra_fim
-
-    await websocket.send_json({"tipo": "transcricao", "turno": turno, "quem": "cliente",
-                               "texto": texto_cliente, "parcial": False})
-
-    # 3. atendimento: identifica/cadastra o cliente e, depois disso, conversa pelo llama
-    try:
-        texto_resposta = await rodar_sem_travar(
-            websocket, turno, "pensando", atendimento.responder, texto_cliente)
-    except Exception as erro:
-        await mandar_erro(websocket, "ollama",
-                          f"Não consegui falar com o Ollama. Ele está aberto? ({erro.__class__.__name__})")
-        return amostra_fim
+        texto_resposta = atendimento._esclarecer(
+            atendimento._pendencia or "Não consegui ouvir palavras nessa fala. Pode falar mais perto do microfone?")
+    else:
+        await websocket.send_json({"tipo": "transcricao", "turno": turno, "quem": "cliente",
+                                   "texto": texto_cliente, "parcial": False})
+        # 3. atendimento: identifica/cadastra o cliente e depois interpreta o pedido.
+        try:
+            texto_resposta = await rodar_sem_travar(
+                websocket, turno, "pensando", atendimento.responder, texto_cliente)
+        except Exception as erro:
+            await mandar_erro(websocket, "ollama",
+                              f"Não consegui falar com o Ollama. Ele está aberto? ({erro.__class__.__name__})")
+            return amostra_fim
+        if getattr(atendimento, "ultimo_rastro", None) is not None:
+            atendimento.ultimo_rastro["audio_cliente_sha256"] = hashlib.sha256(caminho_wav.read_bytes()).hexdigest()
 
     texto_resposta = texto_resposta.strip()
     print(f"[turno {turno}] atendente: {texto_resposta!r}")
@@ -106,14 +118,18 @@ async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, aten
     # 4. piper: transforma a resposta em voz (agente/audio/resposta.wav)
     try:
         caminho_resposta = await rodar_sem_travar(
-            websocket, turno, "respondendo", agente["sintetizar_resposta"], texto_resposta)
+            websocket, turno, "respondendo", agente["sintetizar_resposta"], texto_resposta,
+            pasta / "resposta.wav")
     except Exception as erro:
         await mandar_erro(websocket, "piper", f"Não consegui gerar a voz da resposta ({erro}).")
         return amostra_fim
 
     # 5. manda o audio pra tela: avisa q vai chegar, manda o arquivo e avisa q acabou
     await websocket.send_json({"tipo": "audio_resposta", "turno": turno, "formato": "audio/wav"})
-    await websocket.send_bytes(caminho_resposta.read_bytes())
-    await websocket.send_json({"tipo": "fim_audio"})
+    audio_resposta = caminho_resposta.read_bytes()
+    if getattr(atendimento, "ultimo_rastro", None) is not None and texto_cliente:
+        atendimento.ultimo_rastro["audio_resposta_sha256"] = hashlib.sha256(audio_resposta).hexdigest()
+    await websocket.send_bytes(audio_resposta)
+    await websocket.send_json({"tipo": "fim_audio", "turno": turno})
 
     return amostra_fim

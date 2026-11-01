@@ -34,6 +34,8 @@ O escopo deste semestre é uma chamada simulada no navegador de desktop, sem tel
 
 O navegador envia áudio por `/ws/falar`. O servidor transcreve com Whisper, conduz o cadastro e o pedido por meio de `Atendimento` e gera a resposta em voz com Piper. O LLM auxilia na interpretação; o código consulta e grava no banco.
 
+O carrinho só aceita alterações sustentadas pela transcrição e pelo contexto explícito da sessão. Consultas não alteram o pedido; a listagem completa de produtos e preços é montada diretamente do banco. O resumo para confirmação aparece quando o cliente pede para finalizar.
+
 ```mermaid
 flowchart LR
     nav(["Navegador<br/>do cliente"])
@@ -76,7 +78,8 @@ Com o ambiente virtual ativo e o PostgreSQL disponível:
 
 ```powershell
 npm run teste
-python scripts/validar_evidencias.py
+python scripts/validar_evidencias.py --historico
+node --test tests/frontend_audio.test.cjs
 ```
 
 A suíte recria o esquema do banco `pizzaria_teste`; não use esse banco para dados que deseja preservar. O verificador de evidências confere a integridade dos registros, sem aprovar o comportamento do modelo.
@@ -84,7 +87,7 @@ A suíte recria o esquema do banco `pizzaria_teste`; não use esse banco para da
 ## Arquivos utilizados
 
 - [Prompt do atendente](backend/agente/prompt_sistema.txt): instruções carregadas pelo atendimento.
-- [Evidências em JSON](doc/evidencias/): dados utilizados pelos testes e pelo verificador de evidências.
+- [Evidências em JSON](doc/): dados utilizados pelos testes e pelo verificador de evidências.
 
 ## Equipe
 
