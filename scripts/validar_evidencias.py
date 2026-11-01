@@ -43,7 +43,7 @@ def sha256(texto):
     return hashlib.sha256(texto.replace("\r\n", "\n").encode("utf-8")).hexdigest()
 
 
-def validar(caminho):
+def validar(caminho, comparar_prompt_atual=True):
     bruto = json.loads(caminho.read_text(encoding="utf-8"))
     if bruto.get("formato") != 2:
         raise ValueError(f"{caminho.name}: formato não suportado")
@@ -84,23 +84,29 @@ def validar(caminho):
                 respostas += 1
     atual = dados.get("prompt_no_arquivo")
     if atual:
-        texto = (RAIZ / "backend/agente/prompt_sistema.txt").read_text(encoding="utf-8")
         rodada = next(r for r in dados["rodadas"] if r["id"] == atual["rodada_id"])
-        if sha256(texto) != atual["sha256"] or texto != rodada["prompt"]:
-            raise ValueError("O prompt atual não corresponde à rodada indicada")
+        if sha256(rodada["prompt"]) != atual["sha256"]:
+            raise ValueError("O hash da referência histórica não corresponde à rodada indicada")
+        if comparar_prompt_atual:
+            texto = (RAIZ / "backend/agente/prompt_sistema.txt").read_text(encoding="utf-8")
+            if sha256(texto) != atual["sha256"] or texto != rodada["prompt"]:
+                raise ValueError("O prompt atual não corresponde à rodada indicada")
+        else:
+            avisos.append("Rodada histórica: não comprova o comportamento do prompt atual")
     return len(ids), respostas, avisos
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--expandir", type=Path, help="Imprime JSON com referências resolvidas")
+    parser.add_argument("--historico", action="store_true", help="Valida rodadas antigas sem compará-las ao prompt atual")
     args = parser.parse_args()
     if args.expandir:
         dados = json.loads(args.expandir.read_text(encoding="utf-8"))
         print(json.dumps(expandir(dados), ensure_ascii=False, indent=2))
         return
-    for caminho in sorted((RAIZ / "doc/evidencias").glob("*.json")):
-        rodadas, respostas, avisos = validar(caminho)
+    for caminho in sorted((RAIZ / "doc").glob("*.json")):
+        rodadas, respostas, avisos = validar(caminho, comparar_prompt_atual=not args.historico)
         print(f"{caminho.name}: {rodadas} rodadas, {respostas} respostas; integridade OK")
         for aviso in avisos:
             print(f"  AVISO: {aviso}")

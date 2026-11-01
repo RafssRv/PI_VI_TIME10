@@ -215,7 +215,7 @@ class TestConversaComOLlama:
     def test_json_quebrado_pede_para_repetir(self, atendimento, cpf_da_ana):
         atendimento.responder(cpf_da_ana)
         atendimento._conversar = lambda mensagens, formato=None: "isso nao e json"
-        assert "repetir" in atendimento.responder("quero uma pizza")
+        assert "sabor" in atendimento.responder("quero uma pizza")
         assert atendimento.historico == []
 
     def test_sem_conta_conversa_sem_json(self, atendimento, llama):
@@ -239,7 +239,8 @@ class TestMontaOPedido:
     def test_item_vai_pro_carrinho_com_o_nome_do_cardapio(self, ana_identificada, llama):
         llama.entende([item("margherita", 2)])
         resposta = ana_identificada.responder("quero duas margheritas")
-        assert "Como você vai pagar" in resposta
+        assert "continuar escolhendo" in resposta
+        assert "pagar" not in resposta
         assert ana_identificada.carrinho == [{
             "produto": "Pizza Margherita", "quantidade": 2,
             "preco": Decimal("66.90"), "observacao": None,
@@ -255,12 +256,12 @@ class TestMontaOPedido:
         llama.entende([item("margherita"), item("pizza de sushi")],
                       resposta="Anotei a pizza de sushi!")
         resposta = ana_identificada.responder("margherita e pizza de sushi")
-        assert "Não temos pizza de sushi" in resposta
-        assert ana_identificada.carrinho == []
+        assert "Não encontrei pizza de sushi" in resposta
+        assert [i["produto"] for i in ana_identificada.carrinho] == ["Pizza Margherita"]
 
     def test_produto_desativado_vira_aviso(self, ana_identificada, llama):
         llama.entende([item("Pizza de Escarola com Bacon")])
-        assert "Não temos" in ana_identificada.responder("uma de escarola")
+        assert "Não encontrei" in ana_identificada.responder("uma de escarola")
         assert ana_identificada.carrinho == []
 
     def test_produto_vago_vira_pergunta(self, ana_identificada, llama):
@@ -275,7 +276,7 @@ class TestMontaOPedido:
 
     def test_quantidade_zero_vira_pergunta(self, ana_identificada, llama):
         llama.entende([item("margherita", 0)])
-        assert "Quantas unidades" in ana_identificada.responder("margherita")
+        assert "Quantas unidades" in ana_identificada.responder("zero margheritas")
 
     def test_pagamento_falado_vira_o_do_banco(self, ana_identificada, llama):
         llama.entende([item("margherita")])
@@ -339,7 +340,8 @@ class TestFechaOPedido:
                 for i in ana_identificada.carrinho] == [
             ("Pizza Margherita", 2, "sem tomate"), ("Agua Mineral 500ml", 1, None),
             ("Pizza Margherita", 1, None)]
-        assert "205 reais e 70 centavos" in resposta
+        assert "continuar escolhendo" in resposta
+        assert "205 reais e 70 centavos" in ana_identificada.responder("pode fechar")
 
     @pytest.mark.parametrize("fala", [
         "Troque quatro cocas por uma água", "Troque uma coca e meia por uma água",
@@ -367,12 +369,12 @@ class TestFechaOPedido:
     def test_troca_com_origem_ambigua_preserva_observacoes(self, ana_identificada, llama):
         llama.entende([item("margherita", observacao="sem tomate"),
                       item("margherita", observacao="sem manjericão")])
-        ana_identificada.responder("Duas margheritas com observações diferentes no pix")
+        ana_identificada.responder("Uma margherita sem tomate e uma margherita sem manjericão no pix")
         anterior = list(ana_identificada.carrinho)
         resposta = ana_identificada.responder("Troque uma margherita por uma água")
         assert ana_identificada.carrinho == anterior
         assert "qual" in resposta.lower()
-        assert ana_identificada.responder("sim") == resposta
+        assert "qual" in ana_identificada.responder("sim").lower()
 
     def test_troca_sem_pedido_nao_vira_inclusao(self, ana_identificada):
         resposta = ana_identificada.responder("Troque uma água por uma margherita")
@@ -411,14 +413,14 @@ class TestFechaOPedido:
         assert "Catupiry ou Borda de Cheddar" in pendencia
         ana_identificada.responder("quero trocar")
         assert ana_identificada.responder(ultima_fala) == pendencia
-        assert ana_identificada.responder("sim") == pendencia
+        assert pendencia in ana_identificada.responder("sim")
         assert ana_identificada.etapa == "identificado"
         assert _pedidos_da(db, ana_identificada.cliente_id) == antes
 
     def test_sim_apos_pergunta_do_modelo_nao_escolhe_produto(self, ana_identificada, llama):
         llama.entende([], resposta="Qual pizza você deseja?")
         ana_identificada.responder("uma pizza")
-        assert ana_identificada.responder("sim") == "Qual pizza você deseja?"
+        assert "sabor" in ana_identificada.responder("sim")
         assert len(llama.chamadas) == 1
         assert ana_identificada.carrinho == []
 
@@ -447,7 +449,7 @@ class TestFechaOPedido:
     def test_observacoes_distintas_aparecem_no_resumo(self, ana_identificada, llama):
         llama.entende([item("margherita", observacao="sem tomate"),
                       item("margherita", observacao="sem manjericão")], fechar=True)
-        resposta = ana_identificada.responder("duas margheritas no pix, só isso")
+        resposta = ana_identificada.responder("uma margherita sem tomate e uma margherita sem manjericão no pix, só isso")
         assert "sem tomate" in resposta and "sem manjericão" in resposta
         assert len(ana_identificada.carrinho) == 2
 
@@ -566,7 +568,8 @@ class TestFechaOPedido:
         assert ana_identificada.etapa == "identificado"
 
     def test_endereco_novo_vai_no_pedido(self, ana_identificada, llama, db):
-        self._pedir_e_fechar(ana_identificada, llama, endereco="Rua Nova, 45, Cambuí")
+        self._pedir_e_fechar(ana_identificada, llama, endereco="Rua Nova, 45, Cambuí",
+                            texto="uma margherita e duas cocas no pix, entrega na Rua Nova, 45, Cambuí, é só isso")
         ana_identificada.responder("sim")
         pedido = (db.query(Pedido).filter(Pedido.cliente_id == ana_identificada.cliente_id)
                   .order_by(Pedido.id.desc()).first())

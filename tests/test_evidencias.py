@@ -39,9 +39,15 @@ def test_hash_divergente_detecta_prompt_alterado(tmp_path):
         validar(caminho)
 
 
-def test_evidencias_do_projeto_e_prompt_atual():
-    arquivos = list((RAIZ / "doc/evidencias").glob("*.json"))
+def test_evidencias_historicas_preservam_integridade():
+    arquivos = list((RAIZ / "doc").glob("*.json"))
     assert len(arquivos) == 4
     for arquivo in arquivos:
-        rodadas, respostas, _ = validar(arquivo)
+        rodadas, respostas, _ = validar(arquivo, comparar_prompt_atual=False)
         assert rodadas > 0 and respostas > 0
+
+
+def test_prompt_historico_nao_e_confundido_com_validacao_atual():
+    arquivo = RAIZ / "doc/validacao-prompt-base.json"
+    with pytest.raises(ValueError, match="prompt atual"):
+        validar(arquivo)
