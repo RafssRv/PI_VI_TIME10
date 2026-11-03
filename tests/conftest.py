@@ -59,17 +59,18 @@ def _preparar_banco_de_teste():
         if not existe:
             conexao.execute('create database "{}"'.format(BANCO_DE_TESTE))
 
-    # esquema do zero a cada execucao: o banco.sql e a unica fonte da verdade
+    # esquema do zero a cada execucao: database/banco.sql e a unica fonte da verdade
     with psycopg.connect(_dsn(BANCO_DE_TESTE), autocommit=True) as conexao:
         conexao.execute("drop schema public cascade")
         conexao.execute("create schema public")
-        conexao.execute((RAIZ / "banco.sql").read_text(encoding="utf-8"))
+        conexao.execute((RAIZ / "database/banco.sql").read_text(encoding="utf-8"))
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def banco_de_teste():
     """
-    cria o banco, o esquema e popula UMA vez por execucao da suite.
+    cria o banco, o esquema e popula UMA vez, quando um teste solicita db.
+    testes de regras em memoria nao precisam subir o postgres.
     devolve a marca d'agua: o maior id de pedido e de cliente que o seed criou. tudo acima
     disso foi um teste que gravou, e e apagado no fim dele.
     (repovoar a cada teste deixava a suite em quatro minutos e meio; assim fica em segundos.)

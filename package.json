@@ -11,6 +11,7 @@
     "seed": "python backend/seed.py",
     "seed:recriar": "python backend/seed.py --recriar",
     "teste": "python -m pytest tests -v",
+    "teste:frontend": "node --test tests/frontend/*.test.cjs",
     "deps": "python -m pip install -r backend/requirements.txt"
   }
 }

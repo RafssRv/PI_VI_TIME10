@@ -4,7 +4,6 @@
 # toda funcao recebe a Session (db) pronta de fora, quem abre e fecha eh o get_db do database.py.
 
 import re
-import unicodedata
 from decimal import Decimal
 
 from sqlalchemy import func
@@ -13,6 +12,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from models import Cliente, ItemPedido, Pedido, Produto
 from seguranca import hashear_cpf
+from interpretacao import _normalizar
 
 # a coluna pedido.forma_pagamento eh VARCHAR(20) e o seed so usa esses quatro valores.
 # o que o modelo extrair da fala tem q cair num deles, senao nao grava
@@ -32,16 +32,6 @@ SINAIS_DE_PAGAMENTO = {
 
 # "cartao" e "maquininha" sozinhos nao dizem se eh credito ou debito: pergunta, nao chuta
 SINAIS_AMBIGUOS = ("cartao", "maquininha", "cartao de credito ou debito")
-
-
-def _normalizar(texto):
-    # "Coca-Cola 2 Litros" vira "coca cola 2 litros": sem acento, minusculo e sem pontuacao,
-    # pq a transcricao de voz nao devolve acento nem hifen
-    if not texto:
-        return ""
-    decomposto = unicodedata.normalize("NFKD", str(texto))
-    sem_acento = "".join(c for c in decomposto if not unicodedata.combining(c)).lower()
-    return re.sub(r"[^0-9a-z]+", " ", sem_acento).strip()
 
 
 def _so_digitos(texto):
@@ -297,6 +287,8 @@ def salvar_pedido(db, cliente_id, itens, endereco_entrega=None, forma_pagamento=
 
         # str() antes do Decimal pq se alguem trocar a coluna por float, Decimal(float) vira dizima
         preco_unitario = Decimal(str(produto.preco))
+        if "preco_confirmado" in item and preco_unitario != item["preco_confirmado"]:
+            raise ValueError("O preço mudou; apresente um novo resumo antes de salvar.")
         total += preco_unitario * quantidade
         validados.append((produto, quantidade, preco_unitario, item.get("observacao")))
 

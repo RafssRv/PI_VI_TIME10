@@ -1,7 +1,7 @@
 """
 popula o banco de desenvolvimento com cardapio, clientes e historico de pedidos.
 
-rodar na mao, com o postgres de pe e o banco.sql ja aplicado:
+rodar na mao, com o postgres de pe e database/banco.sql ja aplicado:
     python backend/seed.py
     python backend/seed.py --recriar   # apaga tudo antes e popula de novo
 
@@ -113,7 +113,7 @@ def contar_produtos(sessao):
     except Exception:
         sessao.rollback()
         print("ERRO: nao consegui ler a tabela produto.")
-        print("o container do postgres subiu e o banco.sql rodou?")
+        print("o container do postgres subiu e database/banco.sql rodou?")
         raise
 
 
