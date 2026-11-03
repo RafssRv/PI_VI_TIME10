@@ -61,6 +61,8 @@ def conversa(monkeypatch):
     monkeypatch.setattr(repositorio, "buscar_produtos", buscar_produtos)
     monkeypatch.setattr(repositorio, "buscar_cliente_por_cpf", lambda db, cpf: cliente)
     monkeypatch.setattr(repositorio, "salvar_pedido", salvar_pedido)
+    monkeypatch.setattr(repositorio, "itens_mais_pedidos_do_cliente",
+                        lambda db, cliente_id, limite=3, categoria=None: [(produtos[1], 4)])
     modelo = ModeloRoteirizado()
     atendimento = Atendimento(abrir_sessao=lambda: SimpleNamespace(close=lambda: None),
                               conversar=modelo)

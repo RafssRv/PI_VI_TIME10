@@ -9,6 +9,7 @@ from decimal import Decimal
 import pytest
 
 import repositorio
+import seed
 from models import Pedido
 from atendimento import Atendimento
 from interpretacao import extrair_digitos, extrair_nome, sim_ou_nao
@@ -611,3 +612,78 @@ class TestFechaOPedido:
         atendimento.responder("sim")
         pedido = db.query(Pedido).filter(Pedido.cliente_id == atendimento.cliente_id).one()
         assert pedido.endereco_entrega == "Rua das Palmeiras, 120, Centro"
+
+
+class TestHistoricoERecomendacao:
+    def test_ultimo_pedido_vem_do_banco(self, ana_identificada, llama, db):
+        ultimo = repositorio.historico_cliente(db, ana_identificada.cliente_id, limite=1)[0]
+        resposta = ana_identificada.responder("o que eu pedi da última vez?")
+        assert resposta.startswith("Seu último pedido foi em")
+        assert ultimo.itens[0].produto.nome in resposta
+        assert llama.chamadas == []
+
+    def test_entende_sem_interrogacao(self, ana_identificada, llama):
+        # o whisper nem sempre coloca o ponto de interrogacao
+        assert "Seu último pedido" in ana_identificada.responder("qual foi meu último pedido")
+        assert llama.chamadas == []
+
+    def test_lista_os_ultimos_pedidos(self, ana_identificada):
+        assert "Seus últimos 3 pedidos" in ana_identificada.responder("quais foram meus pedidos anteriores?")
+
+    def test_pedido_novo_aparece_no_historico(self, ana_identificada, llama):
+        llama.entende([item("Pizza Portuguesa")])
+        ana_identificada.responder("uma pizza portuguesa no pix")
+        ana_identificada.responder("é só isso")
+        ana_identificada.responder("sim, pode confirmar")
+        assert "1 Pizza Portuguesa" in ana_identificada.responder("o que eu pedi da última vez?")
+
+    def test_consultar_historico_nao_mexe_no_carrinho(self, ana_identificada, llama):
+        llama.entende([item("margherita")])
+        ana_identificada.responder("uma margherita")
+        ana_identificada.responder("o que eu pedi da última vez?")
+        assert [i["produto"] for i in ana_identificada.carrinho] == ["Pizza Margherita"]
+
+    def test_cliente_novo_nao_tem_historico(self, atendimento):
+        _cadastrar_ate_confirmar(atendimento)
+        atendimento.responder("sim")
+        assert "ainda não tem pedidos" in atendimento.responder("o que eu pedi da última vez?")
+
+    def test_sem_conta_nao_mostra_historico(self, atendimento, llama):
+        atendimento.responder(CPF_NOVO)
+        atendimento.responder("não")
+        assert "Sem uma conta" in atendimento.responder("o que eu pedi da última vez?")
+        assert llama.chamadas == []
+
+    def test_recomenda_o_favorito_do_cliente(self, ana_identificada, llama):
+        resposta = ana_identificada.responder("o que você me recomenda?")
+        assert "você mais pede Pizza de Calabresa" in resposta
+        assert llama.chamadas == []
+
+    def test_cada_cliente_ve_o_proprio_favorito(self, atendimento):
+        atendimento.responder(seed.gerar_cpf(seed.CLIENTES[1][3]))
+        resposta = atendimento.responder("o que você me recomenda?")
+        assert "Pizza de Frango com Catupiry" in resposta
+        assert "Calabresa" not in resposta
+
+    def test_recomenda_dentro_da_categoria(self, ana_identificada):
+        resposta = ana_identificada.responder("qual bebida você recomenda?")
+        assert "Pizza" not in resposta
+
+    def test_o_de_sempre_sugere_e_nao_compra(self, ana_identificada):
+        resposta = ana_identificada.responder("quero o de sempre")
+        assert "Pizza de Calabresa" in resposta
+        assert ana_identificada.carrinho == []
+
+    def test_cliente_novo_recebe_os_mais_pedidos_da_casa(self, atendimento, db):
+        _cadastrar_ate_confirmar(atendimento)
+        atendimento.responder("sim")
+        campeao = repositorio.itens_mais_pedidos_da_casa(db, 1)[0][0]
+        resposta = atendimento.responder("o que você recomenda?")
+        assert "mais pedidos da casa" in resposta
+        assert campeao.nome in resposta
+
+    def test_sem_conta_tambem_recebe_sugestao_real(self, atendimento, llama):
+        atendimento.responder(CPF_NOVO)
+        atendimento.responder("não")
+        assert "mais pedidos da casa" in atendimento.responder("o que você recomenda?")
+        assert llama.chamadas == []

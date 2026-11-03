@@ -18,6 +18,15 @@ CONSULTA = re.compile(
     r"sugere|sugest\w*|ingredientes?|contem|leva|opcoes|sabores)\b|"
     r"\b(?:quais|qual|tem|vendem|e bebidas|quero saber)\b"
 )
+# Pedidos antigos e sugestões saem do banco: o modelo não recebe esses dados e inventaria a resposta.
+CONSULTA_HISTORICO = re.compile(
+    r"\b(?:ultim[oa]s? (?:vez|pedidos?|compras?)|pedidos? anteriore?s?|meu historico|"
+    r"historico de pedidos|meus pedidos|o que (?:eu )?(?:ja )?pedi|ja pedi)\b"
+)
+CONSULTA_RECOMENDACAO = re.compile(
+    r"\b(?:recomenda\w*|sugere|sugest\w*|indica|de sempre|mais peco|costumo pedir|"
+    r"minha preferida|meu preferido|minha favorita|meu favorito)\b"
+)
 FECHAR = re.compile(r"\b(?:e so isso|so isso|pode fechar|fechar o pedido|finalizar|terminei)\b")
 REMOVER = re.compile(r"\b(?:tire|tira|tirar|retire|retira|retirar|remova|remover|exclua|nao quero)\b")
 CORRIGIR = re.compile(r"\b(?:na verdade|so|apenas|corrija|corrigir|altere|alterar|deixe|mude)\b")
@@ -85,7 +94,9 @@ def mencoes(texto, produtos):
 def eh_consulta(texto):
     normal = _normalizar(texto)
     comando = re.match(r"(?:pode|poderia) (?:adicionar|acrescentar|retirar|trocar|substituir)\b", normal)
-    return bool(CONSULTA.search(normal) or normal.startswith("se ") or ("?" in texto and not comando))
+    return bool(CONSULTA.search(normal) or CONSULTA_HISTORICO.search(normal) or
+                CONSULTA_RECOMENDACAO.search(normal) or normal.startswith("se ") or
+                ("?" in texto and not comando))
 
 
 def cardapio_completo(texto):

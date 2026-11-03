@@ -16,8 +16,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from agente.controle_pedido import ControlePedido, ErroPedido, ProdutoCardapio
-from agente.intencao_pedido import (FECHAR, cardapio_completo, comando_negado, eh_consulta, interpretar,
-                                   mencoes)
+from agente.intencao_pedido import (CONSULTA_HISTORICO, CONSULTA_RECOMENDACAO, FECHAR, cardapio_completo,
+                                   comando_negado, eh_consulta, interpretar, mencoes)
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -497,7 +497,11 @@ class Atendimento:
         produtos = repositorio.listar_cardapio(db)
         normalizado = _normalizar(texto)
         _, citados = mencoes(texto, produtos)
-        if cardapio_completo(texto):
+        if CONSULTA_HISTORICO.search(normalizado):
+            fala = self._falar_historico(db, normalizado)
+        elif CONSULTA_RECOMENDACAO.search(normalizado):
+            fala = self._recomendar(db, normalizado, produtos)
+        elif cardapio_completo(texto):
             fala = "Cardápio completo. " + " ".join(
                 "{}: {}.".format(p.nome, preco_falado(p.preco)) for p in produtos)
             if not produtos:
@@ -509,14 +513,6 @@ class Atendimento:
             unicos = {p.id: p for _, _, candidatos in citados for p in candidatos}
             fala = " ".join("{}: {}.".format(p.nome, p.descricao or "ingredientes não informados")
                             for p in unicos.values())
-        elif re.search(r"\b(?:recomenda\w*|sugere|sugest\w*)\b", normalizado):
-            opcoes = [p for p in produtos if "salgada" in _normalizar(p.categoria)] or produtos
-            if opcoes:
-                p = opcoes[0]
-                fala = "Uma opção do cardápio é {}{} . Se quiser pedir, diga o produto e a quantidade.".format(
-                    p.nome, ": " + p.descricao if p.descricao else "").replace(" .", ".")
-            else:
-                fala = "Não há produtos disponíveis no cardápio neste momento."
         else:
             mensagens = [{"role": "system", "content": self._prompt_do_pedido(produtos)}] + self.historico + [
                 {"role": "user", "content": texto}]
@@ -533,6 +529,55 @@ class Atendimento:
                 fala = "Qual informação do cardápio você gostaria de consultar?"
         self.historico.extend([{"role": "user", "content": texto}, {"role": "assistant", "content": fala}])
         return fala
+
+    def _falar_historico(self, db, normalizado):
+        # so le pelo cliente_id desta chamada: o historico de outra pessoa nunca entra aqui
+        if not self.cliente_id:
+            return "Sem uma conta, eu não tenho histórico de pedidos para consultar."
+
+        varios = re.search(r"\b(?:pedidos|compras|historico)\b", normalizado)
+        pedidos = repositorio.historico_cliente(db, self.cliente_id, limite=3 if varios else 1)
+        if not pedidos:
+            return "Você ainda não tem pedidos anteriores."
+
+        def descrever(pedido):
+            itens = ["{} {}".format(i.quantidade, i.produto.nome) for i in pedido.itens]
+            return "em {}: {}, total de {}.".format(
+                pedido.criado_em.astimezone().strftime("%d/%m"), _juntar(itens), preco_falado(pedido.total))
+
+        if len(pedidos) == 1:
+            fala = "Seu último pedido foi " + descrever(pedidos[0])
+        else:
+            fala = "Seus últimos {} pedidos foram: {}".format(
+                len(pedidos), " ".join(descrever(p) for p in pedidos))
+        return fala + " Se quiser repetir, diga os produtos e as quantidades."
+
+    def _recomendar(self, db, normalizado, produtos):
+        # "quais bebidas voce indica" vira "bebida", igual a busca por categoria do cardapio
+        singular = " ".join(p.rstrip("s") for p in normalizado.split())
+        categoria = next((c for c in ("pizza doce", "pizza salgada", "pizza", "bebida", "sobremesa", "borda")
+                          if re.search(r"\b" + c + r"\b", singular)), None)
+        convite = " Se quiser pedir, diga o produto e a quantidade."
+
+        favoritos = []
+        if self.cliente_id:
+            favoritos = repositorio.itens_mais_pedidos_do_cliente(db, self.cliente_id, 1, categoria)
+        if favoritos:
+            produto, quantidade = favoritos[0]
+            return "Pelo seu histórico, você mais pede {}, com {} {} até agora. Hoje custa {}.".format(
+                produto.nome, quantidade, "unidade" if quantidade == 1 else "unidades",
+                preco_falado(produto.preco)) + convite
+
+        # cliente novo, sem conta ou sem nada daquela categoria: vale o que a casa mais vende
+        campeoes = repositorio.itens_mais_pedidos_da_casa(db, 2, categoria)
+        if campeoes:
+            nomes = [produto.nome for produto, _ in campeoes]
+            inicio = "Os mais pedidos da casa são {}." if len(nomes) > 1 else "O mais pedido da casa é {}."
+            return inicio.format(_juntar(nomes)) + convite
+
+        if produtos:
+            return "Uma opção do cardápio é {}.".format(produtos[0].nome) + convite
+        return "Não há produtos disponíveis no cardápio neste momento."
 
     def _trocar_itens(self, db, texto):
         # shortcut: uma troca explícita por fala, sem novas observações ou outras
@@ -799,7 +844,10 @@ class Atendimento:
     def _conversar_com_llm(self, texto):
         db = self._sessao()
         try:
-            if cardapio_completo(texto) or re.search(r"\b(?:preco|precos|custa|custam|quanto)\b", _normalizar(texto)):
+            normalizado = _normalizar(texto)
+            if (cardapio_completo(texto) or CONSULTA_HISTORICO.search(normalizado) or
+                    CONSULTA_RECOMENDACAO.search(normalizado) or
+                    re.search(r"\b(?:preco|precos|custa|custam|quanto)\b", normalizado)):
                 return self._consultar(db, texto)
             cardapio = _cardapio_em_texto(repositorio.listar_cardapio(db))
         except SQLAlchemyError:

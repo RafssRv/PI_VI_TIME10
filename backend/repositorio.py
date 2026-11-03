@@ -193,14 +193,18 @@ def historico_cliente(db, cliente_id, limite=5):
     )
 
 
-def itens_mais_pedidos_do_cliente(db, cliente_id, limite=3):
+def itens_mais_pedidos_do_cliente(db, cliente_id, limite=3, categoria=None):
     """RF08: o que esse cliente mais pediu, do mais pedido pro menos, pra sugerir o de sempre."""
-    linhas = (
+    consulta = (
         db.query(Produto, func.sum(ItemPedido.quantidade))
         .join(ItemPedido, ItemPedido.produto_id == Produto.id)
         .join(Pedido, Pedido.id == ItemPedido.pedido_id)
         .filter(Pedido.cliente_id == cliente_id, Produto.ativo.is_(True))
-        .group_by(Produto.id)
+    )
+    if categoria:
+        consulta = consulta.filter(Produto.categoria.ilike("%" + categoria + "%"))
+    linhas = (
+        consulta.group_by(Produto.id)
         .order_by(func.sum(ItemPedido.quantidade).desc(), Produto.nome)
         .limit(limite)
         .all()
@@ -208,13 +212,17 @@ def itens_mais_pedidos_do_cliente(db, cliente_id, limite=3):
     return [(produto, int(quantidade)) for produto, quantidade in linhas]
 
 
-def itens_mais_pedidos_da_casa(db, limite=3):
+def itens_mais_pedidos_da_casa(db, limite=3, categoria=None):
     """RF08: campeoes de venda da casa, fallback da recomendacao quando o cliente eh novo."""
-    linhas = (
+    consulta = (
         db.query(Produto, func.sum(ItemPedido.quantidade))
         .join(ItemPedido, ItemPedido.produto_id == Produto.id)
         .filter(Produto.ativo.is_(True))
-        .group_by(Produto.id)
+    )
+    if categoria:
+        consulta = consulta.filter(Produto.categoria.ilike("%" + categoria + "%"))
+    linhas = (
+        consulta.group_by(Produto.id)
         .order_by(func.sum(ItemPedido.quantidade).desc(), Produto.nome)
         .limit(limite)
         .all()
