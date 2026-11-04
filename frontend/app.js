@@ -78,10 +78,10 @@ const MS_DESTAQUE_ITEM = 4000;      // quanto tempo o item novo fica em destaque
 // o botao "Conectando" ganha os tres pontinhos piscando pelo css
 const ESTADOS = {
   ocioso:      { rotulo: "Chamada não iniciada", sublinha: "clique em Ligar e fale normalmente", botao: "Ligar" },
-  conectando:  { rotulo: "Chamando…",            sublinha: "abrindo o microfone e a conexão",    botao: "Conectando" },
-  ouvindo:     { rotulo: "Pode falar",           sublinha: "seu microfone está ligado",          botao: "Desligar" },
+  conectando:  { rotulo: "Chamando…",            sublinha: "abrindo microfone",                   botao: "Conectando" },
+  ouvindo:     { rotulo: "Pode falar",           sublinha: "microfone ligado",                    botao: "Desligar" },
   processando: { rotulo: "Anotando seu pedido…", sublinha: "microfone pausado",                  botao: "Desligar" },
-  falando:     { rotulo: "Atendente falando",    sublinha: "seu microfone fica desligado até ele terminar", botao: "Desligar" },
+  falando:     { rotulo: "Atendente falando",    sublinha: "microfone pausado", botao: "Desligar" },
   encerrada:   { rotulo: "Chamada encerrada",    sublinha: "",                                   botao: "Ligar de novo" },
   erro:        { rotulo: "Não deu certo",        sublinha: "",                                   botao: "Tentar de novo" }
 };
