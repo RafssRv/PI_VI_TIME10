@@ -11,13 +11,14 @@
 import logging
 import re
 from copy import deepcopy
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
 from agente.controle_pedido import ControlePedido, ErroPedido, ProdutoCardapio
-from agente.intencao_pedido import (CONSULTA_HISTORICO, CONSULTA_PEDIDO_ATUAL, CONSULTA_RECOMENDACAO, FECHAR,
-                                   RECLAMA_DO_PEDIDO, cardapio_completo, comando_negado, eh_consulta,
+from agente.intencao_pedido import (CONSULTA_HISTORICO, CONSULTA_PEDIDO_ATUAL, CONSULTA_RECOMENDACAO, FALAS_DE_FECHAR,
+                                   FECHAR, RECLAMA_DO_PEDIDO, cardapio_completo, comando_negado, eh_consulta,
                                    interpretar, mencoes)
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -38,7 +39,10 @@ ACEITES_DA_SUGESTAO = {
     "essa", "esse", "essa mesmo", "esse mesmo", "manda essa", "manda esse", "pode mandar",
 }
 # um "sim" solto nao compra nada (regra 12 do prompt), mas tambem nao pode ficar sem resposta
-RESPOSTAS_VAGAS_A_SUGESTAO = {"sim", "pode ser", "ok", "claro", "isso", "beleza"}
+RESPOSTAS_VAGAS_A_SUGESTAO = {"sim", "pode ser", "ok", "claro", "isso", "beleza", "certo", "aham", "uhum",
+                              "ta bom", "perfeito", "pode", "pode sim", "sim pode", "sim por favor"}
+CUMPRIMENTO = re.compile(r"^(?:oi|ola|alo|opa|e ai|bom dia|boa tarde|boa noite|tudo bem|tudo bom)\b")
+CORTESIA = re.compile(r"\b(?:obrigad[oa]|valeu|por favor|viu)\b")
 SINONIMOS_DE_CATEGORIA = {"refrigerante": "bebida", "refri": "bebida", "suco": "bebida", "agua": "bebida"}
 ENDERECO_NA_FALA = re.compile(r"\b(?:rua|avenida|av|travessa|alameda|estrada|rodovia)\b.*", re.IGNORECASE)
 # o cardapio nao tem tamanhos: "pizza de calabresa grande" eh a calabresa, nao um produto desconhecido
@@ -242,12 +246,19 @@ class Atendimento:
 
     # --- identificacao ---
 
+    def saudacao(self):
+        """primeira fala da chamada. o cpf eh obrigatorio pra pedir, entao ja sai pedindo."""
+        if self.etapa == "inicio":
+            self.etapa = "aguardando_cpf"
+        hora = datetime.now().hour
+        periodo = "bom dia" if 5 <= hora < 12 else "boa tarde" if 12 <= hora < 18 else "boa noite"
+        return "Olá, {}! Seja bem-vindo à pizzaria. {}".format(periodo, FRASE_PEDE_CPF)
+
     def _inicio(self, texto):
         # tem gente q ja chega falando o cpf, ai nem precisa pedir
         if len(extrair_cpf(texto)) >= 11:
             return self._receber_cpf(texto)
-        self.etapa = "aguardando_cpf"
-        return "Olá! Bem-vindo à pizzaria. " + FRASE_PEDE_CPF
+        return self.saudacao()
 
     def _receber_cpf(self, texto):
         self.etapa = "aguardando_cpf"
@@ -255,6 +266,9 @@ class Atendimento:
             return self._seguir_sem_conta("Tudo bem, sem problemas.")
 
         digitos = self._cpf_parcial + extrair_cpf(texto)
+        # responder "oi" a saudacao nao eh errar o cpf
+        if not digitos and CUMPRIMENTO.match(_normalizar(texto)):
+            return FRASE_PEDE_CPF
         # a fala eh cortada depois de 1,2 s de silencio, entao quem dita com pausa chega em pedacos
         if 3 <= len(digitos) < 11:
             self._cpf_parcial = digitos
@@ -526,12 +540,12 @@ class Atendimento:
             self.historico.extend([{"role": "user", "content": texto},
                                    {"role": "assistant", "content": fala}])
             return fala
+        if " ".join(CORTESIA.sub("", normalizado).split()) in FALAS_DE_FECHAR:
+            return self._fechar_pedido()
         if confirmacao_explicita(texto):
             if self._pendencia:
                 return self._esclarecer(self._pendencia)
             return "Você pode continuar escolhendo. Quando terminar, diga que posso fechar o pedido."
-        if normalizado in {"e so isso", "so isso", "pode fechar", "terminei", "quero finalizar"}:
-            return self._fechar_pedido()
         cardapio = repositorio.listar_cardapio(db)
 
         turno = {"role": "user", "content": texto}

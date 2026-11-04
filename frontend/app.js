@@ -1121,7 +1121,10 @@ function voltarAOuvir(motivo) {
   pedacosResposta = [];
 
   retomarCaptura();
-  if (motivo === "tocou") {
+  if (turno === 0) {
+    // a saudacao toca antes da primeira fala: o protocolo nao tem turno 0
+    escreverLog("saudação concluída");
+  } else if (motivo === "tocou") {
     enviarTexto({ tipo: "resposta_tocada", turno: turno });
   } else if (motivo === "timeout") {
     enviarTexto({ tipo: "timeout", turno: turno });

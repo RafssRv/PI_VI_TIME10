@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 # o agente so eh carregado na primeira fala, e nao quando o servidor liga.
 # assim o servidor sobe rapido e funciona ate pra quem nao instalou o whisper/piper
 _agente = None
+# a saudacao so muda com o periodo do dia, entao a voz eh gerada uma vez e reaproveitada
+_saudacoes = {}
 
 
 def carregar_agente():
@@ -66,6 +68,28 @@ async def rodar_sem_travar(websocket, turno, etapa, funcao, *argumentos):
                 await websocket.send_json({"tipo": "estado", "etapa": etapa, "turno": turno})
     finally:
         tarefa.add_done_callback(_observar_conclusao)
+
+
+async def saudar(websocket, atendimento):
+    """o atendente fala primeiro. se a voz falhar, o texto ja esta na tela e a chamada segue."""
+    texto = atendimento.saudacao()
+    await websocket.send_json({"tipo": "transcricao", "turno": 0, "quem": "atendente",
+                               "texto": texto, "parcial": False})
+    audio = _saudacoes.get(texto)
+    if audio is None:
+        try:
+            # so o piper: carregar_agente tambem carregaria o whisper e atrasaria o inicio da chamada
+            from agente.services.piper_service import sintetizar_resposta
+            with TemporaryDirectory(prefix="pizzaria-saudacao-") as pasta:
+                caminho = await asyncio.to_thread(sintetizar_resposta, texto, Path(pasta) / "saudacao.wav")
+                audio = caminho.read_bytes()
+        except Exception:
+            logger.warning("chamada=%s etapa=saudacao categoria=sintese", atendimento.id_chamada)
+            return
+        _saudacoes[texto] = audio
+    await websocket.send_json({"tipo": "audio_resposta", "turno": 0, "formato": "audio/wav"})
+    await websocket.send_bytes(audio)
+    await websocket.send_json({"tipo": "fim_audio", "turno": 0})
 
 
 async def mandar_erro(websocket, onde, mensagem, chamada_id, turno, categoria):

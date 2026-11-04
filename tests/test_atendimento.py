@@ -1053,3 +1053,100 @@ class TestErrosDeTranscricaoNosNomes:
     def test_produto_que_nao_existe_continua_recusado(self, ana_identificada):
         assert "Não encontrei" in ana_identificada.responder("uma pizza de sushi")
         assert ana_identificada.carrinho == []
+
+
+class TestSaudacao:
+    @pytest.mark.parametrize("hora, periodo", [
+        (5, "bom dia"), (11, "bom dia"), (12, "boa tarde"), (17, "boa tarde"), (18, "boa noite"), (2, "boa noite"),
+    ])
+    def test_saudacao_usa_o_periodo_do_dia(self, atendimento, monkeypatch, hora, periodo):
+        class Relogio:
+            @staticmethod
+            def now():
+                return SimpleNamespace(hour=hora)
+        monkeypatch.setattr("atendimento.datetime", Relogio)
+        fala = atendimento.saudacao()
+        assert fala.startswith("Olá, {}! Seja bem-vindo à pizzaria.".format(periodo))
+        assert "CPF" in fala
+        assert atendimento.etapa == "aguardando_cpf"
+
+    def test_cpf_logo_depois_da_saudacao(self, atendimento, cpf_da_ana):
+        atendimento.saudacao()
+        atendimento.responder(cpf_da_ana)
+        assert atendimento.etapa == "identificado"
+
+    def test_responder_oi_nao_conta_como_erro_de_cpf(self, atendimento):
+        atendimento.saudacao()
+        for fala in ("oi", "olá, tudo bem?", "boa tarde", "oi", "alô"):
+            assert "CPF" in atendimento.responder(fala)
+        assert atendimento.etapa == "aguardando_cpf"
+
+
+class TestMargemDeErroNaFala:
+    @pytest.mark.parametrize("fala", [
+        "me vê uma calabresa", "me dá uma pizza de calabresa", "traz uma calabresa pra mim",
+        "vou querer uma calabresa", "eu vou querer uma pizza de calabresa", "vou de calabresa",
+        "pode ser uma calabresa", "boa noite, quero uma calabresa", "então, uma calabresa",
+        "ah, quero uma calabresa", "hoje vou querer uma calabresa",
+    ])
+    def test_jeitos_de_pedir(self, ana_identificada, llama, fala):
+        ana_identificada.responder(fala)
+        assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == [("Pizza de Calabresa", 1)]
+        assert llama.chamadas == []
+
+    @pytest.mark.parametrize("fala, produto", [
+        ("pizza de mozarela", "Pizza de Mussarela"), ("pizza de muzzarela", "Pizza de Mussarela"),
+        ("coca 2 litros", "Coca-Cola 2 Litros"),
+    ])
+    def test_grafias_e_volume(self, ana_identificada, fala, produto):
+        ana_identificada.responder(fala)
+        assert [i["produto"] for i in ana_identificada.carrinho] == [produto]
+
+    def test_com_uma_coca_sao_dois_itens(self, ana_identificada):
+        ana_identificada.responder("uma calabresa com uma coca")
+        assert [i["produto"] for i in ana_identificada.carrinho] == ["Pizza de Calabresa", "Coca-Cola 2 Litros"]
+
+    def test_sem_cebola_continua_observacao(self, ana_identificada):
+        ana_identificada.responder("uma calabresa sem cebola")
+        assert ana_identificada.carrinho[0]["observacao"] == "sem cebola"
+        assert len(ana_identificada.carrinho) == 1
+
+    @pytest.mark.parametrize("fala", ["no pics", "no piques", "pics"])
+    def test_pix_mal_transcrito(self, ana_identificada, fala):
+        ana_identificada.responder("uma calabresa")
+        ana_identificada.responder(fala)
+        assert ana_identificada.pagamento == "pix"
+
+    @pytest.mark.parametrize("fala", [
+        "é isso", "é isso aí", "fecha o pedido", "fechar", "finaliza", "acabou", "mais nada", "nada mais",
+        "não quero mais nada", "só isso, obrigado", "era isso", "por enquanto é só", "tá bom assim", "é só",
+    ])
+    def test_jeitos_de_fechar(self, ana_identificada, llama, fala):
+        ana_identificada.responder("uma calabresa no pix")
+        assert "Vou confirmar" in ana_identificada.responder(fala)
+        assert ana_identificada.etapa == "confirmando_pedido"
+        assert llama.chamadas == []
+
+    @pytest.mark.parametrize("fala", [
+        "sim, pode", "pode", "pode sim", "confirma", "confirmado", "isso", "é isso", "tá certo", "está certo",
+        "certo", "tudo certo", "claro", "com certeza", "beleza", "fechado", "perfeito", "aham", "uhum",
+        "sim, por favor", "tá bom",
+    ])
+    def test_jeitos_de_confirmar(self, ana_identificada, db, fala):
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        ana_identificada.responder("uma calabresa no pix")
+        ana_identificada.responder("é só isso")
+        assert "registrado" in ana_identificada.responder(fala)
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes + 1
+
+    @pytest.mark.parametrize("fala", ["sim?", "não", "sim, mas tira a calabresa", "pode ser que sim?", "espera", "calma aí"])
+    def test_nao_confirma_com_duvida_ou_ressalva(self, ana_identificada, llama, db, fala):
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        ana_identificada.responder("uma calabresa no pix")
+        ana_identificada.responder("é só isso")
+        ana_identificada.responder(fala)
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes
+
+    def test_produto_que_nao_existe_com_prefixo_novo_continua_recusado(self, ana_identificada):
+        ana_identificada.responder("me vê uma pizza de sushi")
+        assert ana_identificada.carrinho == []

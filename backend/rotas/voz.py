@@ -8,7 +8,7 @@ from time import monotonic
 from uuid import uuid4
 
 from atendimento import Atendimento
-from turno_de_voz import atender_turno
+from turno_de_voz import atender_turno, saudar
 from protocolo import (
     DURACAO_MAXIMA_CHAMADA_S, LIMITE_AUDIO_CHAMADA_BYTES, LIMITE_BLOCO_AUDIO_BYTES,
     VERSAO_PROTOCOLO, ErroProtocolo, validar_controle,
@@ -100,6 +100,7 @@ async def websocket_audio(websocket: WebSocket):
                     if iniciada:
                         raise ErroProtocolo("A chamada já foi iniciada.")
                     iniciada = True
+                    await saudar(websocket, atendimento)
                     continue
                 if tipo == "encerrar_chamada":
                     await websocket.close()

@@ -27,6 +27,7 @@ PALAVRAS_DE_NAO = {"nao", "dispenso", "negativo", "nunca"}
 PALAVRAS_DE_SIM = {
     "sim", "quero", "claro", "pode", "ok", "okay", "isso", "bora", "aceito", "gostaria",
     "desejo", "vamos", "certeza", "beleza", "manda", "certo", "correto", "exato",
+    "aham", "uhum", "perfeito", "fechado", "confirmo", "confirma",
 }
 
 # o que a pessoa fala antes do dado em si: "meu nome e joao", "moro na rua x"
@@ -121,6 +122,10 @@ def confirmacao_explicita(texto):
     return "?" not in texto and _normalizar(texto).strip() in {
         "sim", "confirmo", "pode confirmar", "sim pode confirmar", "sim confirmo",
         "correto", "esta correto", "isso mesmo", "pode ser", "ok", "okay",
+        "sim pode", "pode", "pode sim", "sim sim", "sim por favor", "quero sim", "confirma", "confirmado",
+        "isso", "e isso", "e isso ai", "certo", "ta certo", "esta certo", "tudo certo", "claro",
+        "claro que sim", "com certeza", "beleza", "fechado", "perfeito", "aham", "uhum", "ta bom",
+        "pode fechar",
     }
 
 

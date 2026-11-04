@@ -277,3 +277,48 @@ def test_falha_no_banco_nao_anuncia_pedido_salvo(chamada, cpf_da_ana, db, monkey
     assert evento_pedido(eventos)["pedido_id"] is None
     assert not any(e["tipo"] == "pedido_salvo" for e in eventos)
     assert db.query(Pedido).count() == antes
+
+
+class TestAtendenteFalaPrimeiro:
+    def _conexao(self):
+        class Conexao:
+            def __init__(self):
+                self.enviados = []
+
+            async def send_json(self, evento):
+                self.enviados.append(evento)
+
+            async def send_bytes(self, dados):
+                self.enviados.append(dados)
+        return Conexao()
+
+    def test_saudacao_vai_em_texto_e_voz_e_fica_guardada(self, monkeypatch, tmp_path):
+        chamadas = []
+
+        def sintetizar(texto, caminho):
+            chamadas.append(texto)
+            caminho.write_bytes(b"voz")
+            return caminho
+
+        monkeypatch.setattr("agente.services.piper_service.sintetizar_resposta", sintetizar)
+        monkeypatch.setattr(turno_de_voz, "_saudacoes", {})
+        primeira, segunda = self._conexao(), self._conexao()
+        asyncio.run(turno_de_voz.saudar(primeira, Atendimento()))
+        asyncio.run(turno_de_voz.saudar(segunda, Atendimento()))
+
+        assert primeira.enviados[0]["tipo"] == "transcricao"
+        assert "Seja bem-vindo" in primeira.enviados[0]["texto"]
+        assert [e["tipo"] for e in primeira.enviados if isinstance(e, dict)][1:] == ["audio_resposta", "fim_audio"]
+        assert b"voz" in primeira.enviados
+        assert segunda.enviados == primeira.enviados
+        assert len(chamadas) == 1
+
+    def test_falha_na_voz_mantem_o_texto_e_a_chamada(self, monkeypatch):
+        def falha(texto, caminho):
+            raise RuntimeError("piper fora")
+
+        monkeypatch.setattr("agente.services.piper_service.sintetizar_resposta", falha)
+        monkeypatch.setattr(turno_de_voz, "_saudacoes", {})
+        conexao = self._conexao()
+        asyncio.run(turno_de_voz.saudar(conexao, Atendimento()))
+        assert [e["tipo"] for e in conexao.enviados] == ["transcricao"]

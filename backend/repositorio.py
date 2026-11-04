@@ -23,6 +23,11 @@ FORMAS_PAGAMENTO = ("pix", "dinheiro", "cartao_credito", "cartao_debito")
 # palavra encontrada -> forma canonica
 SINAIS_DE_PAGAMENTO = {
     "pix": "pix",
+    # como o whisper costuma escrever "pix"
+    "pics": "pix",
+    "picks": "pix",
+    "piques": "pix",
+    "pixe": "pix",
     "dinheiro": "dinheiro",
     "especie": "dinheiro",
     "vivo": "dinheiro",

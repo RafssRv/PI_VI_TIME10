@@ -32,7 +32,11 @@ def executar(monkeypatch, tmp_path):
         await websocket.send_json({"tipo": "estado", "etapa": "ouvindo", "turno": turno})
         return inicio + 1
 
+    async def sem_saudacao(websocket, atendimento):
+        return None
+
     monkeypatch.setattr(voz, "atender_turno", atender)
+    monkeypatch.setattr(voz, "saudar", sem_saudacao)
 
     def rodar(frames, esperar=False):
         async def sessao():

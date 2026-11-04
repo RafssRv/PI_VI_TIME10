@@ -43,6 +43,17 @@ CORRIGIR = re.compile(r"\b(?:na verdade|so|apenas|corrija|corrigir|altere|altera
 
 # Parecem nomes do cardápio, mas são palavras do dia a dia: "quanto" não é "quatro queijos".
 NAO_E_PRODUTO = {"quanto", "quanta"}
+# Grafias que ficam longe demais do nome para a comparação aproximada.
+GRAFIAS = {"calabreza": "calabresa", "mozarela": "mussarela", "muzarela": "mussarela",
+           "muzzarela": "mussarela", "mozzarela": "mussarela", "mozzarella": "mussarela"}
+# Fala inteira que encerra o pedido. A cortesia ("obrigado") é retirada antes de comparar.
+FALAS_DE_FECHAR = {
+    "e so isso", "so isso", "so isso mesmo", "e so isso mesmo", "e isso", "e isso ai", "e isso mesmo",
+    "e so", "so", "era isso", "era so isso", "por enquanto e so", "por enquanto e isso",
+    "pode fechar", "fechar", "fecha", "fecha o pedido", "fechar o pedido", "pode fechar o pedido",
+    "finalizar", "finaliza", "pode finalizar", "quero finalizar", "finaliza o pedido", "terminei",
+    "acabei", "acabou", "mais nada", "nada mais", "nao quero mais nada", "ta bom assim", "esta bom assim",
+}
 
 
 def quantidade(texto):
@@ -56,7 +67,7 @@ def quantidade(texto):
 def radical(palavra):
     palavra = "mineral" if palavra == "minerais" else palavra.removesuffix("s")
     # Grafia observada no Whisper real; se ambos os nomes existirem, fica ambíguo.
-    return "calabresa" if palavra == "calabreza" else palavra
+    return GRAFIAS.get(palavra, palavra)
 
 
 def comando_negado(texto):
@@ -171,7 +182,8 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
     filtrados = []
     for achado in achados:
         entre = " ".join(palavras[filtrados[-1][1]:achado[0]]) if filtrados else ""
-        if re.search(r"\b(?:sem|com)\b", entre) and not re.search(r"\be\s+(?:" + NUMERO + r"|mais|quero)\b", entre):
+        # "uma calabresa com uma coca" são dois itens; "calabresa sem cebola" é observação.
+        if re.search(r"\b(?:sem|com)\b", entre) and not re.search(r"\b(?:e|com)\s+(?:" + NUMERO + r"|mais|quero)\b", entre):
             continue  # Nome usado como ingrediente/observação do produto anterior.
         filtrados.append(achado)
     achados = filtrados
@@ -203,8 +215,12 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
         prefixo = " ".join(palavras[anterior:inicio])
         # Só a última oração autoriza esta menção ("não quero X, quero Y").
         prefixo = re.split(r"\b(?:e|mas)\b", prefixo)[-1]
+        # "uma calabresa com uma coca": esse "com" separa dois itens, não é observação.
+        prefixo = re.sub(r"^\s*com\s+(?=" + NUMERO + r")", "", prefixo)
         trecho = " ".join(palavras[inicio:fim])
         sufixo = " ".join(palavras[fim:seguinte])
+        if indice + 1 < len(achados):
+            sufixo = re.sub(r"\s*\bcom\s+" + NUMERO + r"$", "", sufixo).strip()
         qtd = quantidade(prefixo)
         acao = acao_do_trecho(prefixo, acao)
         # A quantidade pendente é de um item a acrescentar: não vale para "tire as cocas".
@@ -215,7 +231,8 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
                            r"adicione|adicionar|acrescente|acrescentar|inclua|coloque|manda|mande|"
                            r"pode|poderia|por|favor|sim|nao|na|verdade|so|apenas|dessa|desse|daquela|daquele|igual|corrija|corrigir|"
                            r"altere|alterar|deixe|mude|tire|tira|tirar|retire|retira|retirar|"
-                           r"remova|remover|exclua)\b", "", permitido).strip()
+                           r"remova|remover|exclua|me|ve|da|traz|traga|vou|querer|ser|vai|vamos|ah|oi|ola|"
+                           r"boa|bom|noite|tarde|dia|entao|hoje|tambem|agora|pra|para|mim)\b", "", permitido).strip()
         if permitido or re.match(r"e\s+(?!so isso|uma?\b|duas?\b|dois\b|tres\b|\d+\b)", sufixo):
             duvida = {"campo": "intencao"}
             continue
@@ -236,7 +253,11 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
         if restante:
             tamanho = r"^(?:de\s+)?" + r"\s+".join(re.escape(p) + "s?" for p in restante.split()) + r"\b"
             cauda = re.sub(tamanho, "", cauda).strip()
-        if cauda and not re.match(r"(?:e|mas|sem|com|pago|pagamento|entrega|por favor|so isso)\b|no (?:pix|credito|debito|cartao)\b", cauda):
+        # "coca 2 litros": só o volume que está no nome; "coca 600 ml" continua sendo outro produto.
+        volume = re.match(r"(\d+)\s*(litros?|ml)\b", cauda)
+        if volume and "{} {}".format(volume[1], radical(volume[2])) in nome_radical:
+            cauda = cauda[volume.end():].strip()
+        if cauda and not re.match(r"(?:e|mas|sem|com|pago|pagamento|entrega|por favor|so isso|pra mim|para mim|hoje)\b|no (?:pix|credito|debito|cartao)\b", cauda):
             duvida = {"campo": "produto", "quantidade": qtd or 1,
                       "nao_encontrado": trecho + " " + sufixo}
             continue
@@ -306,7 +327,8 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
 
     if not achados:
         # Pagamento, endereço e fechamento são tratados pelo roteiro, sem reconstruir itens.
-        if not FECHAR.search(normal) and not re.search(r"\b(?:pix|dinheiro|cartao|credito|debito|endereco|rua|avenida)\b", normal):
+        if not FECHAR.search(normal) and not re.search(
+                r"\b(?:pix|pics|picks|piques|pixe|dinheiro|cartao|credito|debito|endereco|rua|avenida)\b", normal):
             duvida = pendente or {"campo": "produto", "quantidade": quantidade(normal)}
             desconhecido = re.sub(r"^(?:(?:eu|quero|queria|uma?|duas?|dois|tres|de)\s+)+", "", normal)
             if not pendente and desconhecido and not re.search(r"\b(?:incompreensivel|inaudivel|hmm|trecho)\b", desconhecido):
