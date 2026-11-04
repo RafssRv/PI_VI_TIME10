@@ -3,6 +3,7 @@
 import json
 import re
 import unicodedata
+from difflib import get_close_matches
 
 
 def _normalizar(texto):
@@ -117,6 +118,9 @@ def sim_ou_nao(texto):
     return None
 
 
+CONFIRMACOES_DE_UMA_PALAVRA = ("positivo", "confirmo", "confirma", "confirmado", "perfeito", "beleza", "fechado")
+NAO_E_CONFIRMACAO = {"confira", "conferir", "confere"}
+
 # Medido em fala e ruído: fala real ficou em até 0,21; ruído que virava texto, de 0,51 a 0,84.
 LIMITE_SEM_FALA = 0.45
 
@@ -137,8 +141,17 @@ def confirmacao_explicita(texto):
         "sim pode", "pode", "pode sim", "sim sim", "sim por favor", "quero sim", "confirma", "confirmado",
         "isso", "e isso", "e isso ai", "certo", "ta certo", "esta certo", "tudo certo", "claro",
         "claro que sim", "com certeza", "beleza", "fechado", "perfeito", "aham", "uhum", "ta bom",
-        "pode fechar",
+        "pode fechar", "positivo", "podia", "pois nao", "fechou", "bora", "pode mandar", "manda ver",
+        "sim senhor", "sim senhora", "isso ai", "otimo", "ta otimo", "show", "confirmar", "sim confirma",
     }
+
+
+def parece_confirmacao(texto):
+    """Palavra única mal transcrita ("poisito"). Só vale na pergunta final, depois de ler o resumo."""
+    palavras = _normalizar(texto).split()
+    if "?" in texto or len(palavras) != 1 or palavras[0] in NAO_E_CONFIRMACAO:
+        return False
+    return bool(get_close_matches(palavras[0], CONFIRMACOES_DE_UMA_PALAVRA, n=1, cutoff=0.75))
 
 
 def extrair_nome(texto):

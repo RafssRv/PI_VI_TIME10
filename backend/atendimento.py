@@ -28,7 +28,7 @@ import repositorio
 from interpretacao import (
     ESQUEMA_DO_PEDIDO, PEDIDO_DE_TROCA, _item_da_troca, _nome_na_troca, _normalizar,
     confirmacao_explicita, extrair_digitos, extrair_endereco, extrair_nome,
-    interpretar_resposta, sim_ou_nao,
+    interpretar_resposta, parece_confirmacao, sim_ou_nao,
 )
 
 logger = logging.getLogger(__name__)
@@ -1039,10 +1039,28 @@ class Atendimento:
             PAGAMENTO_FALADO[self.pagamento],
         )
 
+    def _fala_solta_na_confirmacao(self, texto):
+        """palavra que o whisper errou nao pode virar "nao temos X": a pergunta aqui eh sim ou nao."""
+        normalizado = _normalizar(texto).strip()
+        palavras = set(normalizado.split())
+        if "?" in texto or len(palavras) > 2 or sim_ou_nao(texto) is False:
+            return False
+        # no pix, endereco novo e "tira a coca" sao mudancas no pedido, nao falas soltas
+        if palavras & (set(repositorio.SINAIS_DE_PAGAMENTO) | {"cartao", "maquininha", "endereco", "entrega", "rua",
+                                                               "avenida", "tira", "tire", "troca", "troque"}):
+            return False
+        db = self._sessao()
+        try:
+            return not mencoes(texto, repositorio.listar_cardapio(db))[1]
+        finally:
+            db.close()
+
     def _receber_confirmacao_do_pedido(self, texto):
-        if not confirmacao_explicita(texto):
+        if not (confirmacao_explicita(texto) or parece_confirmacao(texto)):
             if _normalizar(texto).strip() in {"hmm", "talvez", ""}:
                 return self._esclarecer("Posso confirmar o pedido?")
+            if self._fala_solta_na_confirmacao(texto):
+                return "Desculpe, não entendi. Posso confirmar o pedido? Pode dizer sim ou não."
             self.etapa = "identificado"
             self._token_resumo = None
             # "nao, tira a coca": a mesma fala ja serve pra corrigir o pedido

@@ -15,7 +15,7 @@ import repositorio
 import seed
 from models import Pedido
 from atendimento import Atendimento
-from interpretacao import extrair_digitos, extrair_nome, juntar_segmentos, sim_ou_nao
+from interpretacao import extrair_digitos, extrair_nome, juntar_segmentos, parece_confirmacao, sim_ou_nao
 
 # valido no digito verificador e fora do seed (o mesmo q o seed sugere pra testar o rf04)
 CPF_NOVO = "11122233396"
@@ -1380,3 +1380,52 @@ class TestNaoESoIsso:
     def test_com_virgula_encerra(self, ana_identificada):
         ana_identificada.responder("um pudim de leite no pix")
         assert "Seu pedido ficou assim" in ana_identificada.responder("não, é só isso")
+
+
+class TestConfirmacaoComErroDoWhisper:
+    def _no_resumo(self, atendimento):
+        atendimento.responder("um pudim de leite no pix")
+        atendimento.responder("é só isso")
+        assert atendimento.etapa == "confirmando_pedido"
+
+    @pytest.mark.parametrize("fala", ["Podia.", "Poisito.", "Positivo", "positiva", "confirmou", "fechou", "pois não", "ótimo"])
+    def test_confirmacao_mal_transcrita_grava(self, ana_identificada, db, fala):
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        self._no_resumo(ana_identificada)
+        assert "confirmado" in ana_identificada.responder(fala)
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes + 1
+
+    @pytest.mark.parametrize("fala", ["blorp", "xyz abc", "agora", "cancelo", "confira", "espera"])
+    def test_palavra_solta_pergunta_de_novo_sem_gravar(self, ana_identificada, db, fala):
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        self._no_resumo(ana_identificada)
+        resposta = ana_identificada.responder(fala)
+        assert resposta.startswith("Desculpe, não entendi. Posso confirmar")
+        assert "cardápio" not in resposta
+        assert ana_identificada.etapa == "confirmando_pedido"
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes
+
+    def test_depois_de_nao_entender_ainda_da_para_confirmar(self, ana_identificada):
+        self._no_resumo(ana_identificada)
+        ana_identificada.responder("blorp")
+        assert "confirmado" in ana_identificada.responder("sim")
+
+    @pytest.mark.parametrize("fala, esperado", [("no débito", "cartao_debito"), ("em dinheiro", "dinheiro")])
+    def test_mudar_o_pagamento_no_resumo_continua_funcionando(self, ana_identificada, fala, esperado):
+        self._no_resumo(ana_identificada)
+        ana_identificada.responder(fala)
+        assert ana_identificada.pagamento == esperado
+
+    def test_acrescentar_item_no_resumo_continua_funcionando(self, ana_identificada):
+        self._no_resumo(ana_identificada)
+        ana_identificada.responder("uma coca")
+        assert "Coca-Cola 2 Litros" in [i["produto"] for i in ana_identificada.carrinho]
+
+    def test_nao_continua_voltando_para_o_pedido(self, ana_identificada):
+        self._no_resumo(ana_identificada)
+        assert ana_identificada.responder("não") == "Tudo bem. O que você quer mudar?"
+
+    def test_parecida_nao_vale_fora_da_confirmacao(self, ana_identificada):
+        assert parece_confirmacao("poisito")
+        assert not parece_confirmacao("poisito?")
+        assert not parece_confirmacao("poisito agora")
