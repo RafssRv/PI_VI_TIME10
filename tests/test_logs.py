@@ -7,6 +7,7 @@ import json
 import logging
 import sys
 import threading
+import types
 
 import pytest
 from fastapi import UploadFile
@@ -235,28 +236,54 @@ def test_falha_inesperada_da_chamada_nao_escapa_para_traceback_do_servidor(
     assert "categoria=inesperada" in caplog.text
 
 
-@pytest.mark.parametrize("codigo", [0, 1])
-def test_saida_do_processo_de_sintese_nao_vaza_texto(
-    monkeypatch, tmp_path, capfd, caplog, codigo,
-):
+@pytest.mark.parametrize("falha", [False, True])
+def test_falha_na_sintese_nao_vaza_texto(monkeypatch, tmp_path, capfd, caplog, falha):
     from agente.services import piper_service
 
+    class VozSimulada:
+        def synthesize_wav(self, texto, arquivo):
+            if falha:
+                raise ValueError("falha ao ler: " + texto)
+            arquivo.setnchannels(1)
+            arquivo.setsampwidth(2)
+            arquivo.setframerate(22050)
+            arquivo.writeframes(b"\0\0")
+
     monkeypatch.setattr(piper_service, "PASTA_AGENTE", tmp_path)
-    popen = piper_service.subprocess.Popen
-
-    def processo_simulado(comando, **kwargs):
-        # Processo real que ecoa a fala nos dois canais, como um diagnóstico de falha.
-        script = ("import sys; texto=sys.stdin.read(); print(texto); "
-                  "print(texto,file=sys.stderr); sys.exit(" + str(codigo) + ")")
-        return popen([sys.executable, "-c", script], **kwargs)
-
-    monkeypatch.setattr(piper_service.subprocess, "Popen", processo_simulado)
-    if codigo:
-        with pytest.raises(RuntimeError, match="codigo 1"):
+    monkeypatch.setattr(piper_service, "_voz", VozSimulada())
+    if falha:
+        with pytest.raises(RuntimeError) as erro:
             piper_service.sintetizar_resposta(DADOS)
+        assert DADOS not in str(erro.value)
+        assert erro.value.__cause__ is None and erro.value.__suppress_context__
     else:
         assert piper_service.sintetizar_resposta(DADOS).name == "resposta.wav"
     conferir_logs(capfd, caplog)
+
+
+def test_a_voz_e_carregada_uma_vez_so(monkeypatch, tmp_path):
+    from agente.services import piper_service
+
+    carregadas = []
+
+    class Voz:
+        def synthesize_wav(self, texto, arquivo):
+            arquivo.setnchannels(1)
+            arquivo.setsampwidth(2)
+            arquivo.setframerate(22050)
+            arquivo.writeframes(b"\0\0")
+
+    class PiperVoice:
+        @staticmethod
+        def load(caminho):
+            carregadas.append(caminho)
+            return Voz()
+
+    monkeypatch.setitem(sys.modules, "piper", types.SimpleNamespace(PiperVoice=PiperVoice))
+    monkeypatch.setattr(piper_service, "_voz", None)
+    piper_service.sintetizar_resposta("um", tmp_path / "um.wav")
+    piper_service.sintetizar_resposta("dois", tmp_path / "dois.wav")
+    assert len(carregadas) == 1
 
 
 @pytest.mark.parametrize("cancelamento", [False, True])
