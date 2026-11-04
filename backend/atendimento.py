@@ -18,7 +18,8 @@ from uuid import uuid4
 
 from agente.controle_pedido import ControlePedido, ErroPedido, ProdutoCardapio
 from agente.intencao_pedido import (CONSULTA_HISTORICO, CONSULTA_PEDIDO_ATUAL, CONSULTA_RECOMENDACAO, FALAS_DE_FECHAR,
-                                   FECHAR, RECLAMA_DO_PEDIDO, cardapio_completo, comando_negado, eh_consulta,
+                                   AINDA_NAO_ACABOU, FECHAR, FIM_DO_PEDIDO, RECLAMA_DO_PEDIDO, cardapio_completo, comando_negado,
+                                   eh_consulta,
                                    interpretar, mencoes)
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -506,6 +507,12 @@ class Atendimento:
         normalizado = _normalizar(texto).strip()
         if NAO_SOU_EU.search(normalizado):
             return self._desfazer_identificacao()
+        sem_cortesia = re.sub(r"\bnao( nao)+\b", "nao", " ".join(CORTESIA.sub("", normalizado).split()))
+        if (FIM_DO_PEDIDO.search(sem_cortesia) and not AINDA_NAO_ACABOU.search(texto)
+                and not mencoes(texto, repositorio.listar_cardapio(db))[1]):
+            self._largar_duvida_de_produto()
+            problemas = self._atualizar_pagamento(texto)
+            return problemas[0] if problemas else self._fechar_pedido()
         sugestoes, self._sugestoes = self._sugestoes, []
         repetir, self._repetir = self._repetir, None
         # a sugestao termina em pergunta ("quer pedir?"), entao o sim responde a ela e so vale na fala seguinte
@@ -574,12 +581,15 @@ class Atendimento:
             self.historico.extend([{"role": "user", "content": texto},
                                    {"role": "assistant", "content": fala}])
             return fala
-        sem_cortesia = " ".join(CORTESIA.sub("", normalizado).split())
         if sem_cortesia in FALAS_DE_FECHAR:
+            self._largar_duvida_de_produto()
             return self._fechar_pedido()
-        # "nao" responde ao "quer algo mais?". com pergunta pendente, responde a ela e nao fecha nada
-        if sem_cortesia in {"nao", "nao quero", "agora nao"} and not self._pendencia:
-            return self._fechar_pedido()
+        # "nao" responde ao "quer algo mais?". com pergunta pendente, desiste dela e nao fecha nada
+        if sem_cortesia in {"nao", "nao quero", "agora nao"}:
+            if not self._pendencia:
+                return self._fechar_pedido()
+            if self._largar_duvida_de_produto():
+                return "Tudo bem. Quer algo mais?" if self.carrinho else "Tudo bem. O que vai querer?"
         if confirmacao_explicita(texto):
             if self._pendencia:
                 return self._esclarecer(self._pendencia)
@@ -670,6 +680,19 @@ class Atendimento:
         self.historico.append({"role": "assistant", "content": fala})
         return fala
 
+    def _largar_duvida_de_produto(self):
+        """
+        desiste de um item que nem entrou no pedido, pra pessoa nunca ficar presa nele.
+        correcao que falhou nao passa por aqui: essa continua bloqueando o resumo ate ser resolvida.
+        """
+        if not self._pendencia or not self._duvida_item or self._duvida_item.get("campo") != "produto":
+            return False
+        self._pendencia = self._duvida_item = self._ultima_pergunta = None
+        self._tentativas = 0
+        if self._controle:
+            self._controle.definir_pendencia(None)
+        return True
+
     def _reconhecer_alteracoes(self, evidencias):
         verbos = {"adicionar": "Anotei", "remover": "Tirei", "corrigir": "Ajustei para"}
         return " ".join("{} {} {}{}.".format(verbos[e["acao"]], e["quantidade"], e["produto"],
@@ -688,6 +711,9 @@ class Atendimento:
             return "Não entendi. Pode repetir o que você quer?"
         candidatos = duvida.get("candidatos", [])
         if duvida.get("nao_encontrado"):
+            # frase longa nao eh nome de produto: repetir ela de volta soa como erro de maquina
+            if len(duvida["nao_encontrado"].split()) > 4:
+                return "Não entendi. Pode repetir o que você quer?"
             return "Não temos {} no cardápio. Quer escolher outra opção?".format(duvida["nao_encontrado"])
         if candidatos:
             if len(candidatos) <= 4:

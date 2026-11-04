@@ -1300,3 +1300,83 @@ class TestConversaNatural:
         ana_identificada.responder("é só isso")
         fala = ana_identificada.responder("sim")
         assert fala.endswith("confirmado! Obrigado, Ana, e bom apetite!")
+
+
+class TestNuncaFicaPreso:
+    @pytest.mark.parametrize("fala", [
+        "Não, não quero mais nada.", "não, só isso", "sim, é só isso", "nada mais, obrigado", "Quero pagar.",
+        "pode cobrar", "quero fechar", "fecha a conta",
+    ])
+    def test_frases_de_fim_fecham_o_pedido(self, ana_identificada, llama, fala):
+        ana_identificada.responder("um pudim de leite no pix")
+        assert "Seu pedido ficou assim" in ana_identificada.responder(fala)
+        assert llama.chamadas == []
+
+    def test_quero_pagar_no_pix_ja_registra_e_fecha(self, ana_identificada):
+        ana_identificada.responder("um pudim de leite")
+        assert "pagamento no Pix" in ana_identificada.responder("quero pagar no pix")
+        assert ana_identificada.pagamento == "pix"
+
+    def test_item_com_fim_na_mesma_frase_ainda_anota(self, ana_identificada):
+        ana_identificada.responder("um pudim de leite no pix")
+        resposta = ana_identificada.responder("uma coca e só isso")
+        assert "Seu pedido ficou assim" in resposta
+        assert "Coca-Cola" in resposta
+
+    def test_produto_que_nao_existe_nao_prende_as_proximas_falas(self, ana_identificada):
+        ana_identificada.responder("uma calabresa")
+        assert "Não temos" in ana_identificada.responder("uma pizza de sushi")
+        assert "Anotei 1 Coca-Cola" in ana_identificada.responder("uma coca")
+        assert "pagamento no Pix" in ana_identificada.responder("no pix")
+
+    def test_nao_depois_de_produto_inexistente_segue_a_conversa(self, ana_identificada):
+        ana_identificada.responder("uma calabresa")
+        ana_identificada.responder("uma pizza de sushi")
+        assert ana_identificada.responder("não") == "Tudo bem. Quer algo mais?"
+        assert "Como você vai pagar" in ana_identificada.responder("não")
+
+    def test_fala_que_nao_entende_nao_e_repetida_de_volta(self, ana_identificada):
+        resposta = ana_identificada.responder("isso aqui não tem nada a ver com pizza hoje")
+        assert "isso aqui" not in resposta
+
+    def test_desistir_do_sabor_nao_trava(self, ana_identificada):
+        ana_identificada.responder("uma calabresa no pix")
+        ana_identificada.responder("quero uma pizza")
+        assert "Seu pedido ficou assim" in ana_identificada.responder("não quero mais nada")
+        assert [i["produto"] for i in ana_identificada.carrinho] == ["Pizza de Calabresa"]
+
+
+class TestEcoDoWhisper:
+    @pytest.mark.parametrize("ouvido, esperado", [
+        ("pudim de leite, pudim de leite", "pudim de leite"),
+        ("Um pudim de leite. Um pudim de leite.", "Um pudim de leite."),
+        ("uma coca-cola uma coca-cola uma coca-cola", "uma coca-cola"),
+        ("Um pudim. Um pudim de leite.", "Um pudim de leite."),
+    ])
+    def test_trecho_repetido_vira_um_so(self, ouvido, esperado):
+        assert juntar_segmentos([SimpleNamespace(text=ouvido, no_speech_prob=0.1)]) == esperado
+
+    @pytest.mark.parametrize("ouvido", ["111.111.111-11", "111 222 333 96", "1 1 1 2 2 2 3 3 3 9 6", "19 99999 9999"])
+    def test_numero_repetido_nao_e_eco(self, ouvido):
+        assert juntar_segmentos([SimpleNamespace(text=ouvido, no_speech_prob=0.1)]) == ouvido
+
+    def test_duas_pizzas_diferentes_continuam_iguais(self):
+        fala = "uma calabresa e uma margherita"
+        assert juntar_segmentos([SimpleNamespace(text=fala, no_speech_prob=0.1)]) == fala
+
+    def test_eco_nao_cobra_duas_vezes(self, ana_identificada):
+        texto = juntar_segmentos([SimpleNamespace(text="pudim de leite, pudim de leite", no_speech_prob=0.1)])
+        ana_identificada.responder(texto)
+        assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == [("Pudim de Leite", 1)]
+
+
+class TestNaoESoIsso:
+    @pytest.mark.parametrize("fala", ["não é só isso", "não só isso"])
+    def test_sem_virgula_pede_mais(self, ana_identificada, fala):
+        ana_identificada.responder("um pudim de leite no pix")
+        ana_identificada.responder(fala)
+        assert ana_identificada.etapa == "identificado"
+
+    def test_com_virgula_encerra(self, ana_identificada):
+        ana_identificada.responder("um pudim de leite no pix")
+        assert "Seu pedido ficou assim" in ana_identificada.responder("não, é só isso")

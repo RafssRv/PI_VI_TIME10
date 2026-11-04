@@ -123,7 +123,10 @@ LIMITE_SEM_FALA = 0.45
 
 def juntar_segmentos(segmentos):
     """Descarta o que o Whisper provavelmente inventou de um ruído, para não virar pedido."""
-    return "".join(s.text for s in segmentos if s.no_speech_prob < LIMITE_SEM_FALA)
+    texto = "".join(s.text for s in segmentos if s.no_speech_prob < LIMITE_SEM_FALA)
+    # O modelo às vezes repete o trecho ("pudim de leite, pudim de leite"), e isso cobraria dois.
+    # Sem dígitos no trecho: número repetido em CPF ou telefone é dado, não eco.
+    return re.sub(r"\b([^\W\d_][^\d]{3,}?)(?:[\s,.;]+\1\b)+", r"\1", texto, flags=re.IGNORECASE)
 
 
 def confirmacao_explicita(texto):

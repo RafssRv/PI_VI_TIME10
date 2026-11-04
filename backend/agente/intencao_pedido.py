@@ -36,7 +36,12 @@ CONSULTA_PEDIDO_ATUAL = re.compile(
     r"\b(?:voce|vc) anotou\b|\bate agora\b|\bpedido atual\b"
 )
 RECLAMA_DO_PEDIDO = re.compile(r"\bnao (?:e|foi|era)\b.*\bpedi\b")
-FECHAR = re.compile(r"\b(?:e so isso|so isso|pode fechar|fechar o pedido|finalizar|terminei)\b")
+FECHAR = re.compile(r"\b(?:e so isso|so isso|pode fechar|fechar o pedido|finalizar|terminei|mais nada|nada mais)\b")
+# "Não é só isso" pede mais; "não, é só isso" encerra. Só a vírgula separa, por isso olha o texto cru.
+AINDA_NAO_ACABOU = re.compile(r"\bn[aã]o\s+(?:[eé]\s+)?s[oó]\b", re.IGNORECASE)
+# Sem produto na frase, basta conter isto: "não, não quero mais nada", "quero pagar no pix".
+FIM_DO_PEDIDO = re.compile(r"\b(?:mais nada|nada mais|so isso|quero pagar|pode cobrar|"
+                           r"fecha(?:r)? a conta|quero fechar|quero encerrar)\b")
 REMOVER = re.compile(r"\b(?:tire|tira|tirar|retire|retira|retirar|remova|remover|exclua|nao quero)\b")
 CORRIGIR = re.compile(r"\b(?:na verdade|so|apenas|corrija|corrigir|altere|alterar|deixe|mude)\b")
 
@@ -53,6 +58,7 @@ FALAS_DE_FECHAR = {
     "pode fechar", "fechar", "fecha", "fecha o pedido", "fechar o pedido", "pode fechar o pedido",
     "finalizar", "finaliza", "pode finalizar", "quero finalizar", "finaliza o pedido", "terminei",
     "acabei", "acabou", "mais nada", "nada mais", "nao quero mais nada", "ta bom assim", "esta bom assim",
+    "quero pagar", "vou pagar", "pagar", "pode cobrar", "encerrar", "pode encerrar",
 }
 
 
@@ -147,6 +153,9 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
     """Retorna (rascunho, pendência de campo, evidências) sem efeitos externos."""
     texto = _numero_do_nome(texto)
     normal = _normalizar(texto)
+    # "Não temos X" é aviso, não pergunta aberta: não pode prender as falas seguintes.
+    if pendente and pendente.get("nao_encontrado"):
+        pendente = None
     novo = deepcopy(atual)
     evidencias = []
     if eh_consulta(texto):
@@ -334,7 +343,8 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
     if not achados:
         # Pagamento, endereço e fechamento são tratados pelo roteiro, sem reconstruir itens.
         if not FECHAR.search(normal) and not re.search(
-                r"\b(?:pix|pics|picks|piques|pixe|dinheiro|cartao|credito|debito|endereco|rua|avenida)\b", normal):
+                r"\b(?:pix|pics|picks|piques|pixe|dinheiro|cartao|credito|debito|endereco|rua|avenida|av|travessa|"
+                r"alameda|estrada|rodovia)\b", normal):
             duvida = pendente or {"campo": "produto", "quantidade": quantidade(normal)}
             desconhecido = re.sub(r"^(?:(?:eu|quero|queria|uma?|duas?|dois|tres|de)\s+)+", "", normal)
             if not pendente and desconhecido and not re.search(r"\b(?:incompreensivel|inaudivel|hmm|trecho)\b", desconhecido):
