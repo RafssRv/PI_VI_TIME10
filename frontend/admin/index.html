@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pizzaria Exemplo · painel</title>
+  <link rel="icon" type="image/svg+xml" href="../logo.svg">
+  <link rel="stylesheet" href="painel.css?v=1">
+</head>
+<body>
+  <header class="topo">
+    <div class="marca">
+      <img src="../logo.svg" alt="" width="34" height="34">
+      <div>
+        <h1>Pizzaria Exemplo</h1>
+        <p>Painel do administrador</p>
+      </div>
+    </div>
+
+    <div class="topo-acoes">
+      <div class="periodos" role="group" aria-label="Período">
+        <button type="button" data-dias="7">7 dias</button>
+        <button type="button" data-dias="30" aria-pressed="true">30 dias</button>
+        <button type="button" data-dias="90">90 dias</button>
+        <button type="button" data-dias="0">Tudo</button>
+      </div>
+      <span id="atualizado" class="atualizado">carregando…</span>
+      <a class="botao-link" href="/">Abrir atendimento</a>
+    </div>
+  </header>
+
+  <div id="aviso" class="aviso" role="alert" hidden></div>
+
+  <main id="painel" class="carregando" aria-busy="true">
+    <section class="indicadores" aria-label="Resumo do período">
+      <article class="cartao indicador">
+        <h2>Pedidos</h2>
+        <strong id="kpi-pedidos">—</strong>
+        <p><span id="var-pedidos" class="variacao"></span> <span id="kpi-itens" class="fraco"></span></p>
+      </article>
+      <article class="cartao indicador">
+        <h2>Faturamento</h2>
+        <strong id="kpi-faturamento">—</strong>
+        <p><span id="var-faturamento" class="variacao"></span></p>
+      </article>
+      <article class="cartao indicador">
+        <h2>Ticket médio</h2>
+        <strong id="kpi-ticket">—</strong>
+        <p class="fraco">por pedido</p>
+      </article>
+      <article class="cartao indicador">
+        <h2>Clientes atendidos</h2>
+        <strong id="kpi-clientes">—</strong>
+        <p id="kpi-novos" class="fraco"></p>
+      </article>
+    </section>
+
+    <section class="grade">
+      <article class="cartao largo">
+        <header class="cartao-topo">
+          <h2>Faturamento por dia</h2>
+          <span id="legenda-dias" class="fraco"></span>
+        </header>
+        <div id="grafico-dias" class="grafico"></div>
+      </article>
+
+      <article class="cartao">
+        <header class="cartao-topo"><h2>Formas de pagamento</h2></header>
+        <div id="grafico-pagamentos" class="rosca"></div>
+      </article>
+
+      <article class="cartao">
+        <header class="cartao-topo"><h2>Mais vendidos</h2><span class="fraco">unidades</span></header>
+        <ol id="mais-vendidos" class="barras-h"></ol>
+      </article>
+
+      <article class="cartao">
+        <header class="cartao-topo"><h2>Pedidos por horário</h2></header>
+        <div id="grafico-horas" class="grafico"></div>
+      </article>
+
+      <article class="cartao">
+        <header class="cartao-topo"><h2>Vendas por categoria</h2></header>
+        <ol id="categorias" class="barras-h"></ol>
+      </article>
+
+      <article class="cartao largo">
+        <header class="cartao-topo"><h2>Últimos pedidos</h2></header>
+        <div class="tabela-rolagem">
+          <table>
+            <thead>
+              <tr><th>Nº</th><th>Quando</th><th>Cliente</th><th class="num">Itens</th><th>Pagamento</th><th>Status</th><th class="num">Total</th></tr>
+            </thead>
+            <tbody id="ultimos"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="cartao">
+        <header class="cartao-topo"><h2>Cardápio</h2></header>
+        <div id="cardapio" class="cardapio"></div>
+      </article>
+    </section>
+  </main>
+
+  <div id="dica" class="dica" role="tooltip" hidden></div>
+
+  <script src="painel.js?v=1"></script>
+</body>
+</html>

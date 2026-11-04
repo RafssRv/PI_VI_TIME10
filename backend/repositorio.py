@@ -334,3 +334,57 @@ def salvar_pedido(db, cliente_id, itens, endereco_entrega=None, forma_pagamento=
     # carrega os itens agora, com a sessao ainda aberta, pq quem chamou vai ler isso depois
     list(pedido.itens)
     return pedido
+
+
+
+# --- painel do administrador ---
+# so le colunas que o painel mostra: cpf_hash, telefone e endereco nunca saem daqui
+
+def _pedidos_validos(consulta, desde=None, ate=None):
+    # pedido cancelado nao eh venda: fica fora do faturamento e das contagens
+    consulta = consulta.filter(Pedido.status != "cancelado")
+    if desde is not None:
+        consulta = consulta.filter(Pedido.criado_em >= desde)
+    if ate is not None:
+        consulta = consulta.filter(Pedido.criado_em < ate)
+    return consulta
+
+
+def dados_do_painel(db, desde=None, ate=None):
+    """pedidos do periodo e os itens deles, em duas consultas, para o painel agregar."""
+    pedidos = _pedidos_validos(
+        db.query(Pedido.id, Pedido.criado_em, Pedido.total, Pedido.forma_pagamento,
+                 Pedido.status, Pedido.cliente_id, Cliente.nome)
+        .join(Cliente, Cliente.id == Pedido.cliente_id),
+        desde, ate,
+    ).order_by(Pedido.criado_em, Pedido.id).all()
+
+    itens = _pedidos_validos(
+        db.query(ItemPedido.pedido_id, Produto.nome, Produto.categoria,
+                 ItemPedido.quantidade, ItemPedido.preco_unitario)
+        .join(Pedido, Pedido.id == ItemPedido.pedido_id)
+        .join(Produto, Produto.id == ItemPedido.produto_id),
+        desde, ate,
+    ).all()
+    return pedidos, itens
+
+
+def primeiras_compras(db, cliente_ids):
+    """data do primeiro pedido de cada cliente: quem comprou pela 1a vez no periodo eh cliente novo."""
+    if not cliente_ids:
+        return {}
+    linhas = (
+        _pedidos_validos(db.query(Pedido.cliente_id, func.min(Pedido.criado_em)))
+        .filter(Pedido.cliente_id.in_(list(cliente_ids)))
+        .group_by(Pedido.cliente_id)
+        .all()
+    )
+    return {cliente_id: primeira for cliente_id, primeira in linhas}
+
+
+def totais_do_periodo(db, desde=None, ate=None):
+    """(quantidade de pedidos, faturamento) de um periodo, pra comparar com o periodo atual."""
+    quantidade, faturamento = _pedidos_validos(
+        db.query(func.count(Pedido.id), func.coalesce(func.sum(Pedido.total), 0)), desde, ate
+    ).one()
+    return int(quantidade), Decimal(str(faturamento))
