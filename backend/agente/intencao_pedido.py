@@ -6,6 +6,7 @@ não aproximados. Amplie com uma regressão de fala real ao aceitar outra constr
 
 import re
 from copy import deepcopy
+from difflib import get_close_matches
 
 from repositorio import _normalizar
 
@@ -38,6 +39,10 @@ RECLAMA_DO_PEDIDO = re.compile(r"\bnao (?:e|foi|era)\b.*\bpedi\b")
 FECHAR = re.compile(r"\b(?:e so isso|so isso|pode fechar|fechar o pedido|finalizar|terminei)\b")
 REMOVER = re.compile(r"\b(?:tire|tira|tirar|retire|retira|retirar|remova|remover|exclua|nao quero)\b")
 CORRIGIR = re.compile(r"\b(?:na verdade|so|apenas|corrija|corrigir|altere|alterar|deixe|mude)\b")
+
+
+# Parecem nomes do cardápio, mas são palavras do dia a dia: "quanto" não é "quatro queijos".
+NAO_E_PRODUTO = {"quanto", "quanta"}
 
 
 def quantidade(texto):
@@ -77,6 +82,14 @@ def mencoes(texto, produtos):
     radicais = [radical(p) for p in palavras]
     nomes = [(p, [radical(t) for t in _normalizar(p.nome).split()]) for p in produtos]
     ignorar = {"de", "do", "da", "com", "sem", "e", "o", "a", "litro", "ml"}
+    # O Whisper erra letras de nomes ("calabresia", "margarita"). Só corrige quando há um único
+    # parecido no cardápio, e o resumo ainda é lido para o cliente confirmar.
+    vocabulario = {t for _, nome in nomes for t in nome if len(t) >= 5}
+    for i, palavra in enumerate(radicais):
+        if len(palavra) >= 5 and palavra not in vocabulario and palavra not in NAO_E_PRODUTO:
+            parecidas = get_close_matches(palavra, vocabulario, n=2, cutoff=0.8)
+            if len(parecidas) == 1:
+                palavras[i] = radicais[i] = parecidas[0]
     resultado = []
     inicio = 0
     while inicio < len(palavras):

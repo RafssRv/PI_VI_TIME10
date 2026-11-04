@@ -990,3 +990,66 @@ class TestQuandoOModeloEChamado:
         cardapio = primeiro.index("Pedido atual:")
         assert primeiro[:cardapio] == segundo[:cardapio]
         assert "Cardápio:" in primeiro[:cardapio]
+
+
+class TestTamanhoDaPizza:
+    @pytest.mark.parametrize("fala", [
+        "pizza de calabresa grande.", "uma pizza grande de calabresa", "quero uma calabresa média",
+        "pizza de calabresa tamanho família", "uma pizza de calabresa de tamanho grande",
+    ])
+    def test_tamanho_nao_impede_o_pedido(self, ana_identificada, llama, fala):
+        resposta = ana_identificada.responder(fala)
+        assert resposta.startswith("Trabalhamos com tamanho único.")
+        assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == [("Pizza de Calabresa", 1)]
+        assert llama.chamadas == []
+
+    def test_quantidade_e_mantida(self, ana_identificada):
+        ana_identificada.responder("duas pizzas grandes de calabresa e uma coca-cola")
+        ana_identificada.responder("duas pizzas de calabresa grande")
+        assert ("Pizza de Calabresa", 2) in [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho]
+
+    def test_sabor_vago_com_tamanho_ainda_pergunta_o_sabor(self, ana_identificada):
+        resposta = ana_identificada.responder("quero uma pizza grande")
+        assert "tamanho único" in resposta
+        assert "sabor" in resposta
+        assert ana_identificada.carrinho == []
+
+    @pytest.mark.parametrize("fala", ["quais tamanhos vocês têm?", "tem pizza grande?", "qual o tamanho da pizza?"])
+    def test_pergunta_sobre_tamanho_nao_chama_o_modelo(self, ana_identificada, llama, fala):
+        assert ana_identificada.responder(fala) == "Trabalhamos com tamanho único."
+        assert llama.chamadas == []
+
+    def test_so_o_tamanho_pede_o_produto(self, ana_identificada):
+        assert "produto e a quantidade" in ana_identificada.responder("grande")
+
+    def test_rua_com_nome_de_tamanho_continua_igual(self, ana_identificada):
+        ana_identificada.responder("a entrega é na Rua Grande, 10")
+        assert ana_identificada.endereco_entrega == "Rua Grande, 10"
+
+    def test_preco_com_tamanho_responde_o_preco(self, ana_identificada, llama):
+        resposta = ana_identificada.responder("quanto custa a pizza de calabresa grande?")
+        assert "64 reais e 90 centavos" in resposta
+        assert llama.chamadas == []
+
+
+class TestErrosDeTranscricaoNosNomes:
+    @pytest.mark.parametrize("fala, produto", [
+        ("Pizza de calabresia", "Pizza de Calabresa"),
+        ("uma margarita", "Pizza Margherita"),
+        ("uma pizza de muçarela", "Pizza de Mussarela"),
+        ("uma pizza portugesa", "Pizza Portuguesa"),
+        ("uma pizza de peperoni", "Pizza de Pepperoni"),
+    ])
+    def test_nome_com_letra_errada_acha_o_produto(self, ana_identificada, llama, fala, produto):
+        ana_identificada.responder(fala)
+        assert [i["produto"] for i in ana_identificada.carrinho] == [produto]
+        assert llama.chamadas == []
+
+    def test_quanto_nao_vira_quatro_queijos(self, ana_identificada):
+        resposta = ana_identificada.responder("quanto custa a margherita?")
+        assert "Quatro Queijos" not in resposta
+        assert "66 reais e 90 centavos" in resposta
+
+    def test_produto_que_nao_existe_continua_recusado(self, ana_identificada):
+        assert "Não encontrei" in ana_identificada.responder("uma pizza de sushi")
+        assert ana_identificada.carrinho == []

@@ -347,6 +347,32 @@ body[data-estado="ocioso"] #timer { display: none; }
   .controles { bottom: 26px; }
 }
 
+/* em chamada o que importa eh a conversa: a esfera encolhe e vai pro lado do nome.
+   vem depois das telas baixas de proposito, pra valer em qualquer altura */
+body:not([data-estado="ocioso"]) #cartao-estado {
+  display: grid; grid-template-columns: 72px minmax(0, 1fr); column-gap: 14px; align-items: center;
+  padding: 44px 24px 0; text-align: left;
+}
+body:not([data-estado="ocioso"]) #orbe { grid-row: 1 / span 3; }
+body:not([data-estado="ocioso"]) #orbe,
+body:not([data-estado="ocioso"]) #orbe-canvas { width: 72px; height: 72px; }
+body:not([data-estado="ocioso"]) .empresa { font-size: 20px; margin-top: 0; }
+body:not([data-estado="ocioso"]) .linha-tempo { margin-top: 0; font-size: 14px; }
+body:not([data-estado="ocioso"]) #sublinha-estado {
+  margin-top: 0; padding: 0; font-size: 12px; min-height: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+body:not([data-estado="ocioso"]) #caixa-conversa {
+  top: 152px; bottom: 112px; height: auto;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 20px);
+          mask-image: linear-gradient(to bottom, transparent 0, #000 20px);
+}
+body:not([data-estado="ocioso"]) #conversa { padding-top: 16px; }
+body:not([data-estado="ocioso"]) .fala:not(:nth-last-child(-n + 2)) { opacity: .75; }
+body:not([data-estado="ocioso"]) .controles { bottom: 16px; }
+body:not([data-estado="ocioso"]) .botao-chamada { gap: 4px; }
+body:not([data-estado="ocioso"]) .botao-chamada .forma { width: 60px; height: 60px; }
+
 /* quem pediu menos movimento no sistema nao ve as animacoes */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }

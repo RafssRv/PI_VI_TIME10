@@ -41,6 +41,12 @@ ACEITES_DA_SUGESTAO = {
 RESPOSTAS_VAGAS_A_SUGESTAO = {"sim", "pode ser", "ok", "claro", "isso", "beleza"}
 SINONIMOS_DE_CATEGORIA = {"refrigerante": "bebida", "refri": "bebida", "suco": "bebida", "agua": "bebida"}
 ENDERECO_NA_FALA = re.compile(r"\b(?:rua|avenida|av|travessa|alameda|estrada|rodovia)\b.*", re.IGNORECASE)
+# o cardapio nao tem tamanhos: "pizza de calabresa grande" eh a calabresa, nao um produto desconhecido
+TAMANHO_NA_FALA = re.compile(r"(?<!em )\b(?:(?:de |do |no )?tamanho )?(?:grande|m[eé]dia|m[eé]dio|pequena|pequeno|"
+                             r"gigante|fam[ií]lia|broto)\b", re.IGNORECASE)
+PERGUNTA_DE_TAMANHO = re.compile(r"\btamanhos?\b|\btem\b.*\b(?:grande|media|medio|pequena|pequeno|gigante|"
+                                 r"familia|broto)\b")
+FRASE_TAMANHO_UNICO = "Trabalhamos com tamanho único."
 # o que vem depois do endereco na mesma frase: "rua x, 10, e so isso"
 FIM_DO_ENDERECO = re.compile(r"[,.;]?\s*\b(?:[eé] s[oó] isso|s[oó] isso|por favor|pode fechar|pago|pagamento|"
                              r"vou pagar|no pix|em dinheiro|no cart[aã]o|no cr[eé]dito|no d[eé]bito)\b.*",
@@ -81,6 +87,15 @@ PAGAMENTO_FALADO = {
     "cartao_credito": "no cartão de crédito",
     "cartao_debito": "no cartão de débito",
 }
+
+def remover_tamanho(texto):
+    """tira o tamanho da fala e diz se tinha algum. nao mexe no endereco: "Rua Grande, 10" fica igual."""
+    endereco = ENDERECO_NA_FALA.search(texto)
+    corte = endereco.start() if endereco else len(texto)
+    limpo, quantos = TAMANHO_NA_FALA.subn("", texto[:corte])
+    limpo = re.sub(r"\s+([.,!?])", r"\1", re.sub(r"\s+", " ", limpo + texto[corte:])).strip()
+    return limpo, quantos > 0
+
 
 def _prompt_base():
     return (Path(__file__).parent / "agente" / "prompt_sistema.txt").read_text(encoding="utf-8")
@@ -429,7 +444,14 @@ class Atendimento:
     def _montar_pedido(self, texto):
         db = self._sessao()
         try:
-            return self._montar_pedido_com(db, texto)
+            if eh_consulta(texto) and PERGUNTA_DE_TAMANHO.search(_normalizar(texto)):
+                return FRASE_TAMANHO_UNICO
+            sem_tamanho, citou_tamanho = remover_tamanho(texto)
+            if not citou_tamanho:
+                return self._montar_pedido_com(db, texto)
+            if not _normalizar(sem_tamanho):
+                return FRASE_TAMANHO_UNICO + " Pode falar o produto e a quantidade?"
+            return FRASE_TAMANHO_UNICO + " " + self._montar_pedido_com(db, sem_tamanho)
         except SQLAlchemyError:
             # erro do llama (ollama fechado) sobe de proposito: o turno_de_voz avisa na tela
             logger.warning("chamada=%s etapa=montar_pedido categoria=banco", self.id_chamada)
