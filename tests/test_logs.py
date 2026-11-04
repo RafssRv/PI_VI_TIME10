@@ -56,7 +56,7 @@ def chamada_privada(db, monkeypatch, tmp_path, caplog):
 
     agente = {
         "salvar_fala_em_wav": salvar,
-        "transcrever": lambda caminho: fala["texto"],
+        "transcrever": lambda caminho, dica=None: fala["texto"],
         "sintetizar_resposta": lambda texto, caminho=None: resposta,
     }
     monkeypatch.setattr(turno_de_voz, "carregar_agente", lambda: agente)

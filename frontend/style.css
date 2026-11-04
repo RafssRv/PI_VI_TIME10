@@ -351,7 +351,7 @@ body[data-estado="ocioso"] #timer { display: none; }
    vem depois das telas baixas de proposito, pra valer em qualquer altura */
 body:not([data-estado="ocioso"]) #cartao-estado {
   display: grid; grid-template-columns: 72px minmax(0, 1fr); column-gap: 14px; align-items: center;
-  padding: 44px 24px 0; text-align: left;
+  padding: 8px 24px 0; text-align: left;
 }
 body:not([data-estado="ocioso"]) #orbe { grid-row: 1 / span 3; }
 body:not([data-estado="ocioso"]) #orbe,
@@ -363,7 +363,7 @@ body:not([data-estado="ocioso"]) #sublinha-estado {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 body:not([data-estado="ocioso"]) #caixa-conversa {
-  top: 152px; bottom: 112px; height: auto;
+  top: 118px; bottom: 112px; height: auto;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 20px);
           mask-image: linear-gradient(to bottom, transparent 0, #000 20px);
 }

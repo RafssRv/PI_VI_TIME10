@@ -34,7 +34,7 @@ def test_chamadas_simultaneas_nao_trocam_audio(tmp_path, monkeypatch, etapa_conc
     barreira = threading.Barrier(2)
     caminhos = []
 
-    def transcrever(caminho):
+    def transcrever(caminho, dica=None):
         caminhos.append(Path(caminho))
         if etapa_concorrente == "transcricao":
             barreira.wait(timeout=5)
@@ -61,6 +61,9 @@ def test_chamadas_simultaneas_nao_trocam_audio(tmp_path, monkeypatch, etapa_conc
 
     class Atendimento:
         id_chamada = "chamada-concorrente"
+
+        def dica_de_transcricao(self):
+            return None
 
         def responder_com_eventos(self, texto):
             return {"texto": texto, "eventos": []}
@@ -129,7 +132,7 @@ def test_transcricoes_vazias_recebem_orientacao_em_voz_sem_modelo(tmp_path, monk
     atendimento = Atendimento(abrir_sessao=nao_chamar, conversar=nao_chamar)
     monkeypatch.setattr(turno_de_voz, "_agente", {
         "salvar_fala_em_wav": audio_service.salvar_fala_em_wav,
-        "transcrever": lambda caminho: "",
+        "transcrever": lambda caminho, dica=None: "",
         "sintetizar_resposta": sintetizar,
     })
     for turno in (1, 2):
@@ -163,7 +166,7 @@ def chamada(db, monkeypatch, tmp_path):
 
     agente = {
         "salvar_fala_em_wav": salvar,
-        "transcrever": lambda caminho: fala["texto"],
+        "transcrever": lambda caminho, dica=None: fala["texto"],
         "sintetizar_resposta": lambda texto, caminho=None: resposta,
     }
     monkeypatch.setattr(turno_de_voz, "carregar_agente", lambda: agente)

@@ -149,6 +149,7 @@ class Atendimento:
         self._cpf_parcial = ""
         self._erros_de_cpf = 0
         self._comanda_desatualizada = False
+        self._dica = None
         self.sessao_id = self.id_chamada
         self.turno_id = 0
         self.ultimo_rastro = None
@@ -235,6 +236,27 @@ class Atendimento:
             "forma_pagamento": self.pagamento,
             "endereco_entrega": self.endereco_entrega or self.endereco_do_cadastro,
         }
+
+    def dica_de_transcricao(self):
+        """
+        o que o whisper deve esperar ouvir. so vale quando a fala eh sobre o cardapio: no cpf nao ajuda
+        e em nome e endereco atrapalharia. nao colocar comandos aqui: testando, o modelo repetia o fim
+        da dica quando so ouvia ruido, e "e so isso" fecharia o pedido sozinho.
+        """
+        if self.etapa not in {"identificado", "confirmando_pedido", "sem_cadastro"}:
+            return None
+        if self._dica is None:
+            db = self._sessao()
+            try:
+                nomes = [p.nome for p in repositorio.listar_cardapio(db)]
+            except Exception:
+                logger.warning("chamada=%s etapa=dica_transcricao categoria=banco", self.id_chamada)
+                return None
+            finally:
+                db.close()
+            self._dica = ("Cardápio da pizzaria: {}. Pix, dinheiro, crédito e débito. "
+                          "O cliente diz o pedido:").format(", ".join(nomes))
+        return self._dica
 
     # --- banco ---
 
@@ -656,6 +678,8 @@ class Atendimento:
                 len(candidatos), duvida.get("trecho", "produto"))
         qtd = duvida.get("quantidade")
         if qtd:
+            if qtd == 1:
+                return "Não entendi um dos produtos. Pode repetir o nome dele?"
             return "Entendi {} unidades, mas faltou o nome. Qual é o produto dessas {} unidades?".format(qtd, qtd)
         return "Não identifiquei o produto no cardápio. Pode repetir só o nome do produto?"
 

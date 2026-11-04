@@ -87,9 +87,14 @@ def acao_do_trecho(texto, anterior="adicionar"):
     return anterior
 
 
+def _numero_do_nome(texto):
+    # O Whisper escreve "Pizza 4 Queijos": esse 4 faz parte do nome, não é a quantidade.
+    return re.sub(r"\b4\s+queijos?\b", "quatro queijos", texto, flags=re.IGNORECASE)
+
+
 def mencoes(texto, produtos):
     """Maior trecho contíguo do nome; nunca resolve um nome com vários candidatos."""
-    palavras = _normalizar(texto).split()
+    palavras = _normalizar(_numero_do_nome(texto)).split()
     radicais = [radical(p) for p in palavras]
     nomes = [(p, [radical(t) for t in _normalizar(p.nome).split()]) for p in produtos]
     ignorar = {"de", "do", "da", "com", "sem", "e", "o", "a", "litro", "ml"}
@@ -140,6 +145,7 @@ def cardapio_completo(texto):
 
 def interpretar(texto, produtos, atual, pendente=None, referencia=None):
     """Retorna (rascunho, pendência de campo, evidências) sem efeitos externos."""
+    texto = _numero_do_nome(texto)
     normal = _normalizar(texto)
     novo = deepcopy(atual)
     evidencias = []

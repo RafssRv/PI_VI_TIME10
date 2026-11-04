@@ -117,6 +117,15 @@ def sim_ou_nao(texto):
     return None
 
 
+# Medido em fala e ruído: fala real ficou em até 0,21; ruído que virava texto, de 0,51 a 0,84.
+LIMITE_SEM_FALA = 0.45
+
+
+def juntar_segmentos(segmentos):
+    """Descarta o que o Whisper provavelmente inventou de um ruído, para não virar pedido."""
+    return "".join(s.text for s in segmentos if s.no_speech_prob < LIMITE_SEM_FALA)
+
+
 def confirmacao_explicita(texto):
     """Somente uma afirmação completa autoriza a gravação, nunca palavras isoladas."""
     return "?" not in texto and _normalizar(texto).strip() in {

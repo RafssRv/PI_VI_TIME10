@@ -2,6 +2,8 @@ import os
 
 from faster_whisper import WhisperModel
 
+from interpretacao import juntar_segmentos
+
 modelo = WhisperModel(
     os.environ.get("WHISPER_MODEL", "base"),
     device="cpu",
@@ -9,16 +11,12 @@ modelo = WhisperModel(
 )
 
 
-def transcrever(caminho_audio):
+def transcrever(caminho_audio, dica=None):
+    # a dica diz o que esperar ouvir: sem ela, "coca-cola" virava "foca escona" no modelo base
     segmentos, info = modelo.transcribe(
         caminho_audio,
-        language="pt"
+        language="pt",
+        initial_prompt=dica
         )
 
-
-    texto_completo = ""
-
-    for segmento in segmentos:
-        texto_completo += segmento.text
-
-    return texto_completo
+    return juntar_segmentos(segmentos)

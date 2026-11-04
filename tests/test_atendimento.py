@@ -15,7 +15,7 @@ import repositorio
 import seed
 from models import Pedido
 from atendimento import Atendimento
-from interpretacao import extrair_digitos, extrair_nome, sim_ou_nao
+from interpretacao import extrair_digitos, extrair_nome, juntar_segmentos, sim_ou_nao
 
 # valido no digito verificador e fora do seed (o mesmo q o seed sugere pra testar o rf04)
 CPF_NOVO = "11122233396"
@@ -1150,3 +1150,60 @@ class TestMargemDeErroNaFala:
     def test_produto_que_nao_existe_com_prefixo_novo_continua_recusado(self, ana_identificada):
         ana_identificada.responder("me vê uma pizza de sushi")
         assert ana_identificada.carrinho == []
+
+
+class TestDicaParaOWhisper:
+    def test_com_o_cliente_identificado_a_dica_traz_o_cardapio(self, ana_identificada):
+        dica = ana_identificada.dica_de_transcricao()
+        assert "Coca-Cola 2 Litros" in dica
+        assert "Pizza de Calabresa" in dica
+
+    def test_produto_desativado_fica_fora(self, ana_identificada):
+        assert "Escarola" not in ana_identificada.dica_de_transcricao()
+
+    def test_dica_nao_tem_comando_que_o_ruido_possa_repetir(self, ana_identificada):
+        dica = ana_identificada.dica_de_transcricao().lower()
+        assert not any(c in dica for c in ("só isso", "confirm", "fechar", "pode ser"))
+
+    def test_cpf_e_cadastro_nao_recebem_dica(self, atendimento):
+        assert atendimento.dica_de_transcricao() is None
+        atendimento.saudacao()
+        assert atendimento.dica_de_transcricao() is None
+        atendimento.responder(CPF_NOVO)
+        atendimento.responder("sim")
+        assert atendimento.dica_de_transcricao() is None
+
+    def test_banco_fora_do_ar_nao_impede_a_transcricao(self, ana_identificada, monkeypatch):
+        def quebra(*a, **k):
+            raise OperationalError("select", {}, Exception("banco caiu"))
+        monkeypatch.setattr(repositorio, "listar_cardapio", quebra)
+        assert ana_identificada.dica_de_transcricao() is None
+
+    def test_ruido_inventado_e_descartado(self):
+        segmentos = [SimpleNamespace(text=" uma coca-cola", no_speech_prob=0.1),
+                     SimpleNamespace(text=" é só isso", no_speech_prob=0.84)]
+        assert juntar_segmentos(segmentos) == " uma coca-cola"
+
+    def test_produto_nao_entendido_tem_frase_natural(self, ana_identificada):
+        resposta = ana_identificada.responder("eu quero uma pizza de calabreza e uma foca escona")
+        assert "1 unidades" not in resposta
+        assert "Não entendi um dos produtos" in resposta
+        assert [i["produto"] for i in ana_identificada.carrinho] == ["Pizza de Calabresa"]
+
+
+class TestNumeroNoNomeDoProduto:
+    @pytest.mark.parametrize("fala, quantidade", [
+        ("Pizza 4 Queijos", 1), ("uma pizza 4 queijos", 1), ("duas pizzas 4 queijos", 2), ("2 pizzas 4 queijos", 2),
+        ("pizza quatro queijos", 1),
+    ])
+    def test_quatro_queijos_nao_vira_quatro_pizzas(self, ana_identificada, fala, quantidade):
+        ana_identificada.responder(fala)
+        assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == [
+            ("Pizza Quatro Queijos", quantidade)]
+
+    def test_quatro_calabresas_continua_sendo_quatro(self, ana_identificada):
+        ana_identificada.responder("4 calabresas")
+        assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == [("Pizza de Calabresa", 4)]
+
+    def test_preco_da_4_queijos_nao_cai_em_outra_conta(self, ana_identificada):
+        assert "78 reais e 90 centavos" in ana_identificada.responder("quanto custa a pizza 4 queijos?")

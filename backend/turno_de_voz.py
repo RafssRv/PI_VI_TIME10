@@ -135,7 +135,8 @@ async def _atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, ate
     # 2. whisper: transforma a fala em texto
     try:
         texto_cliente = await rodar_sem_travar(
-            websocket, turno, "transcrevendo", agente["transcrever"], str(caminho_wav))
+            websocket, turno, "transcrevendo",
+            lambda: agente["transcrever"](str(caminho_wav), atendimento.dica_de_transcricao()))
     except Exception:
         await mandar_erro(websocket, "transcricao", "A transcrição falhou.",
                           atendimento.id_chamada, turno, "transcricao")
