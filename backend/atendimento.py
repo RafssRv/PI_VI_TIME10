@@ -50,7 +50,7 @@ TAMANHO_NA_FALA = re.compile(r"(?<!em )\b(?:(?:de |do |no )?tamanho )?(?:grande|
                              r"gigante|fam[ií]lia|broto)\b", re.IGNORECASE)
 PERGUNTA_DE_TAMANHO = re.compile(r"\btamanhos?\b|\btem\b.*\b(?:grande|media|medio|pequena|pequeno|gigante|"
                                  r"familia|broto)\b")
-FRASE_TAMANHO_UNICO = "Trabalhamos com tamanho único."
+FRASE_TAMANHO_UNICO = "Nossas pizzas têm tamanho único."
 # o que vem depois do endereco na mesma frase: "rua x, 10, e so isso"
 FIM_DO_ENDERECO = re.compile(r"[,.;]?\s*\b(?:[eé] s[oó] isso|s[oó] isso|por favor|pode fechar|pago|pagamento|"
                              r"vou pagar|no pix|em dinheiro|no cart[aã]o|no cr[eé]dito|no d[eé]bito)\b.*",
@@ -91,6 +91,12 @@ PAGAMENTO_FALADO = {
     "cartao_credito": "no cartão de crédito",
     "cartao_debito": "no cartão de débito",
 }
+
+def _com_artigo(nome):
+    # o cardapio nao guarda genero: esses comecos sao femininos, o resto (guarana, pudim, suco) masculino
+    feminino = _normalizar(nome).split()[0] in {"pizza", "borda", "coca", "agua"}
+    return ("A " if feminino else "O ") + nome
+
 
 def remover_tamanho(texto):
     """tira o tamanho da fala e diz se tinha algum. nao mexe no endereco: "Rua Grande, 10" fica igual."""
@@ -166,6 +172,7 @@ class Atendimento:
         self._token_resumo = None
         self._pendencia = None
         self._sugestoes = []
+        self._repetir = None
         self._troca_pendente = False
         self._pendencia_antes_da_troca = None
         self._duvida_item = None
@@ -299,14 +306,14 @@ class Atendimento:
         if len(digitos) != 11:
             if self._pergunta_sobre_dados(texto):
                 return "Para isso, preciso do seu CPF primeiro. Pode falar os onze números, por favor?"
-            return self._cpf_nao_entendido("Não consegui entender o CPF. Pode falar os onze números, por favor?")
+            return self._cpf_nao_entendido("Não entendi o CPF. Pode repetir os números, por favor?")
 
         db = self._sessao()
         try:
             cliente = repositorio.buscar_cliente_por_cpf(db, digitos)
         except ValueError:
             # digito verificador nao bate: quase sempre eh o whisper q ouviu um numero errado
-            return self._cpf_nao_entendido("Esse CPF parece inválido. Pode repetir devagar, por favor?")
+            return self._cpf_nao_entendido("Acho que não ouvi direito. Pode repetir o CPF mais devagar?")
         except Exception:
             logger.warning("chamada=%s etapa=buscar_cliente categoria=banco", self.id_chamada)
             return FRASE_ERRO_BANCO
@@ -315,11 +322,11 @@ class Atendimento:
 
         if cliente:
             self._identificar(cliente.id, cliente.nome, cliente.endereco, cliente.telefone)
-            return "Achei seu cadastro, {}! O que vai querer hoje?".format(self._primeiro_nome())
+            return "Oi, {}! Que bom te ver de novo. O que vai querer hoje?".format(self._primeiro_nome())
 
         self.cadastro = {"cpf": digitos}
         self.etapa = "oferecendo_cadastro"
-        return "Não encontrei nenhuma conta com esse CPF. Deseja criar uma conta agora?"
+        return "Não encontrei cadastro com esse CPF. Quer criar agora? É rapidinho."
 
     def _cpf_nao_entendido(self, frase):
         self._erros_de_cpf += 1
@@ -500,15 +507,20 @@ class Atendimento:
         if NAO_SOU_EU.search(normalizado):
             return self._desfazer_identificacao()
         sugestoes, self._sugestoes = self._sugestoes, []
-        if sugestoes and normalizado in ACEITES_DA_SUGESTAO:
+        repetir, self._repetir = self._repetir, None
+        # a sugestao termina em pergunta ("quer pedir?"), entao o sim responde a ela e so vale na fala seguinte
+        aceitou = normalizado in ACEITES_DA_SUGESTAO or normalizado in RESPOSTAS_VAGAS_A_SUGESTAO
+        if (sugestoes or repetir) and sim_ou_nao(texto) is False and len(normalizado.split()) <= 3:
+            return "Tudo bem. Quer algo mais?" if self.carrinho else "Tudo bem. O que vai querer?"
+        if repetir and aceitou:
+            texto = repetir
+            normalizado = _normalizar(texto)
+        elif sugestoes and aceitou:
             if len(sugestoes) > 1:
                 self._sugestoes = sugestoes
                 return "Qual você quer: {}?".format(_juntar(sugestoes, "ou"))
             texto = "uma " + sugestoes[0]
             normalizado = _normalizar(texto)
-        elif sugestoes and normalizado in RESPOSTAS_VAGAS_A_SUGESTAO:
-            self._sugestoes = sugestoes
-            return "Para anotar, me diga o produto e a quantidade. Por exemplo: uma {}.".format(sugestoes[0])
         if comando_negado(texto):
             self._fechamento_solicitado = False
             self._token_resumo = None
@@ -659,7 +671,7 @@ class Atendimento:
         return fala
 
     def _reconhecer_alteracoes(self, evidencias):
-        verbos = {"adicionar": "Anotei", "remover": "Retirei", "corrigir": "Ajustei para"}
+        verbos = {"adicionar": "Anotei", "remover": "Tirei", "corrigir": "Ajustei para"}
         return " ".join("{} {} {}{}.".format(verbos[e["acao"]], e["quantidade"], e["produto"],
                         " ({})".format(e["observacao"]) if e.get("observacao") else "") for e in evidencias)
 
@@ -668,20 +680,19 @@ class Atendimento:
             return "Não consegui interpretar essa alteração. Pode repetir o produto e a quantidade?"
         campo = duvida["campo"]
         if campo == "quantidade":
-            return "Quantas unidades inteiras{} você deseja?".format(
+            return "Quantas unidades inteiras{} você quer?".format(
                 " de " + duvida["produto"] if duvida.get("produto") else "")
         if campo == "observacao":
             return "Qual é a observação para {}?".format(duvida["produto"])
         if campo == "intencao":
-            return "Você deseja alterar o pedido agora? Diga o produto e a quantidade."
+            return "Não entendi. Pode repetir o que você quer?"
         candidatos = duvida.get("candidatos", [])
         if duvida.get("nao_encontrado"):
-            return "Não encontrei {} no cardápio. Pode repetir o nome do produto?".format(duvida["nao_encontrado"])
+            return "Não temos {} no cardápio. Quer escolher outra opção?".format(duvida["nao_encontrado"])
         if candidatos:
             if len(candidatos) <= 4:
                 return "Qual produto você quer: {}?".format(_juntar(candidatos, "ou"))
-            return "Temos {} opções de {}. Qual é o sabor que você quer?".format(
-                len(candidatos), duvida.get("trecho", "produto"))
+            return "Claro! Qual sabor você quer?"
         qtd = duvida.get("quantidade")
         if qtd:
             if qtd == 1:
@@ -697,8 +708,8 @@ class Atendimento:
         if self._tentativas == 1:
             return pergunta
         if self._tentativas == 2:
-            return "Vamos por partes, uma coisa por vez. " + pergunta
-        return "Ainda não ficou claro. Tente reformular com outras palavras. " + pergunta
+            return "Desculpe, não entendi. " + pergunta
+        return "Desculpe, ainda não entendi. Pode falar de outro jeito? " + pergunta
 
     def _continuar_pedido(self):
         if self._pendencia:
@@ -718,17 +729,30 @@ class Atendimento:
         elif CONSULTA_RECOMENDACAO.search(normalizado):
             fala = self._recomendar(db, normalizado, produtos)
         elif cardapio_completo(texto):
-            fala = "Cardápio completo. " + " ".join(
-                "{}: {}.".format(p.nome, preco_falado(p.preco)) for p in produtos)
             if not produtos:
                 fala = "Não há produtos disponíveis no cardápio neste momento."
+            elif re.search(r"\b(?:todos|todas|completo|inteiro|precos)\b", normalizado):
+                fala = "Cardápio completo. " + " ".join(
+                    "{}: {}.".format(p.nome, preco_falado(p.preco)) for p in produtos)
+            else:
+                # ler 18 produtos em voz alta cansa: fala as categorias e deixa a pessoa escolher
+                categorias = sorted({p.categoria for p in produtos}, key=lambda c: (not c.startswith("pizza"), c))
+                nomes = [" ".join(palavra + "s" for palavra in c.split()) for c in categorias]
+                fala = "Temos {}. O que você quer saber?".format(_juntar(nomes))
         elif re.search(r"\b(?:preco|precos|custa|custam|quanto)\b", normalizado) and citados:
             unicos = {p.id: p for _, _, candidatos in citados for p in candidatos}
-            fala = " ".join("{} custa {}.".format(p.nome, preco_falado(p.preco)) for p in unicos.values())
+            fala = " ".join("{} custa {}.".format(_com_artigo(p.nome), preco_falado(p.preco))
+                            for p in unicos.values())
         elif re.search(r"\b(?:ingredientes|contem|leva|tem cebola)\b", normalizado) and citados:
             unicos = {p.id: p for _, _, candidatos in citados for p in candidatos}
             fala = " ".join("{}: {}.".format(p.nome, p.descricao or "ingredientes não informados")
                             for p in unicos.values())
+        elif (self._categoria_citada(normalizado) and not any(len(c) == 1 for _, _, c in citados)
+              and re.search(r"\b(?:quais|qual|que|tem|opcoes|sabores|vendem)\b", normalizado)):
+            categoria = self._categoria_citada(normalizado)
+            nomes = [p.nome for p in repositorio.listar_cardapio(db, categoria)]
+            fala = ("Temos {}. Quer saber o preço de alguma opção?".format(_juntar(nomes)) if nomes
+                    else "Não temos opções de {} disponíveis agora.".format(categoria))
         else:
             mensagens = [{"role": "system", "content": self._prompt_do_pedido(produtos)}] + self.historico + [
                 {"role": "user", "content": texto}]
@@ -776,40 +800,45 @@ class Atendimento:
                 preco_falado(pedido.total))
 
         if len(pedidos) == 1:
-            fala = "Seu último pedido foi " + descrever(pedidos[0])
-        else:
-            fala = "Seus últimos {} pedidos foram: {}".format(
-                len(pedidos), " ".join(descrever(p) for p in pedidos))
-        return fala + " Se quiser repetir, diga os produtos e as quantidades."
+            itens = ["{} {}".format(i.quantidade, i.produto.nome) for i in pedidos[0].itens]
+            if not itens:
+                return "Seu último pedido foi " + descrever(pedidos[0])
+            # o sim na fala seguinte repete: passa pelas mesmas validacoes de um pedido falado
+            self._repetir = " e ".join(itens)
+            return "Seu último pedido foi " + descrever(pedidos[0]) + " Quer pedir de novo?"
+        return "Seus últimos {} pedidos foram: {} Se quiser repetir algum, me diga os produtos.".format(
+            len(pedidos), " ".join(descrever(p) for p in pedidos))
 
-    def _recomendar(self, db, normalizado, produtos):
+    def _categoria_citada(self, normalizado):
         # "quais bebidas voce indica" vira "bebida", igual a busca por categoria do cardapio
         singular = " ".join(p.rstrip("s") for p in normalizado.split())
         categoria = next((c for c in ("pizza doce", "pizza salgada", "pizza", "bebida", "sobremesa", "borda")
                           if re.search(r"\b" + c + r"\b", singular)), None)
-        if not categoria:
-            categoria = next((SINONIMOS_DE_CATEGORIA[p] for p in singular.split()
-                              if p in SINONIMOS_DE_CATEGORIA), None)
-        convite = " Se quiser pedir, diga o produto e a quantidade."
+        if categoria:
+            return categoria
+        return next((SINONIMOS_DE_CATEGORIA[p] for p in singular.split() if p in SINONIMOS_DE_CATEGORIA), None)
+
+    def _recomendar(self, db, normalizado, produtos):
+        categoria = self._categoria_citada(normalizado)
+        convite = " Quer pedir?"
 
         favoritos = []
         # "o que mais sai da casa" pergunta da pizzaria, nao do cliente
         if self.cliente_id and "casa" not in normalizado.split():
             favoritos = repositorio.itens_mais_pedidos_do_cliente(db, self.cliente_id, 1, categoria)
         if favoritos:
-            produto, quantidade = favoritos[0]
+            produto = favoritos[0][0]
             self._sugestoes = [produto.nome]
-            return "Pelo seu histórico, você mais pede {}, com {} {} até agora. Hoje custa {}.".format(
-                produto.nome, quantidade, "unidade" if quantidade == 1 else "unidades",
-                preco_falado(produto.preco)) + convite
+            return "Você costuma pedir {}, que está {}.".format(produto.nome, preco_falado(produto.preco)) + convite
 
         # cliente novo, sem conta ou sem nada daquela categoria: vale o que a casa mais vende
         campeoes = repositorio.itens_mais_pedidos_da_casa(db, 2, categoria)
         if campeoes:
             nomes = [produto.nome for produto, _ in campeoes]
             self._sugestoes = nomes
-            inicio = "Os mais pedidos da casa são {}." if len(nomes) > 1 else "O mais pedido da casa é {}."
-            return inicio.format(_juntar(nomes)) + convite
+            if len(nomes) > 1:
+                return "Os mais pedidos da casa são {}. Qual você prefere?".format(_juntar(nomes))
+            return "O mais pedido da casa é {}.".format(nomes[0]) + convite
 
         # ninguem pediu nada ainda: sugere do cardapio, sem oferecer agua pra quem pediu sobremesa
         if categoria:
@@ -952,7 +981,7 @@ class Atendimento:
         except ValueError:
             self.pagamento = None
             if "cartao" in texto or "maquininha" in texto:
-                return ["No cartão de crédito ou de débito?"]
+                return ["Crédito ou débito?"]
             return [FRASE_PEDE_PAGAMENTO]
 
     def _fechar_pedido(self):
@@ -976,7 +1005,7 @@ class Atendimento:
         itens = ["{} {}{}".format(i.quantidade, i.nome,
                  " (solicitação: {})".format(i.observacao) if i.observacao else "")
                  for i in resumo.itens]
-        return ("Vou confirmar seu pedido: {}. Subtotal dos produtos de {}. Entrega no endereço {}, "
+        return ("Seu pedido ficou assim: {}. Total de {}, entrega em {}, "
                 "pagamento {}. Posso confirmar?").format(
             _juntar(itens),
             preco_falado(resumo.subtotal),
@@ -987,7 +1016,7 @@ class Atendimento:
     def _receber_confirmacao_do_pedido(self, texto):
         if not confirmacao_explicita(texto):
             if _normalizar(texto).strip() in {"hmm", "talvez", ""}:
-                return self._esclarecer("Posso confirmar o pedido? Responda sim ou não.")
+                return self._esclarecer("Posso confirmar o pedido?")
             self.etapa = "identificado"
             self._token_resumo = None
             # "nao, tira a coca": a mesma fala ja serve pra corrigir o pedido
@@ -1033,7 +1062,7 @@ class Atendimento:
         self._limpar_pedido()
         self.historico = []
         self.etapa = "identificado"
-        return "Pedido número {} registrado! Obrigado pela preferência, {}.".format(
+        return "Pedido número {} confirmado! Obrigado, {}, e bom apetite!".format(
             numero, self._primeiro_nome())
 
     def _prompt_do_pedido(self, cardapio):

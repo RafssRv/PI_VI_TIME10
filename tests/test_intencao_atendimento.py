@@ -125,8 +125,8 @@ def test_recomendacao_nao_adiciona_produto(conversa):
 
 
 def test_sim_nao_compra_recomendacao_sem_pergunta_de_aceite(conversa):
-    conversa.modelo.entende([], resposta="A Pizza de Calabresa é uma opção.")
-    conversa.atendimento.responder("Quais opções de pizza vocês recomendam?")
+    # A recomendação agora termina em "Quer pedir?". Sem essa pergunta, um sim solto não compra.
+    conversa.atendimento.responder("Quanto custa a pizza de calabresa?")
     conversa.modelo.entende([item("Pizza de Calabresa")], resposta="Adicionei.")
 
     conversa.atendimento.responder("sim")
@@ -172,7 +172,7 @@ def test_erros_consecutivos_pedem_reformulacao_e_preservam_pedido(conversa):
     segunda = conversa.atendimento.responder("[incompreensível]")
 
     assert segunda != primeira
-    assert any(p in segunda.lower() for p in ("reformul", "outras palavras", "uma coisa", "por vez"))
+    assert any(p in segunda.lower() for p in ("não entendi", "outro jeito"))
     assert carrinho(conversa) == [("Água Mineral 500 ml", 1, None)]
     assert not conversa.gravados
 

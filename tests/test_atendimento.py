@@ -112,7 +112,7 @@ class TestIdentificacao:
     def test_cpf_invalido_pede_de_novo(self, atendimento):
         atendimento.responder("oi")
         resposta = atendimento.responder("111.222.333-97")
-        assert "inválido" in resposta
+        assert "não ouvi direito" in resposta
         assert atendimento.etapa == "aguardando_cpf"
 
     def test_cpf_incompleto_pede_de_novo(self, atendimento):
@@ -123,7 +123,7 @@ class TestIdentificacao:
     def test_nao_achou_oferece_cadastro(self, atendimento):
         atendimento.responder("oi")
         resposta = atendimento.responder(CPF_NOVO)
-        assert "criar uma conta" in resposta
+        assert "criar agora" in resposta
         assert atendimento.etapa == "oferecendo_cadastro"
 
     def test_o_cpf_nao_vai_para_o_llama(self, atendimento, llama, cpf_da_ana):
@@ -198,12 +198,12 @@ class TestConversaComOLlama:
         atendimento.responder(cpf_da_ana)
         assert llama.chamadas == []
 
-        assert atendimento.responder("quais pizzas tem?") == "resposta do llama"
+        assert atendimento.responder("vocês abrem amanhã?") == "resposta do llama"
         assert len(llama.chamadas) == 1
 
     def test_prompt_tem_o_nome_e_o_cardapio(self, atendimento, llama, cpf_da_ana):
         atendimento.responder(cpf_da_ana)
-        atendimento.responder("quais pizzas tem?")
+        atendimento.responder("vocês abrem amanhã?")
         sistema = llama.chamadas[0][0]
         assert sistema["role"] == "system"
         assert "Ana Beatriz Moraes" in sistema["content"]
@@ -212,8 +212,8 @@ class TestConversaComOLlama:
 
     def test_lembra_da_conversa(self, atendimento, llama, cpf_da_ana):
         atendimento.responder(cpf_da_ana)
-        atendimento.responder("quais pizzas tem?")
-        atendimento.responder("e bebidas?")
+        atendimento.responder("vocês abrem amanhã?")
+        atendimento.responder("e no domingo?")
         mensagens = llama.chamadas[1]
         assert [m["role"] for m in mensagens] == ["system", "user", "assistant", "user"]
 
@@ -261,12 +261,12 @@ class TestMontaOPedido:
         llama.entende([item("margherita"), item("pizza de sushi")],
                       resposta="Anotei a pizza de sushi!")
         resposta = ana_identificada.responder("margherita e pizza de sushi")
-        assert "Não encontrei pizza de sushi" in resposta
+        assert "Não temos pizza de sushi" in resposta
         assert [i["produto"] for i in ana_identificada.carrinho] == ["Pizza Margherita"]
 
     def test_produto_desativado_vira_aviso(self, ana_identificada, llama):
         llama.entende([item("Pizza de Escarola com Bacon")])
-        assert "Não encontrei" in ana_identificada.responder("uma de escarola")
+        assert "Não temos" in ana_identificada.responder("uma de escarola")
         assert ana_identificada.carrinho == []
 
     def test_produto_vago_vira_pergunta(self, ana_identificada, llama):
@@ -277,7 +277,7 @@ class TestMontaOPedido:
 
     def test_muito_vago_da_exemplos(self, ana_identificada, llama):
         llama.entende([item("pizza")])
-        assert "opções de pizza" in ana_identificada.responder("quero uma pizza")
+        assert "Qual sabor" in ana_identificada.responder("quero uma pizza")
 
     def test_quantidade_zero_vira_pergunta(self, ana_identificada, llama):
         llama.entende([item("margherita", 0)])
@@ -298,7 +298,7 @@ class TestMontaOPedido:
 
     def test_cartao_sem_dizer_qual_pergunta(self, ana_identificada, llama):
         llama.entende([item("margherita")])
-        assert "crédito ou de débito" in ana_identificada.responder("no cartão")
+        assert "Crédito ou débito" in ana_identificada.responder("no cartão")
         assert ana_identificada.pagamento is None
 
     def test_pagamento_null_nao_apaga_o_anterior(self, ana_identificada, llama):
@@ -331,7 +331,7 @@ class TestFechaOPedido:
             ("Pizza Margherita", 2)]
         assert "133 reais e 80 centavos" in resposta
         assert _pedidos_da(db, ana_identificada.cliente_id) == antes
-        assert "registrado" in ana_identificada.responder("sim")
+        assert "confirmado" in ana_identificada.responder("sim")
         pedido = (db.query(Pedido).filter(Pedido.cliente_id == ana_identificada.cliente_id)
                   .order_by(Pedido.id.desc()).first())
         assert pedido.total == Decimal("133.80")
@@ -511,7 +511,7 @@ class TestFechaOPedido:
         assert ana_identificada.etapa == "confirmando_pedido"
         assert _pedidos_da(db, ana_identificada.cliente_id) == antes
 
-        assert "registrado" in ana_identificada.responder("sim")
+        assert "confirmado" in ana_identificada.responder("sim")
         pedido = (db.query(Pedido).filter(Pedido.cliente_id == ana_identificada.cliente_id)
                   .order_by(Pedido.id.desc()).first())
         assert _pedidos_da(db, ana_identificada.cliente_id) == antes + 1
@@ -558,7 +558,7 @@ class TestFechaOPedido:
         self._pedir_e_fechar(ana_identificada, llama)
         resposta = ana_identificada.responder("sim, pode confirmar")
 
-        assert "registrado" in resposta
+        assert "confirmado" in resposta
         assert _pedidos_da(db, ana_identificada.cliente_id) == antes + 1
         pedido = (db.query(Pedido).filter(Pedido.cliente_id == ana_identificada.cliente_id)
                   .order_by(Pedido.id.desc()).first())
@@ -605,7 +605,7 @@ class TestFechaOPedido:
 
     def test_resposta_confusa_pergunta_de_novo(self, ana_identificada, llama):
         self._pedir_e_fechar(ana_identificada, llama)
-        assert "sim ou não" in ana_identificada.responder("hmm")
+        assert "Posso confirmar" in ana_identificada.responder("hmm")
         assert ana_identificada.etapa == "confirmando_pedido"
 
     def test_cliente_novo_tambem_pede(self, atendimento, llama, db):
@@ -659,7 +659,7 @@ class TestHistoricoERecomendacao:
 
     def test_recomenda_o_favorito_do_cliente(self, ana_identificada, llama):
         resposta = ana_identificada.responder("o que você me recomenda?")
-        assert "você mais pede Pizza de Calabresa" in resposta
+        assert "Você costuma pedir Pizza de Calabresa" in resposta
         assert llama.chamadas == []
 
     def test_cada_cliente_ve_o_proprio_favorito(self, atendimento):
@@ -713,10 +713,17 @@ class TestFurosDoHistoricoERecomendacao:
         ana_identificada.responder("quero essa")
         assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == [("Pizza de Calabresa", 1)]
 
-    def test_sim_solto_orienta_e_nao_compra(self, ana_identificada):
+    def test_sim_responde_a_pergunta_da_sugestao(self, ana_identificada):
+        assert ana_identificada.responder("o que você me recomenda?").endswith("Quer pedir?")
+        ana_identificada.responder("sim")
+        assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == [("Pizza de Calabresa", 1)]
+
+    @pytest.mark.parametrize("fala", ["não", "não, obrigado", "agora não"])
+    def test_recusar_a_sugestao_nao_fecha_nada(self, ana_identificada, fala):
         ana_identificada.responder("o que você me recomenda?")
-        assert "uma Pizza de Calabresa" in ana_identificada.responder("sim")
+        assert ana_identificada.responder(fala) == "Tudo bem. O que vai querer?"
         assert ana_identificada.carrinho == []
+        assert ana_identificada.etapa == "identificado"
 
     def test_duas_sugestoes_pergunta_qual(self, atendimento):
         _cadastrar_ate_confirmar(atendimento)
@@ -760,7 +767,7 @@ class TestFurosDoHistoricoERecomendacao:
     def test_fechar_meu_pedido_nao_vira_consulta(self, ana_identificada, llama):
         llama.entende([item("margherita")])
         ana_identificada.responder("uma margherita no pix")
-        assert "Vou confirmar" in ana_identificada.responder("pode fechar meu pedido")
+        assert "Seu pedido ficou assim" in ana_identificada.responder("pode fechar meu pedido")
 
     def test_sem_vendas_nao_sugere_agua_para_sobremesa(self, ana_identificada, monkeypatch):
         monkeypatch.setattr(repositorio, "itens_mais_pedidos_do_cliente", lambda *a, **k: [])
@@ -940,7 +947,7 @@ class TestQuandoOModeloEChamado:
         ana_identificada.responder("uma margherita e duas coca-colas")
         ana_identificada.responder("vou pagar no pix")
         assert "96 reais e 70 centavos" in ana_identificada.responder("é só isso")
-        assert "registrado" in ana_identificada.responder("sim, pode confirmar")
+        assert "confirmado" in ana_identificada.responder("sim, pode confirmar")
         assert _pedidos_da(db, ana_identificada.cliente_id) == antes + 1
 
     def test_correcao_continua_passando_pelo_modelo(self, ana_identificada, llama):
@@ -999,7 +1006,7 @@ class TestTamanhoDaPizza:
     ])
     def test_tamanho_nao_impede_o_pedido(self, ana_identificada, llama, fala):
         resposta = ana_identificada.responder(fala)
-        assert resposta.startswith("Trabalhamos com tamanho único.")
+        assert resposta.startswith("Nossas pizzas têm tamanho único.")
         assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == [("Pizza de Calabresa", 1)]
         assert llama.chamadas == []
 
@@ -1016,7 +1023,7 @@ class TestTamanhoDaPizza:
 
     @pytest.mark.parametrize("fala", ["quais tamanhos vocês têm?", "tem pizza grande?", "qual o tamanho da pizza?"])
     def test_pergunta_sobre_tamanho_nao_chama_o_modelo(self, ana_identificada, llama, fala):
-        assert ana_identificada.responder(fala) == "Trabalhamos com tamanho único."
+        assert ana_identificada.responder(fala) == "Nossas pizzas têm tamanho único."
         assert llama.chamadas == []
 
     def test_so_o_tamanho_pede_o_produto(self, ana_identificada):
@@ -1051,7 +1058,7 @@ class TestErrosDeTranscricaoNosNomes:
         assert "66 reais e 90 centavos" in resposta
 
     def test_produto_que_nao_existe_continua_recusado(self, ana_identificada):
-        assert "Não encontrei" in ana_identificada.responder("uma pizza de sushi")
+        assert "Não temos" in ana_identificada.responder("uma pizza de sushi")
         assert ana_identificada.carrinho == []
 
 
@@ -1123,7 +1130,7 @@ class TestMargemDeErroNaFala:
     ])
     def test_jeitos_de_fechar(self, ana_identificada, llama, fala):
         ana_identificada.responder("uma calabresa no pix")
-        assert "Vou confirmar" in ana_identificada.responder(fala)
+        assert "Seu pedido ficou assim" in ana_identificada.responder(fala)
         assert ana_identificada.etapa == "confirmando_pedido"
         assert llama.chamadas == []
 
@@ -1136,7 +1143,7 @@ class TestMargemDeErroNaFala:
         antes = _pedidos_da(db, ana_identificada.cliente_id)
         ana_identificada.responder("uma calabresa no pix")
         ana_identificada.responder("é só isso")
-        assert "registrado" in ana_identificada.responder(fala)
+        assert "confirmado" in ana_identificada.responder(fala)
         assert _pedidos_da(db, ana_identificada.cliente_id) == antes + 1
 
     @pytest.mark.parametrize("fala", ["sim?", "não", "sim, mas tira a calabresa", "pode ser que sim?", "espera", "calma aí"])
@@ -1216,7 +1223,7 @@ class TestQuerAlgoMais:
     @pytest.mark.parametrize("fala", ["não", "não, obrigado", "não quero", "agora não"])
     def test_nao_fecha_o_pedido(self, ana_identificada, fala):
         ana_identificada.responder("uma calabresa no pix")
-        assert "Vou confirmar" in ana_identificada.responder(fala)
+        assert "Seu pedido ficou assim" in ana_identificada.responder(fala)
 
     def test_sim_pergunta_o_que_mais(self, ana_identificada):
         ana_identificada.responder("uma calabresa")
@@ -1230,7 +1237,7 @@ class TestQuerAlgoMais:
     def test_depois_do_pagamento_vai_direto_para_o_resumo(self, ana_identificada):
         ana_identificada.responder("uma calabresa")
         assert "Como você vai pagar" in ana_identificada.responder("não")
-        assert "Vou confirmar" in ana_identificada.responder("no pix")
+        assert "Seu pedido ficou assim" in ana_identificada.responder("no pix")
         assert ana_identificada.etapa == "confirmando_pedido"
 
     def test_nao_com_pergunta_pendente_nao_fecha(self, ana_identificada):
@@ -1241,3 +1248,55 @@ class TestQuerAlgoMais:
 
     def test_nao_sem_nada_no_pedido_pergunta_o_que_quer(self, ana_identificada):
         assert "O que vai querer" in ana_identificada.responder("não")
+
+
+class TestConversaNatural:
+    def test_repetir_o_ultimo_pedido(self, ana_identificada, db):
+        ultimo = repositorio.historico_cliente(db, ana_identificada.cliente_id, limite=1)[0]
+        assert ana_identificada.responder("o que eu pedi da última vez?").endswith("Quer pedir de novo?")
+        ana_identificada.responder("sim")
+        anotado = {(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho}
+        assert anotado == {(i.produto.nome, i.quantidade) for i in ultimo.itens}
+
+    def test_recusar_repetir_nao_anota_nada(self, ana_identificada):
+        ana_identificada.responder("o que eu pedi da última vez?")
+        assert ana_identificada.responder("não") == "Tudo bem. O que vai querer?"
+        assert ana_identificada.carrinho == []
+
+    def test_cardapio_fala_as_categorias(self, ana_identificada, llama):
+        resposta = ana_identificada.responder("qual é o cardápio?")
+        assert resposta.startswith("Temos pizzas doces, pizzas salgadas")
+        assert "reais" not in resposta
+        assert llama.chamadas == []
+
+    def test_cardapio_completo_continua_listando_tudo(self, ana_identificada):
+        resposta = ana_identificada.responder("me fala o cardápio completo")
+        assert "Coca-Cola 2 Litros: 14 reais e 90 centavos" in resposta
+
+    @pytest.mark.parametrize("fala, esperado, fora", [
+        ("quais bebidas vocês têm?", "Coca-Cola 2 Litros", "Pizza"),
+        ("quais são as sobremesas?", "Pudim de Leite", "Coca"),
+        ("quais pizzas doces tem?", "Pizza de Brigadeiro", "Pizza Margherita"),
+    ])
+    def test_categoria_lista_sem_chamar_o_modelo(self, ana_identificada, llama, fala, esperado, fora):
+        resposta = ana_identificada.responder(fala)
+        assert esperado in resposta and fora not in resposta
+        assert llama.chamadas == []
+
+    def test_pergunta_sobre_um_produto_nao_lista_a_categoria(self, ana_identificada):
+        assert "Pizza de Brigadeiro" not in ana_identificada.responder("a pizza de mussarela tem azeitona?")
+
+    @pytest.mark.parametrize("fala, inicio", [
+        ("quanto custa a margherita?", "A Pizza Margherita custa"),
+        ("quanto custa o guaraná?", "O Guarana 2 Litros custa"),
+        ("quanto custa a coca?", "A Coca-Cola 2 Litros custa"),
+        ("quanto custa o pudim?", "O Pudim de Leite custa"),
+    ])
+    def test_preco_usa_o_artigo_certo(self, ana_identificada, fala, inicio):
+        assert ana_identificada.responder(fala).startswith(inicio)
+
+    def test_fim_do_pedido(self, ana_identificada):
+        ana_identificada.responder("uma calabresa no pix")
+        ana_identificada.responder("é só isso")
+        fala = ana_identificada.responder("sim")
+        assert fala.endswith("confirmado! Obrigado, Ana, e bom apetite!")
