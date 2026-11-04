@@ -244,7 +244,7 @@ class TestMontaOPedido:
     def test_item_vai_pro_carrinho_com_o_nome_do_cardapio(self, ana_identificada, llama):
         llama.entende([item("margherita", 2)])
         resposta = ana_identificada.responder("quero duas margheritas")
-        assert "continuar escolhendo" in resposta
+        assert "Quer algo mais?" in resposta
         assert "pagar" not in resposta
         assert ana_identificada.carrinho == [{
             "produto": "Pizza Margherita", "quantidade": 2,
@@ -345,7 +345,7 @@ class TestFechaOPedido:
                 for i in ana_identificada.carrinho] == [
             ("Pizza Margherita", 2, "sem tomate"), ("Agua Mineral 500ml", 1, None),
             ("Pizza Margherita", 1, None)]
-        assert "continuar escolhendo" in resposta
+        assert "Quer algo mais?" in resposta
         assert "205 reais e 70 centavos" in ana_identificada.responder("pode fechar")
 
     @pytest.mark.parametrize("fala", [
@@ -1207,3 +1207,37 @@ class TestNumeroNoNomeDoProduto:
 
     def test_preco_da_4_queijos_nao_cai_em_outra_conta(self, ana_identificada):
         assert "78 reais e 90 centavos" in ana_identificada.responder("quanto custa a pizza 4 queijos?")
+
+
+class TestQuerAlgoMais:
+    def test_depois_de_anotar_pergunta_se_quer_mais(self, ana_identificada):
+        assert ana_identificada.responder("uma coca") == "Anotei 1 Coca-Cola 2 Litros. Quer algo mais?"
+
+    @pytest.mark.parametrize("fala", ["não", "não, obrigado", "não quero", "agora não"])
+    def test_nao_fecha_o_pedido(self, ana_identificada, fala):
+        ana_identificada.responder("uma calabresa no pix")
+        assert "Vou confirmar" in ana_identificada.responder(fala)
+
+    def test_sim_pergunta_o_que_mais(self, ana_identificada):
+        ana_identificada.responder("uma calabresa")
+        assert ana_identificada.responder("sim") == "Claro! O que mais vai querer?"
+        assert len(ana_identificada.carrinho) == 1
+
+    def test_pagamento_e_confirmado_na_fala(self, ana_identificada):
+        ana_identificada.responder("uma calabresa")
+        assert ana_identificada.responder("vou pagar no pix") == "Certo, pagamento no Pix. Quer algo mais?"
+
+    def test_depois_do_pagamento_vai_direto_para_o_resumo(self, ana_identificada):
+        ana_identificada.responder("uma calabresa")
+        assert "Como você vai pagar" in ana_identificada.responder("não")
+        assert "Vou confirmar" in ana_identificada.responder("no pix")
+        assert ana_identificada.etapa == "confirmando_pedido"
+
+    def test_nao_com_pergunta_pendente_nao_fecha(self, ana_identificada):
+        ana_identificada.responder("uma calabresa no pix")
+        ana_identificada.responder("quero uma pizza")
+        ana_identificada.responder("não")
+        assert ana_identificada.etapa == "identificado"
+
+    def test_nao_sem_nada_no_pedido_pergunta_o_que_quer(self, ana_identificada):
+        assert "O que vai querer" in ana_identificada.responder("não")

@@ -512,7 +512,7 @@ class Atendimento:
         if comando_negado(texto):
             self._fechamento_solicitado = False
             self._token_resumo = None
-            return "Tudo bem, mantive seu pedido como estava. Pode continuar escolhendo."
+            return "Tudo bem, mantive seu pedido como estava. Quer algo mais?"
         if set(normalizado.split()) & {"taxa", "frete", "gratis", "gratuita", "gratuito",
                                        "prazo", "desconto", "demora"}:
             fala = "A pizzaria precisa confirmar a taxa, o prazo de entrega e se há desconto."
@@ -562,12 +562,16 @@ class Atendimento:
             self.historico.extend([{"role": "user", "content": texto},
                                    {"role": "assistant", "content": fala}])
             return fala
-        if " ".join(CORTESIA.sub("", normalizado).split()) in FALAS_DE_FECHAR:
+        sem_cortesia = " ".join(CORTESIA.sub("", normalizado).split())
+        if sem_cortesia in FALAS_DE_FECHAR:
+            return self._fechar_pedido()
+        # "nao" responde ao "quer algo mais?". com pergunta pendente, responde a ela e nao fecha nada
+        if sem_cortesia in {"nao", "nao quero", "agora nao"} and not self._pendencia:
             return self._fechar_pedido()
         if confirmacao_explicita(texto):
             if self._pendencia:
                 return self._esclarecer(self._pendencia)
-            return "Você pode continuar escolhendo. Quando terminar, diga que posso fechar o pedido."
+            return "Claro! O que mais vai querer?"
         cardapio = repositorio.listar_cardapio(db)
 
         turno = {"role": "user", "content": texto}
@@ -643,11 +647,13 @@ class Atendimento:
             self._tentativas = 0
             self._ultima_pergunta = None
             if evidencias:
-                fala = self._reconhecer_alteracoes(evidencias) + " Pode continuar escolhendo."
+                fala = self._reconhecer_alteracoes(evidencias) + " Quer algo mais?"
             elif endereco_falado:
-                fala = "Certo, a entrega será em {}. Pode continuar escolhendo.".format(endereco_falado)
+                fala = "Certo, a entrega será em {}. Quer algo mais?".format(endereco_falado)
             else:
-                fala = "Entendido. Você pode continuar escolhendo ou pedir para fechar."
+                fala = "Entendido. Quer algo mais?"
+                if fala_de_pagamento and self.pagamento:
+                    fala = "Certo, pagamento {}. Quer algo mais?".format(PAGAMENTO_FALADO[self.pagamento])
 
         self.historico.append({"role": "assistant", "content": fala})
         return fala
@@ -697,7 +703,7 @@ class Atendimento:
     def _continuar_pedido(self):
         if self._pendencia:
             return self._esclarecer(self._pendencia)
-        return self._fechar_pedido() if self._fechamento_solicitado else "Alteração anotada. Pode continuar escolhendo."
+        return self._fechar_pedido() if self._fechamento_solicitado else "Alteração anotada. Quer algo mais?"
 
     def _consultar(self, db, texto):
         produtos = repositorio.listar_cardapio(db)
@@ -706,7 +712,7 @@ class Atendimento:
         if RECLAMA_DO_PEDIDO.search(normalizado):
             fala = self._falar_pedido_atual(" O que você quer mudar?")
         elif CONSULTA_PEDIDO_ATUAL.search(normalizado):
-            fala = self._falar_pedido_atual(" Pode continuar escolhendo.")
+            fala = self._falar_pedido_atual(" Quer algo mais?")
         elif CONSULTA_HISTORICO.search(normalizado):
             fala = self._falar_historico(db, normalizado)
         elif CONSULTA_RECOMENDACAO.search(normalizado):
@@ -752,7 +758,7 @@ class Atendimento:
         fala_do_passado = re.search(r"\b(?:ultim\w+|anterior\w*|passad\w+|historico|meus pedidos|ja pedi)\b",
                                     normalizado)
         if self.carrinho and not fala_do_passado:
-            return self._falar_pedido_atual(" Pode continuar escolhendo.")
+            return self._falar_pedido_atual(" Quer algo mais?")
 
         # so le pelo cliente_id desta chamada: o historico de outra pessoa nunca entra aqui
         if not self.cliente_id:
@@ -955,6 +961,8 @@ class Atendimento:
             return self._esclarecer(self._pendencia)
         if not self.carrinho:
             return "Você ainda não pediu nada. O que vai querer?"
+        # quem ja pediu pra fechar nao precisa pedir de novo depois de dizer como paga
+        self._fechamento_solicitado = True
         if not self.pagamento:
             return FRASE_PEDE_PAGAMENTO
         if not (self.endereco_entrega or self.endereco_do_cadastro):
