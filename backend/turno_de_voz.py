@@ -37,6 +37,15 @@ def _observar_conclusao(tarefa):
         tarefa.exception()
 
 
+async def _executar_guardando_erro(funcao, *argumentos):
+    # no python 3.14 o shield avisa o loop de toda excecao que chega depois da conexao cair,
+    # e esse aviso traz a mensagem do erro, que pode ter dado pessoal. por isso ela volta como valor
+    try:
+        return True, await asyncio.to_thread(funcao, *argumentos)
+    except Exception as erro:
+        return False, erro
+
+
 async def rodar_sem_travar(websocket, turno, etapa, funcao, *argumentos):
     """
     roda uma etapa pesada sem travar o servidor.
@@ -45,11 +54,14 @@ async def rodar_sem_travar(websocket, turno, etapa, funcao, *argumentos):
     """
     await websocket.send_json({"tipo": "estado", "etapa": etapa, "turno": turno})
 
-    tarefa = asyncio.create_task(asyncio.to_thread(funcao, *argumentos))
+    tarefa = asyncio.create_task(_executar_guardando_erro(funcao, *argumentos))
     try:
         while True:
             try:
-                return await asyncio.wait_for(asyncio.shield(tarefa), timeout=5)
+                sucesso, resultado = await asyncio.wait_for(asyncio.shield(tarefa), timeout=5)
+                if sucesso:
+                    return resultado
+                raise resultado
             except asyncio.TimeoutError:
                 await websocket.send_json({"tipo": "estado", "etapa": etapa, "turno": turno})
     finally:

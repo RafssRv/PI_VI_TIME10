@@ -220,7 +220,7 @@ class TestConversaComOLlama:
     def test_json_quebrado_pede_para_repetir(self, atendimento, cpf_da_ana):
         atendimento.responder(cpf_da_ana)
         atendimento._conversar = lambda mensagens, formato=None: "isso nao e json"
-        assert "sabor" in atendimento.responder("quero uma pizza")
+        assert atendimento.responder("a entrega é no meu trabalho")
         assert atendimento.historico == []
 
     def test_sem_conta_conversa_sem_json(self, atendimento, llama):
@@ -254,8 +254,8 @@ class TestMontaOPedido:
     def test_o_llama_ve_o_pedido_atual(self, ana_identificada, llama):
         llama.entende([item("margherita")])
         ana_identificada.responder("uma margherita")
-        ana_identificada.responder("e uma coca")
-        assert "1 Pizza Margherita" in llama.chamadas[1][0]["content"]
+        ana_identificada.responder("a entrega é no meu trabalho")
+        assert "1 Pizza Margherita" in llama.chamadas[0][0]["content"]
 
     def test_produto_inventado_vira_aviso(self, ana_identificada, llama):
         llama.entende([item("margherita"), item("pizza de sushi")],
@@ -426,7 +426,7 @@ class TestFechaOPedido:
         llama.entende([], resposta="Qual pizza você deseja?")
         ana_identificada.responder("uma pizza")
         assert "sabor" in ana_identificada.responder("sim")
-        assert len(llama.chamadas) == 1
+        assert llama.chamadas == []
         assert ana_identificada.carrinho == []
 
     def test_condicao_comercial_nao_e_inventada(self, ana_identificada, llama):
@@ -439,7 +439,7 @@ class TestFechaOPedido:
             raise TimeoutError("Ollama indisponível")
         ana_identificada._conversar = indisponivel
         with pytest.raises(TimeoutError):
-            ana_identificada.responder("uma margherita")
+            ana_identificada.responder("a entrega é no meu trabalho")
         assert ana_identificada.historico == []
 
     @pytest.mark.parametrize("fala", ["sim, mas tire as cocas", "sim, a entrega é grátis?",
@@ -921,3 +921,72 @@ class TestFurosDoLogin:
         atendimento.responder("19 99812 4477")
         atendimento.responder("Rua Cancela, 10")
         assert atendimento.etapa == "confirmando_cadastro"
+
+
+class TestQuandoOModeloEChamado:
+    @pytest.mark.parametrize("fala", [
+        "uma margherita", "quero uma pizza de calabresa e duas coca-colas", "vou pagar no pix",
+        "no débito", "quero uma pizza", "uma de chocolate com sushi",
+    ])
+    def test_fala_resolvida_pelo_codigo_nao_espera_o_modelo(self, ana_identificada, llama, fala):
+        ana_identificada.responder(fala)
+        assert llama.chamadas == []
+
+    def test_pedido_inteiro_funciona_com_o_ollama_fora_do_ar(self, ana_identificada, db):
+        def indisponivel(*args, **kwargs):
+            raise TimeoutError("Ollama indisponível")
+        ana_identificada._conversar = indisponivel
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        ana_identificada.responder("uma margherita e duas coca-colas")
+        ana_identificada.responder("vou pagar no pix")
+        assert "96 reais e 70 centavos" in ana_identificada.responder("é só isso")
+        assert "registrado" in ana_identificada.responder("sim, pode confirmar")
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes + 1
+
+    def test_correcao_continua_passando_pelo_modelo(self, ana_identificada, llama):
+        ana_identificada.responder("uma margherita e duas coca-colas")
+        llama.entende([item("margherita")])
+        ana_identificada.responder("tire as cocas")
+        assert len(llama.chamadas) == 1
+
+    @pytest.mark.parametrize("fala, esperado", [
+        ("a entrega é na rua das flores, 10", "rua das flores, 10"),
+        ("entrega na Avenida Brasil, 500, por favor.", "Avenida Brasil, 500"),
+        ("rua das flores, 10, vou pagar no pix", "rua das flores, 10"),
+        ("pode entregar na travessa do sol 12", "travessa do sol 12"),
+    ])
+    def test_endereco_com_rua_sai_da_fala_sem_o_modelo(self, ana_identificada, llama, fala, esperado):
+        resposta = ana_identificada.responder(fala)
+        assert ana_identificada.endereco_entrega == esperado
+        assert esperado in resposta
+        assert llama.chamadas == []
+
+    def test_endereco_novo_vai_no_resumo(self, ana_identificada):
+        ana_identificada.responder("uma margherita no pix")
+        ana_identificada.responder("a entrega é na rua das flores, 10")
+        assert "rua das flores, 10" in ana_identificada.responder("é só isso")
+
+    def test_endereco_sem_nome_de_rua_ainda_usa_o_modelo(self, ana_identificada, llama):
+        ana_identificada.responder("a entrega é no meu trabalho")
+        assert len(llama.chamadas) == 1
+
+    def test_pergunta_pendente_nao_muda_a_quantidade_da_remocao(self, ana_identificada, llama):
+        ana_identificada.responder("uma margherita e duas coca-colas")
+        ana_identificada.responder("quero uma pizza")
+        llama.entende([item("margherita")])
+        ana_identificada.responder("tire as cocas")
+        assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == [("Pizza Margherita", 1)]
+
+    def test_pergunta_pendente_ainda_vale_para_o_sabor(self, ana_identificada):
+        ana_identificada.responder("quero duas pizzas")
+        ana_identificada.responder("margherita")
+        assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == [("Pizza Margherita", 2)]
+
+    def test_o_inicio_do_prompt_nao_muda_entre_as_falas(self, ana_identificada, llama):
+        ana_identificada.responder("a entrega é no meu trabalho")
+        ana_identificada.responder("uma margherita")
+        ana_identificada.responder("a entrega é na casa da minha mãe")
+        primeiro, segundo = (c[0]["content"] for c in llama.chamadas)
+        cardapio = primeiro.index("Pedido atual:")
+        assert primeiro[:cardapio] == segundo[:cardapio]
+        assert "Cardápio:" in primeiro[:cardapio]

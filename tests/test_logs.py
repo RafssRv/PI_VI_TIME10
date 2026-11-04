@@ -196,7 +196,7 @@ def test_json_invalido_do_modelo_nao_vaza_documento(
     atendimento, falar, _, _ = chamada_privada
     falar(cpf_da_ana)
     monkeypatch.setattr(atendimento, "_conversar", lambda *a, **k: DADOS)
-    falar("uma margherita")
+    falar("a entrega é no meu trabalho")
     conferir_logs(capsys, caplog)
     assert "categoria=modelo_invalido" in caplog.text
 

@@ -178,7 +178,8 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
 
     for fragmento in re.split(r"\s+e\s+(?=" + NUMERO + r"|quero\b)", normal):
         if quantidade(fragmento) is not None and not mencoes(fragmento, produtos)[1] and not esclarecendo_quantidade:
-            if not re.search(r"\b(?:pix|dinheiro|credito|debito|rua|avenida)\b", fragmento):
+            if not re.search(r"\b(?:pix|dinheiro|credito|debito|rua|avenida|av|travessa|alameda|estrada|rodovia)\b",
+                             fragmento):
                 duvida = {"campo": "produto", "quantidade": quantidade(fragmento)}
 
     acao = pendente.get("acao", "adicionar") if esclarecendo_quantidade else "adicionar"
@@ -192,9 +193,10 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
         trecho = " ".join(palavras[inicio:fim])
         sufixo = " ".join(palavras[fim:seguinte])
         qtd = quantidade(prefixo)
-        if qtd is None and pendente and pendente.get("campo") == "produto" and len(achados) == 1:
-            qtd = pendente.get("quantidade")
         acao = acao_do_trecho(prefixo, acao)
+        # A quantidade pendente é de um item a acrescentar: não vale para "tire as cocas".
+        if qtd is None and pendente and pendente.get("campo") == "produto" and len(achados) == 1 and acao == "adicionar":
+            qtd = pendente.get("quantidade")
         permitido = re.sub(NUMERO, "", prefixo)
         permitido = re.sub(r"\b(?:eu|quero|queria|gostaria|de|a|o|as|os|mais|uma|um|"
                            r"adicione|adicionar|acrescente|acrescentar|inclua|coloque|manda|mande|"

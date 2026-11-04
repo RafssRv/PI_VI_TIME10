@@ -40,6 +40,11 @@ ACEITES_DA_SUGESTAO = {
 # um "sim" solto nao compra nada (regra 12 do prompt), mas tambem nao pode ficar sem resposta
 RESPOSTAS_VAGAS_A_SUGESTAO = {"sim", "pode ser", "ok", "claro", "isso", "beleza"}
 SINONIMOS_DE_CATEGORIA = {"refrigerante": "bebida", "refri": "bebida", "suco": "bebida", "agua": "bebida"}
+ENDERECO_NA_FALA = re.compile(r"\b(?:rua|avenida|av|travessa|alameda|estrada|rodovia)\b.*", re.IGNORECASE)
+# o que vem depois do endereco na mesma frase: "rua x, 10, e so isso"
+FIM_DO_ENDERECO = re.compile(r"[,.;]?\s*\b(?:[eé] s[oó] isso|s[oó] isso|por favor|pode fechar|pago|pagamento|"
+                             r"vou pagar|no pix|em dinheiro|no cart[aã]o|no cr[eé]dito|no d[eé]bito)\b.*",
+                             re.IGNORECASE)
 
 TENTATIVAS_DE_CPF = 3
 RECUSA_DE_CPF = re.compile(
@@ -518,17 +523,33 @@ class Atendimento:
         if self._controle:
             self._controle.definir_pendencia(self._pendencia)
         mensagens += self.historico + [turno]
-        if self.ultimo_rastro is not None:
-            self.ultimo_rastro["mensagens_modelo"] = deepcopy(mensagens)
-        bruto = self._carregar_llama()(mensagens, formato=ESQUEMA_DO_PEDIDO)
-        if self.ultimo_rastro is not None:
-            self.ultimo_rastro["resposta_modelo"] = bruto
+        palavras = set(normalizado.split())
+        fala_de_pagamento = bool(palavras & (set(repositorio.SINAIS_DE_PAGAMENTO) | {"cartao", "maquininha"}))
+        # o endereco vem da propria fala: testando, o modelo demorava e ainda inventava itens no json
+        endereco_na_fala = ENDERECO_NA_FALA.search(texto)
+        endereco_falado = None
+        if endereco_na_fala:
+            endereco_falado = extrair_endereco(FIM_DO_ENDERECO.sub("", endereco_na_fala.group()))
+        fala_de_endereco = bool(palavras & {"endereco", "entrega"}) and not endereco_falado
+        so_adicoes = bool(evidencias) and all(e["acao"] == "adicionar" for e in evidencias)
+        # item novo, pagamento e pergunta de esclarecimento ja saem do codigo, e esperar o modelo aqui
+        # custava ate 1 minuto por fala no notebook sem gpu. correcao e remocao continuam passando por
+        # ele: se o modelo falhar, o pedido fica como estava
+        resolvida = so_adicoes or (not evidencias and (duvida or fala_de_pagamento or endereco_falado))
+        if resolvida and not fala_de_endereco:
+            dados = {"itens": [], "endereco": None}
+        else:
+            if self.ultimo_rastro is not None:
+                self.ultimo_rastro["mensagens_modelo"] = deepcopy(mensagens)
+            bruto = self._carregar_llama()(mensagens, formato=ESQUEMA_DO_PEDIDO)
+            if self.ultimo_rastro is not None:
+                self.ultimo_rastro["resposta_modelo"] = bruto
 
-        try:
-            dados = interpretar_resposta(bruto)
-        except ValueError:
-            logger.warning("chamada=%s etapa=interpretar_pedido categoria=modelo_invalido", self.id_chamada)
-            return self._esclarecer(self._pendencia)
+            try:
+                dados = interpretar_resposta(bruto)
+            except ValueError:
+                logger.warning("chamada=%s etapa=interpretar_pedido categoria=modelo_invalido", self.id_chamada)
+                return self._esclarecer(self._pendencia)
 
         self.historico.append(turno)
         # O retrato COMPLETO do modelo é apenas uma proposta auditável. Somente a
@@ -551,6 +572,8 @@ class Atendimento:
         if (len(endereco) >= 5 and _normalizar(endereco) in normalizado
                 and re.search(r"\b(?:endereco|entrega|rua|avenida)\b", normalizado)):
             self.endereco_entrega = endereco
+        if endereco_falado:
+            self.endereco_entrega = endereco_falado
 
         if self._pendencia:
             fala = self._esclarecer(self._pendencia)
@@ -563,6 +586,8 @@ class Atendimento:
             self._ultima_pergunta = None
             if evidencias:
                 fala = self._reconhecer_alteracoes(evidencias) + " Pode continuar escolhendo."
+            elif endereco_falado:
+                fala = "Certo, a entrega será em {}. Pode continuar escolhendo.".format(endereco_falado)
             else:
                 fala = "Entendido. Você pode continuar escolhendo ou pedir para fechar."
 
@@ -958,8 +983,7 @@ class Atendimento:
             _prompt_base(),
             "MODO INTEGRADO: o modelo extrai dados; somente o código apresenta o resumo, "
             "pede confirmação e registra o pedido. Siga o formato JSON abaixo.",
-            "Você é o atendente de telefone de uma pizzaria e está anotando o pedido de "
-            "{}.".format(self.nome),
+            "Você é o atendente de telefone de uma pizzaria e está anotando um pedido.",
             "Responda sempre com um JSON com estes campos:",
             '- "resposta": responda à pergunta atual em português do Brasil. Prefira frases curtas, '
             "mas nunca omita produtos ou preços de uma listagem completa solicitada. Sem emojis ou "
@@ -981,15 +1005,17 @@ class Atendimento:
             "Se houver dúvida pendente, peça esclarecimento; não considere um simples sim "
             "como solução. Não invente taxa, prazo ou desconto.",
             "",
+            # o que nao muda fica antes: o ollama reaproveita o inicio igual do prompt entre as falas
+            "Cardápio:",
+            _cardapio_em_texto(cardapio),
+            "",
+            "Cliente: {}".format(self.nome),
             "Pedido atual:",
             atual,
             "Pendência: {}".format(self._pendencia or "nenhuma"),
             "Pagamento: {}".format(PAGAMENTO_FALADO.get(self.pagamento, "ainda não informado")),
             "Endereço de entrega: {}".format(
                 self.endereco_entrega or self.endereco_do_cadastro or "ainda não informado"),
-            "",
-            "Cardápio:",
-            _cardapio_em_texto(cardapio),
         ])
 
     # --- quem nao quis conta so conversa com o llama, sem pedido ---
