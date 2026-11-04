@@ -4,9 +4,12 @@ e so depois passa a conversa pro llama. o llama aqui eh de mentira, entao roda s
 """
 
 import json
+from datetime import datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 import repositorio
 import seed
@@ -687,3 +690,234 @@ class TestHistoricoERecomendacao:
         atendimento.responder("não")
         assert "mais pedidos da casa" in atendimento.responder("o que você recomenda?")
         assert llama.chamadas == []
+
+
+class TestFurosDoHistoricoERecomendacao:
+    @pytest.mark.parametrize("fala", [
+        "não sei o que pedir", "estou em dúvida", "qual é a mais pedida?", "qual a melhor pizza?",
+        "o que eu mais pedi?", "me dá uma indicação", "o que vocês têm de bom?",
+    ])
+    def test_duvida_vira_recomendacao_sem_o_llama(self, ana_identificada, llama, fala):
+        assert "Pizza de Calabresa" in ana_identificada.responder(fala)
+        assert llama.chamadas == []
+
+    def test_refrigerante_recomenda_bebida(self, ana_identificada):
+        assert "Pizza" not in ana_identificada.responder("qual refrigerante você recomenda?")
+
+    def test_mais_pedida_da_casa_nao_usa_o_favorito(self, ana_identificada):
+        assert "da casa" in ana_identificada.responder("qual é a mais pedida da casa?")
+
+    def test_aceitar_a_sugestao_anota_o_produto(self, ana_identificada, llama):
+        ana_identificada.responder("o que você me recomenda?")
+        llama.entende([item("Pizza de Calabresa")])
+        ana_identificada.responder("quero essa")
+        assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == [("Pizza de Calabresa", 1)]
+
+    def test_sim_solto_orienta_e_nao_compra(self, ana_identificada):
+        ana_identificada.responder("o que você me recomenda?")
+        assert "uma Pizza de Calabresa" in ana_identificada.responder("sim")
+        assert ana_identificada.carrinho == []
+
+    def test_duas_sugestoes_pergunta_qual(self, atendimento):
+        _cadastrar_ate_confirmar(atendimento)
+        atendimento.responder("sim")
+        atendimento.responder("o que você recomenda?")
+        assert atendimento.responder("quero essa").startswith("Qual você quer")
+        assert atendimento.carrinho == []
+
+    def test_a_sugestao_vale_so_para_a_proxima_fala(self, ana_identificada, llama):
+        ana_identificada.responder("o que você me recomenda?")
+        ana_identificada.responder("quanto custa a margherita?")
+        llama.entende([])
+        ana_identificada.responder("quero essa")
+        assert ana_identificada.carrinho == []
+
+    def test_o_que_eu_pedi_ate_agora_olha_o_carrinho(self, ana_identificada, llama):
+        llama.entende([item("margherita")])
+        ana_identificada.responder("uma margherita")
+        assert "Até agora anotei 1 Pizza Margherita" in ana_identificada.responder("o que eu pedi até agora?")
+
+    def test_o_que_eu_pedi_com_carrinho_nao_fala_do_passado(self, ana_identificada, llama):
+        llama.entende([item("margherita")])
+        ana_identificada.responder("uma margherita")
+        assert "Até agora anotei" in ana_identificada.responder("o que foi que eu pedi?")
+
+    def test_ultima_vez_com_carrinho_continua_no_historico(self, ana_identificada, llama):
+        llama.entende([item("margherita")])
+        ana_identificada.responder("uma margherita")
+        assert "Seu último pedido" in ana_identificada.responder("o que eu pedi da última vez?")
+
+    def test_reclamar_le_o_pedido_atual(self, ana_identificada, llama):
+        llama.entende([item("margherita")])
+        ana_identificada.responder("uma margherita")
+        resposta = ana_identificada.responder("esse não é o que eu pedi")
+        assert "Até agora anotei" in resposta
+        assert "O que você quer mudar?" in resposta
+
+    def test_reclamar_sem_carrinho_nao_fala_do_historico(self, ana_identificada):
+        assert "Ainda não anotei" in ana_identificada.responder("não foi isso que eu pedi")
+
+    def test_fechar_meu_pedido_nao_vira_consulta(self, ana_identificada, llama):
+        llama.entende([item("margherita")])
+        ana_identificada.responder("uma margherita no pix")
+        assert "Vou confirmar" in ana_identificada.responder("pode fechar meu pedido")
+
+    def test_sem_vendas_nao_sugere_agua_para_sobremesa(self, ana_identificada, monkeypatch):
+        monkeypatch.setattr(repositorio, "itens_mais_pedidos_do_cliente", lambda *a, **k: [])
+        monkeypatch.setattr(repositorio, "itens_mais_pedidos_da_casa", lambda *a, **k: [])
+        resposta = ana_identificada.responder("qual sobremesa você recomenda?")
+        assert "Mousse" in resposta or "Pudim" in resposta
+
+    def test_sem_vendas_sugere_pizza_salgada(self, ana_identificada, monkeypatch):
+        monkeypatch.setattr(repositorio, "itens_mais_pedidos_do_cliente", lambda *a, **k: [])
+        monkeypatch.setattr(repositorio, "itens_mais_pedidos_da_casa", lambda *a, **k: [])
+        assert "Pizza" in ana_identificada.responder("o que você recomenda?")
+
+    def test_pedido_antigo_sem_itens_nao_fala_frase_quebrada(self, ana_identificada, monkeypatch):
+        pedido = SimpleNamespace(itens=[], total=Decimal("0"), criado_em=datetime.now(timezone.utc))
+        monkeypatch.setattr(repositorio, "historico_cliente", lambda *a, **k: [pedido])
+        assert "sem itens registrados" in ana_identificada.responder("o que eu pedi da última vez?")
+
+    def test_banco_fora_do_ar_nao_derruba_a_conversa(self, ana_identificada, monkeypatch):
+        def quebra(*a, **k):
+            raise OperationalError("select", {}, Exception("banco caiu"))
+        monkeypatch.setattr(repositorio, "historico_cliente", quebra)
+        assert "problema para consultar" in ana_identificada.responder("o que eu pedi da última vez?")
+
+
+class TestFurosDoLogin:
+    def test_cpf_ditado_com_pausa(self, atendimento, cpf_da_ana):
+        atendimento.responder("oi")
+        assert "Entendi 5 números" in atendimento.responder(cpf_da_ana[:5])
+        assert "Ana" in atendimento.responder(cpf_da_ana[5:])
+        assert atendimento.etapa == "identificado"
+
+    def test_cpf_em_tres_pedacos(self, atendimento, cpf_da_ana):
+        atendimento.responder("oi")
+        atendimento.responder(cpf_da_ana[:3])
+        atendimento.responder(cpf_da_ana[3:7])
+        atendimento.responder(cpf_da_ana[7:])
+        assert atendimento.etapa == "identificado"
+
+    def test_pedaco_errado_nao_contamina_a_proxima_tentativa(self, atendimento, cpf_da_ana):
+        atendimento.responder("oi")
+        atendimento.responder("111")
+        atendimento.responder("22233397")
+        atendimento.responder(cpf_da_ana)
+        assert atendimento.etapa == "identificado"
+
+    def test_palavra_um_junto_do_cpf_nao_vira_digito(self, atendimento, cpf_da_ana):
+        atendimento.responder("meu cpf é {}, um abraço".format(cpf_da_ana))
+        assert atendimento.etapa == "identificado"
+
+    def test_cpf_com_telefone_na_mesma_fala(self, atendimento, cpf_da_ana):
+        atendimento.responder("oi")
+        atendimento.responder("cpf {} e telefone 19998124477".format(cpf_da_ana))
+        assert atendimento.etapa == "identificado"
+
+    @pytest.mark.parametrize("fala", [
+        "não quero falar meu cpf", "não tenho cpf", "prefiro não informar", "não vou dar meu cpf",
+    ])
+    def test_recusar_o_cpf_nao_prende_a_pessoa(self, atendimento, fala):
+        atendimento.responder("oi")
+        assert "dúvidas sobre o cardápio" in atendimento.responder(fala)
+        assert atendimento.etapa == "sem_cadastro"
+
+    def test_tres_erros_de_cpf_oferecem_saida(self, atendimento):
+        atendimento.responder("oi")
+        atendimento.responder("111.222.333-97")
+        atendimento.responder("111.222.333-97")
+        assert atendimento.etapa == "aguardando_cpf"
+        assert "Não consegui confirmar" in atendimento.responder("111.222.333-97")
+        assert atendimento.etapa == "sem_cadastro"
+
+    def test_sem_conta_pode_voltar_a_informar_o_cpf(self, atendimento, llama, cpf_da_ana):
+        atendimento.responder("oi")
+        atendimento.responder("não quero falar meu cpf")
+        assert "CPF" in atendimento.responder("agora quero fazer um pedido")
+        atendimento.responder(cpf_da_ana)
+        assert atendimento.etapa == "identificado"
+        assert llama.chamadas == []
+
+    def test_sem_conta_pode_falar_o_cpf_direto(self, atendimento, cpf_da_ana):
+        atendimento.responder("oi")
+        atendimento.responder("não tenho cpf")
+        atendimento.responder(cpf_da_ana)
+        assert atendimento.etapa == "identificado"
+
+    def test_cpf_novo_depois_do_nao_encontrei(self, atendimento, cpf_da_ana):
+        atendimento.responder(CPF_NOVO)
+        atendimento.responder("meu cpf é " + cpf_da_ana)
+        assert atendimento.etapa == "identificado"
+        assert atendimento.cadastro == {}
+
+    def test_errei_o_cpf_volta_para_a_pergunta(self, atendimento):
+        atendimento.responder(CPF_NOVO)
+        assert "CPF novamente" in atendimento.responder("não, errei o número")
+        assert atendimento.etapa == "aguardando_cpf"
+        assert atendimento.cadastro == {}
+
+    @pytest.mark.parametrize("fala", ["não sou eu", "não sou a Ana", "esse não é meu cadastro", "cpf errado"])
+    def test_nao_sou_eu_desfaz_o_login(self, ana_identificada, fala):
+        assert "Desculpe pelo engano" in ana_identificada.responder(fala)
+        assert ana_identificada.cliente_id is None
+        assert ana_identificada.nome is None
+        assert ana_identificada.endereco_do_cadastro is None
+        assert ana_identificada.etapa == "aguardando_cpf"
+
+    def test_nao_sou_eu_apaga_o_carrinho_e_limpa_a_tela(self, ana_identificada, llama):
+        llama.entende([item("margherita")])
+        ana_identificada.responder("uma margherita")
+        resultado = ana_identificada.responder_com_eventos("não sou eu")
+        assert ana_identificada.carrinho == []
+        assert resultado["eventos"][0]["cliente"]["nome"] is None
+        assert resultado["eventos"][0]["itens"] == []
+        assert resultado["eventos"][0]["endereco_entrega"] is None
+
+    def test_depois_do_engano_nao_ve_o_historico_da_outra_pessoa(self, ana_identificada):
+        ana_identificada.responder("não sou eu")
+        assert "preciso do seu CPF" in ana_identificada.responder("o que eu pedi da última vez?")
+
+    def test_pergunta_antes_do_cpf_explica_o_motivo(self, atendimento):
+        atendimento.responder("oi")
+        assert "preciso do seu CPF" in atendimento.responder("o que eu pedi da última vez?")
+
+    def test_pergunta_no_cadastro_nao_vira_nome(self, atendimento):
+        atendimento.responder(CPF_NOVO)
+        atendimento.responder("sim")
+        assert "Qual é o seu nome" in atendimento.responder("o que você recomenda?")
+        assert atendimento.etapa == "aguardando_nome"
+        assert "nome" not in atendimento.cadastro
+
+    def test_pergunta_no_cadastro_nao_vira_endereco(self, atendimento):
+        atendimento.responder(CPF_NOVO)
+        atendimento.responder("sim")
+        atendimento.responder("João da Silva")
+        atendimento.responder("19 99812 4477")
+        atendimento.responder("o que eu pedi da última vez?")
+        assert atendimento.etapa == "aguardando_endereco"
+
+    @pytest.mark.parametrize("fala", ["sim", "ok", "não"])
+    def test_resposta_solta_nao_vira_nome(self, atendimento, fala):
+        atendimento.responder(CPF_NOVO)
+        atendimento.responder("sim")
+        atendimento.responder(fala)
+        assert atendimento.etapa == "aguardando_nome"
+
+    @pytest.mark.parametrize("etapas", [1, 2, 3, 4])
+    def test_desistir_no_meio_do_cadastro_nao_grava(self, atendimento, db, etapas):
+        atendimento.responder(CPF_NOVO)
+        atendimento.responder("sim")
+        for fala in ["João da Silva", "19 99812 4477", "Rua das Palmeiras, 120"][:etapas - 1]:
+            atendimento.responder(fala)
+        assert "cancelei o cadastro" in atendimento.responder("desisti")
+        assert atendimento.etapa == "sem_cadastro"
+        assert repositorio.buscar_cliente_por_cpf(db, CPF_NOVO) is None
+
+    def test_rua_cancela_continua_sendo_endereco(self, atendimento):
+        atendimento.responder(CPF_NOVO)
+        atendimento.responder("sim")
+        atendimento.responder("João da Silva")
+        atendimento.responder("19 99812 4477")
+        atendimento.responder("Rua Cancela, 10")
+        assert atendimento.etapa == "confirmando_cadastro"

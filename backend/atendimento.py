@@ -16,8 +16,9 @@ from pathlib import Path
 from uuid import uuid4
 
 from agente.controle_pedido import ControlePedido, ErroPedido, ProdutoCardapio
-from agente.intencao_pedido import (CONSULTA_HISTORICO, CONSULTA_RECOMENDACAO, FECHAR, cardapio_completo,
-                                   comando_negado, eh_consulta, interpretar, mencoes)
+from agente.intencao_pedido import (CONSULTA_HISTORICO, CONSULTA_PEDIDO_ATUAL, CONSULTA_RECOMENDACAO, FECHAR,
+                                   RECLAMA_DO_PEDIDO, cardapio_completo, comando_negado, eh_consulta,
+                                   interpretar, mencoes)
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -29,6 +30,41 @@ from interpretacao import (
 )
 
 logger = logging.getLogger(__name__)
+
+# depois de uma sugestao, essas falas apontam pro produto sugerido
+ACEITES_DA_SUGESTAO = {
+    "quero", "vou querer", "quero sim", "sim quero", "quero essa", "quero esse", "sim quero essa",
+    "sim quero esse", "vou querer essa", "vou querer esse", "pode ser essa", "pode ser esse",
+    "essa", "esse", "essa mesmo", "esse mesmo", "manda essa", "manda esse", "pode mandar",
+}
+# um "sim" solto nao compra nada (regra 12 do prompt), mas tambem nao pode ficar sem resposta
+RESPOSTAS_VAGAS_A_SUGESTAO = {"sim", "pode ser", "ok", "claro", "isso", "beleza"}
+SINONIMOS_DE_CATEGORIA = {"refrigerante": "bebida", "refri": "bebida", "suco": "bebida", "agua": "bebida"}
+
+TENTATIVAS_DE_CPF = 3
+RECUSA_DE_CPF = re.compile(
+    r"\bnao (?:quero|vou|posso|gostaria de) (?:falar|dar|informar|passar|dizer)\b|"
+    r"\bnao tenho cpf\b|\bsem cpf\b|\bprefiro nao\b"
+)
+CPF_ERRADO = re.compile(r"\b(?:errei|errado|errada|outro cpf)\b|\bnao e (?:esse|meu|o meu) cpf\b")
+NAO_SOU_EU = re.compile(
+    r"\bnao sou (?:eu|a|o|essa|esse)\b|\bnao e (?:meu nome|meu cadastro|minha conta|meu cpf|o meu cpf)\b|"
+    r"\b(?:cpf|conta|cadastro) errad[oa]\b|\boutra pessoa\b"
+)
+# so no comeco da fala, pra "Rua Cancela, 10" continuar sendo endereco
+DESISTIU_DO_CADASTRO = re.compile(r"^(?:eu )?(?:desisti|desistir|deixa pra la|deixa para la|cancela|cancelar|"
+                                  r"nao quero mais)\b")
+VOLTAR_PARA_O_CPF = re.compile(r"\b(?:cpf|criar (?:uma )?conta|me cadastrar|cadastro|fazer (?:um )?pedido|"
+                               r"quero pedir)\b")
+
+
+def extrair_cpf(texto):
+    # um numero inteiro de 11 digitos ganha das palavras: em "52998224725, um abraco" o "um" nao eh digito
+    for trecho in re.finditer(r"\d(?:[\d.\-\s]*\d)?", texto or ""):
+        digitos = re.sub(r"\D", "", trecho.group())
+        if len(digitos) == 11:
+            return digitos
+    return extrair_digitos(texto)
 
 FRASE_PEDE_CPF = "Para começar, me diga o seu CPF, por favor."
 FRASE_ERRO_BANCO = "Tive um problema para consultar o sistema. Pode repetir, por favor?"
@@ -86,6 +122,9 @@ class Atendimento:
         self.endereco_do_cadastro = None
         self.cadastro = {}
         self.historico = []
+        self._cpf_parcial = ""
+        self._erros_de_cpf = 0
+        self._comanda_desatualizada = False
         self.sessao_id = self.id_chamada
         self.turno_id = 0
         self.ultimo_rastro = None
@@ -101,6 +140,7 @@ class Atendimento:
         self._controle = None
         self._token_resumo = None
         self._pendencia = None
+        self._sugestoes = []
         self._troca_pendente = False
         self._pendencia_antes_da_troca = None
         self._duvida_item = None
@@ -147,6 +187,10 @@ class Atendimento:
         salvo_anterior = self._pedido_salvo
         resposta = self.responder(texto)
         eventos = []
+        if self._comanda_desatualizada:
+            # quem disse "nao sou eu" nao pode continuar vendo os dados da outra pessoa na tela
+            self._comanda_desatualizada = False
+            eventos.append({"tipo": "pedido", **self._dados_do_pedido()})
         if self.cliente_id is not None:
             pedido = self._pedido_salvo or self._dados_do_pedido()
             eventos.append({"tipo": "pedido", **deepcopy(pedido)})
@@ -180,23 +224,33 @@ class Atendimento:
 
     def _inicio(self, texto):
         # tem gente q ja chega falando o cpf, ai nem precisa pedir
-        if len(extrair_digitos(texto)) >= 11:
+        if len(extrair_cpf(texto)) >= 11:
             return self._receber_cpf(texto)
         self.etapa = "aguardando_cpf"
         return "Olá! Bem-vindo à pizzaria. " + FRASE_PEDE_CPF
 
     def _receber_cpf(self, texto):
         self.etapa = "aguardando_cpf"
-        digitos = extrair_digitos(texto)
+        if RECUSA_DE_CPF.search(_normalizar(texto)):
+            return self._seguir_sem_conta("Tudo bem, sem problemas.")
+
+        digitos = self._cpf_parcial + extrair_cpf(texto)
+        # a fala eh cortada depois de 1,2 s de silencio, entao quem dita com pausa chega em pedacos
+        if 3 <= len(digitos) < 11:
+            self._cpf_parcial = digitos
+            return "Entendi {} números. Pode falar o restante?".format(len(digitos))
+        self._cpf_parcial = ""
         if len(digitos) != 11:
-            return "Não consegui entender o CPF. Pode falar os onze números, por favor?"
+            if self._pergunta_sobre_dados(texto):
+                return "Para isso, preciso do seu CPF primeiro. Pode falar os onze números, por favor?"
+            return self._cpf_nao_entendido("Não consegui entender o CPF. Pode falar os onze números, por favor?")
 
         db = self._sessao()
         try:
             cliente = repositorio.buscar_cliente_por_cpf(db, digitos)
         except ValueError:
             # digito verificador nao bate: quase sempre eh o whisper q ouviu um numero errado
-            return "Esse CPF parece inválido. Pode repetir devagar, por favor?"
+            return self._cpf_nao_entendido("Esse CPF parece inválido. Pode repetir devagar, por favor?")
         except Exception:
             logger.warning("chamada=%s etapa=buscar_cliente categoria=banco", self.id_chamada)
             return FRASE_ERRO_BANCO
@@ -211,7 +265,44 @@ class Atendimento:
         self.etapa = "oferecendo_cadastro"
         return "Não encontrei nenhuma conta com esse CPF. Deseja criar uma conta agora?"
 
+    def _cpf_nao_entendido(self, frase):
+        self._erros_de_cpf += 1
+        if self._erros_de_cpf >= TENTATIVAS_DE_CPF:
+            return self._seguir_sem_conta("Não consegui confirmar o seu CPF.")
+        return frase
+
+    def _seguir_sem_conta(self, inicio):
+        # sem saida aqui, quem nao quer ou nao consegue falar o cpf ficaria preso na mesma pergunta
+        self.cadastro = {}
+        self._cpf_parcial = ""
+        self._erros_de_cpf = 0
+        self.etapa = "sem_cadastro"
+        return inicio + " Posso tirar dúvidas sobre o cardápio. Para fazer um pedido, diga que quer informar o CPF."
+
+    def _desfazer_identificacao(self):
+        # cpf de outra pessoa: nada do que foi carregado pode seguir nesta chamada
+        self.cliente_id = None
+        self.nome = None
+        self.telefone = None
+        self.endereco_do_cadastro = None
+        self.historico = []
+        self._limpar_pedido()
+        self._comanda_desatualizada = True
+        self.etapa = "aguardando_cpf"
+        return "Desculpe pelo engano. Pode falar o seu CPF novamente?"
+
+    def _desistiu_do_cadastro(self, texto):
+        return bool(DESISTIU_DO_CADASTRO.search(_normalizar(texto)))
+
     def _receber_aceite(self, texto):
+        # percebeu o erro depois do "nao encontrei": sem isso, o cpf novo era tratado como sim ou nao
+        if len(extrair_cpf(texto)) == 11:
+            self.cadastro = {}
+            return self._receber_cpf(texto)
+        if CPF_ERRADO.search(_normalizar(texto)):
+            self.cadastro = {}
+            self.etapa = "aguardando_cpf"
+            return "Sem problemas. Pode falar o CPF novamente?"
         resposta = sim_ou_nao(texto)
         if resposta is None:
             return "Desculpe, não entendi. Quer criar uma conta? Responda sim ou não."
@@ -223,15 +314,26 @@ class Atendimento:
         return ("Tudo bem! Sem conta eu não consigo registrar pedidos, "
                 "mas posso tirar suas dúvidas sobre o cardápio.")
 
+    def _pergunta_sobre_dados(self, texto):
+        normalizado = _normalizar(texto)
+        return bool(CONSULTA_HISTORICO.search(normalizado) or CONSULTA_RECOMENDACAO.search(normalizado))
+
     def _receber_nome(self, texto):
+        if self._desistiu_do_cadastro(texto):
+            return self._seguir_sem_conta("Tudo bem, cancelei o cadastro.")
+        # sem isso, "o que voce recomenda" entrava no banco como nome do cliente
+        if self._pergunta_sobre_dados(texto):
+            return "Posso ajudar com isso logo depois do cadastro. Qual é o seu nome completo?"
         nome = extrair_nome(texto)
-        if not nome:
+        if not nome or (sim_ou_nao(texto) is not None and len(nome.split()) <= 2):
             return "Não entendi o seu nome. Pode repetir, por favor?"
         self.cadastro["nome"] = nome
         self.etapa = "aguardando_telefone"
         return "Prazer, {}! Qual é o seu telefone com DDD?".format(nome.split()[0])
 
     def _receber_telefone(self, texto):
+        if self._desistiu_do_cadastro(texto):
+            return self._seguir_sem_conta("Tudo bem, cancelei o cadastro.")
         digitos = extrair_digitos(texto)
         if not digitos and sim_ou_nao(texto) is False:
             # "nao tenho", "prefiro nao falar": telefone eh opcional no banco
@@ -244,6 +346,10 @@ class Atendimento:
         return "E qual é o endereço para entrega?"
 
     def _receber_endereco(self, texto):
+        if self._desistiu_do_cadastro(texto):
+            return self._seguir_sem_conta("Tudo bem, cancelei o cadastro.")
+        if self._pergunta_sobre_dados(texto):
+            return "Posso ajudar com isso logo depois do cadastro. Qual é o endereço para entrega?"
         endereco = extrair_endereco(texto)
         if not endereco:
             return "Não entendi o endereço. Pode falar a rua, o número e o bairro?"
@@ -257,6 +363,8 @@ class Atendimento:
         return "Vou confirmar: {}. Está tudo certo?".format(", ".join(partes))
 
     def _receber_confirmacao(self, texto):
+        if self._desistiu_do_cadastro(texto):
+            return self._seguir_sem_conta("Tudo bem, cancelei o cadastro.")
         resposta = sim_ou_nao(texto)
         if resposta is None:
             return "Os dados estão certos? Responda sim ou não."
@@ -299,6 +407,7 @@ class Atendimento:
         self.nome = nome
         self.telefone = telefone
         self.endereco_do_cadastro = endereco
+        self._erros_de_cpf = 0
         self.etapa = "identificado"
 
     def _primeiro_nome(self):
@@ -325,6 +434,18 @@ class Atendimento:
 
     def _montar_pedido_com(self, db, texto):
         normalizado = _normalizar(texto).strip()
+        if NAO_SOU_EU.search(normalizado):
+            return self._desfazer_identificacao()
+        sugestoes, self._sugestoes = self._sugestoes, []
+        if sugestoes and normalizado in ACEITES_DA_SUGESTAO:
+            if len(sugestoes) > 1:
+                self._sugestoes = sugestoes
+                return "Qual você quer: {}?".format(_juntar(sugestoes, "ou"))
+            texto = "uma " + sugestoes[0]
+            normalizado = _normalizar(texto)
+        elif sugestoes and normalizado in RESPOSTAS_VAGAS_A_SUGESTAO:
+            self._sugestoes = sugestoes
+            return "Para anotar, me diga o produto e a quantidade. Por exemplo: uma {}.".format(sugestoes[0])
         if comando_negado(texto):
             self._fechamento_solicitado = False
             self._token_resumo = None
@@ -497,7 +618,11 @@ class Atendimento:
         produtos = repositorio.listar_cardapio(db)
         normalizado = _normalizar(texto)
         _, citados = mencoes(texto, produtos)
-        if CONSULTA_HISTORICO.search(normalizado):
+        if RECLAMA_DO_PEDIDO.search(normalizado):
+            fala = self._falar_pedido_atual(" O que você quer mudar?")
+        elif CONSULTA_PEDIDO_ATUAL.search(normalizado):
+            fala = self._falar_pedido_atual(" Pode continuar escolhendo.")
+        elif CONSULTA_HISTORICO.search(normalizado):
             fala = self._falar_historico(db, normalizado)
         elif CONSULTA_RECOMENDACAO.search(normalizado):
             fala = self._recomendar(db, normalizado, produtos)
@@ -530,7 +655,20 @@ class Atendimento:
         self.historico.extend([{"role": "user", "content": texto}, {"role": "assistant", "content": fala}])
         return fala
 
+    def _falar_pedido_atual(self, complemento):
+        if not self.carrinho:
+            return "Ainda não anotei nada neste pedido. O que vai querer?"
+        itens = ["{} {}".format(i["quantidade"], i["produto"]) for i in self.carrinho]
+        total = sum((i["preco"] * i["quantidade"] for i in self.carrinho), Decimal("0.00"))
+        return "Até agora anotei {}, subtotal de {}.".format(_juntar(itens), preco_falado(total)) + complemento
+
     def _falar_historico(self, db, normalizado):
+        # com pedido em andamento, "o que eu pedi" sem falar do passado eh sobre o pedido de agora
+        fala_do_passado = re.search(r"\b(?:ultim\w+|anterior\w*|passad\w+|historico|meus pedidos|ja pedi)\b",
+                                    normalizado)
+        if self.carrinho and not fala_do_passado:
+            return self._falar_pedido_atual(" Pode continuar escolhendo.")
+
         # so le pelo cliente_id desta chamada: o historico de outra pessoa nunca entra aqui
         if not self.cliente_id:
             return "Sem uma conta, eu não tenho histórico de pedidos para consultar."
@@ -543,7 +681,8 @@ class Atendimento:
         def descrever(pedido):
             itens = ["{} {}".format(i.quantidade, i.produto.nome) for i in pedido.itens]
             return "em {}: {}, total de {}.".format(
-                pedido.criado_em.astimezone().strftime("%d/%m"), _juntar(itens), preco_falado(pedido.total))
+                pedido.criado_em.astimezone().strftime("%d/%m"), _juntar(itens) or "sem itens registrados",
+                preco_falado(pedido.total))
 
         if len(pedidos) == 1:
             fala = "Seu último pedido foi " + descrever(pedidos[0])
@@ -557,13 +696,18 @@ class Atendimento:
         singular = " ".join(p.rstrip("s") for p in normalizado.split())
         categoria = next((c for c in ("pizza doce", "pizza salgada", "pizza", "bebida", "sobremesa", "borda")
                           if re.search(r"\b" + c + r"\b", singular)), None)
+        if not categoria:
+            categoria = next((SINONIMOS_DE_CATEGORIA[p] for p in singular.split()
+                              if p in SINONIMOS_DE_CATEGORIA), None)
         convite = " Se quiser pedir, diga o produto e a quantidade."
 
         favoritos = []
-        if self.cliente_id:
+        # "o que mais sai da casa" pergunta da pizzaria, nao do cliente
+        if self.cliente_id and "casa" not in normalizado.split():
             favoritos = repositorio.itens_mais_pedidos_do_cliente(db, self.cliente_id, 1, categoria)
         if favoritos:
             produto, quantidade = favoritos[0]
+            self._sugestoes = [produto.nome]
             return "Pelo seu histórico, você mais pede {}, com {} {} até agora. Hoje custa {}.".format(
                 produto.nome, quantidade, "unidade" if quantidade == 1 else "unidades",
                 preco_falado(produto.preco)) + convite
@@ -572,11 +716,20 @@ class Atendimento:
         campeoes = repositorio.itens_mais_pedidos_da_casa(db, 2, categoria)
         if campeoes:
             nomes = [produto.nome for produto, _ in campeoes]
+            self._sugestoes = nomes
             inicio = "Os mais pedidos da casa são {}." if len(nomes) > 1 else "O mais pedido da casa é {}."
             return inicio.format(_juntar(nomes)) + convite
 
-        if produtos:
-            return "Uma opção do cardápio é {}.".format(produtos[0].nome) + convite
+        # ninguem pediu nada ainda: sugere do cardapio, sem oferecer agua pra quem pediu sobremesa
+        if categoria:
+            opcoes = [p for p in produtos if categoria in _normalizar(p.categoria)]
+        else:
+            opcoes = [p for p in produtos if "salgada" in _normalizar(p.categoria)] or produtos
+        if opcoes:
+            self._sugestoes = [opcoes[0].nome]
+            return "Uma opção do cardápio é {}.".format(opcoes[0].nome) + convite
+        if categoria:
+            return "Não temos opções de {} disponíveis agora.".format(categoria)
         return "Não há produtos disponíveis no cardápio neste momento."
 
     def _trocar_itens(self, db, texto):
@@ -842,6 +995,11 @@ class Atendimento:
     # --- quem nao quis conta so conversa com o llama, sem pedido ---
 
     def _conversar_com_llm(self, texto):
+        if len(extrair_cpf(texto)) == 11:
+            return self._receber_cpf(texto)
+        if VOLTAR_PARA_O_CPF.search(_normalizar(texto)):
+            self.etapa = "aguardando_cpf"
+            return "Claro. Pode falar o seu CPF, por favor?"
         db = self._sessao()
         try:
             normalizado = _normalizar(texto)

@@ -20,13 +20,21 @@ CONSULTA = re.compile(
 )
 # Pedidos antigos e sugestões saem do banco: o modelo não recebe esses dados e inventaria a resposta.
 CONSULTA_HISTORICO = re.compile(
-    r"\b(?:ultim[oa]s? (?:vez|pedidos?|compras?)|pedidos? anteriore?s?|meu historico|"
-    r"historico de pedidos|meus pedidos|o que (?:eu )?(?:ja )?pedi|ja pedi)\b"
+    r"\b(?:ultim[oa]s? (?:vez|pedidos?|compras?)|pedidos? anteriore?s?|pedidos? passados?|"
+    r"vez passada|meu historico|historico de pedidos|meus pedidos|"
+    r"o que (?:foi que )?(?:eu )?(?:ja )?pedi|ja pedi)\b"
 )
 CONSULTA_RECOMENDACAO = re.compile(
-    r"\b(?:recomenda\w*|sugere|sugest\w*|indica|de sempre|mais peco|costumo pedir|"
-    r"minha preferida|meu preferido|minha favorita|meu favorito)\b"
+    r"\b(?:recomenda\w*|sugere|sugest\w*|indica|indicac\w+|de sempre|mais peco|mais pedi\w*|"
+    r"mais vendid\w*|costumo pedir|minha preferida|meu preferido|minha favorita|meu favorito|"
+    r"nao sei o que|nao sei qual|em duvida|(?:a|o) melhor|de bom)\b"
 )
+# O pedido desta chamada não é o histórico: "o que eu pedi até agora" olha o carrinho.
+CONSULTA_PEDIDO_ATUAL = re.compile(
+    r"\b(?:como|qual|o que)\b.*\bmeu pedido\b|\bo que (?:tem|ta|esta) no pedido\b|"
+    r"\b(?:voce|vc) anotou\b|\bate agora\b|\bpedido atual\b"
+)
+RECLAMA_DO_PEDIDO = re.compile(r"\bnao (?:e|foi|era)\b.*\bpedi\b")
 FECHAR = re.compile(r"\b(?:e so isso|so isso|pode fechar|fechar o pedido|finalizar|terminei)\b")
 REMOVER = re.compile(r"\b(?:tire|tira|tirar|retire|retira|retirar|remova|remover|exclua|nao quero)\b")
 CORRIGIR = re.compile(r"\b(?:na verdade|so|apenas|corrija|corrigir|altere|alterar|deixe|mude)\b")
@@ -95,7 +103,8 @@ def eh_consulta(texto):
     normal = _normalizar(texto)
     comando = re.match(r"(?:pode|poderia) (?:adicionar|acrescentar|retirar|trocar|substituir)\b", normal)
     return bool(CONSULTA.search(normal) or CONSULTA_HISTORICO.search(normal) or
-                CONSULTA_RECOMENDACAO.search(normal) or normal.startswith("se ") or
+                CONSULTA_RECOMENDACAO.search(normal) or CONSULTA_PEDIDO_ATUAL.search(normal) or
+                RECLAMA_DO_PEDIDO.search(normal) or normal.startswith("se ") or
                 ("?" in texto and not comando))
 
 
