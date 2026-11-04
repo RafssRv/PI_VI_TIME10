@@ -324,4 +324,5 @@ class TestAtendenteFalaPrimeiro:
         monkeypatch.setattr(turno_de_voz, "_saudacoes", {})
         conexao = self._conexao()
         asyncio.run(turno_de_voz.saudar(conexao, Atendimento()))
-        assert [e["tipo"] for e in conexao.enviados] == ["transcricao"]
+        assert [e["tipo"] for e in conexao.enviados] == ["transcricao", "estado"]
+        assert conexao.enviados[1]["etapa"] == "ouvindo"

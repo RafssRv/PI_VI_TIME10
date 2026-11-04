@@ -85,6 +85,8 @@ async def saudar(websocket, atendimento):
                 audio = caminho.read_bytes()
         except Exception:
             logger.warning("chamada=%s etapa=saudacao categoria=sintese", atendimento.id_chamada)
+            # a tela espera a saudacao de microfone fechado: sem audio, avisa que ja pode ouvir
+            await websocket.send_json({"tipo": "estado", "etapa": "ouvindo"})
             return
         _saudacoes[texto] = audio
     await websocket.send_json({"tipo": "audio_resposta", "turno": 0, "formato": "audio/wav"})

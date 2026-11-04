@@ -1175,6 +1175,8 @@ async function ligar() {
 
   try {
     await iniciarCaptura();
+    // o atendente fala primeiro: nada que o cliente disser enquanto tudo carrega pode virar fala
+    pausarCaptura();
   } catch (erro) {
     pararTimer();
     mostrarErro(mensagemDeMicrofone(erro), true);
@@ -1195,8 +1197,9 @@ async function ligar() {
     comandaAviso.hidden = false;
   }
 
-  marcarEtapa(1);
-  definirEstado("ouvindo");
+  // quem abre o microfone eh o fim da saudacao (voltarAOuvir) ou o estado "ouvindo" do servidor,
+  // se a voz falhar. o relogio garante que ninguem fique sem microfone se nada disso chegar
+  armarRelogioSeguranca();
 }
 
 // motivo = null quando quem encerrou foi o servidor (ou um erro): aí não manda encerrar_chamada.
