@@ -37,6 +37,11 @@ CONSULTA_PEDIDO_ATUAL = re.compile(
 )
 RECLAMA_DO_PEDIDO = re.compile(r"\bnao (?:e|foi|era)\b.*\bpedi\b")
 FECHAR = re.compile(r"\b(?:e so isso|so isso|pode fechar|fechar o pedido|finalizar|terminei|mais nada|nada mais)\b")
+# Pagamento dito junto do item ("uma coca em dinheiro"): não é nome de produto nem observação.
+PAGAMENTO_NA_FALA = re.compile(
+    r"\b(?:(?:no|na|em|com|pelo|de)\s+)?(?:pix|pics|picks|piques|pixe|dinheiro|maquininha|"
+    r"cartao(?:\s+de\s+(?:credito|debito))?|credito|debito)\b"
+)
 # "Não é só isso" pede mais; "não, é só isso" encerra. Só a vírgula separa, por isso olha o texto cru.
 AINDA_NAO_ACABOU = re.compile(r"\bn[aã]o\s+(?:[eé]\s+)?s[oó]\b", re.IGNORECASE)
 # Sem produto na frase, basta conter isto: "não, não quero mais nada", "quero pagar no pix".
@@ -233,7 +238,7 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
         # "uma calabresa com uma coca": esse "com" separa dois itens, não é observação.
         prefixo = re.sub(r"^\s*com\s+(?=" + NUMERO + r")", "", prefixo)
         trecho = " ".join(palavras[inicio:fim])
-        sufixo = " ".join(palavras[fim:seguinte])
+        sufixo = PAGAMENTO_NA_FALA.sub("", " ".join(palavras[fim:seguinte])).strip()
         if indice + 1 < len(achados):
             sufixo = re.sub(r"\s*\bcom\s+" + NUMERO + r"$", "", sufixo).strip()
         qtd = quantidade(prefixo)
@@ -272,7 +277,7 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
         volume = re.match(r"(\d+)\s*(litros?|ml)\b", cauda)
         if volume and "{} {}".format(volume[1], radical(volume[2])) in nome_radical:
             cauda = cauda[volume.end():].strip()
-        if cauda and not re.match(r"(?:e|mas|sem|com|pago|pagamento|entrega|por favor|so isso|pra mim|para mim|hoje)\b|no (?:pix|credito|debito|cartao)\b", cauda):
+        if cauda and not re.match(r"(?:e|mas|sem|com|pago|pagamento|entrega|por favor|so isso|pra mim|para mim|hoje|vou pagar|quero pagar)\b", cauda):
             duvida = {"campo": "produto", "quantidade": qtd or 1,
                       "nao_encontrado": trecho + " " + sufixo}
             continue

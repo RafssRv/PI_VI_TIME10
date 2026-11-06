@@ -65,6 +65,9 @@ def test_chamadas_simultaneas_nao_trocam_audio(tmp_path, monkeypatch, etapa_conc
         def dica_de_transcricao(self):
             return None
 
+        def texto_para_tela(self, texto):
+            return texto
+
         def responder_com_eventos(self, texto):
             return {"texto": texto, "eventos": []}
 
@@ -283,6 +286,11 @@ def test_falha_no_banco_nao_anuncia_pedido_salvo(chamada, cpf_da_ana, db, monkey
 
 
 class TestAtendenteFalaPrimeiro:
+    @pytest.fixture(autouse=True)
+    def sem_carregar_o_whisper(self, monkeypatch):
+        self.aquecidos = []
+        monkeypatch.setattr(turno_de_voz, "carregar_agente", lambda: self.aquecidos.append(1))
+
     def _conexao(self):
         class Conexao:
             def __init__(self):
@@ -326,3 +334,22 @@ class TestAtendenteFalaPrimeiro:
         asyncio.run(turno_de_voz.saudar(conexao, Atendimento()))
         assert [e["tipo"] for e in conexao.enviados] == ["transcricao", "estado"]
         assert conexao.enviados[1]["etapa"] == "ouvindo"
+
+    def test_whisper_carrega_durante_a_saudacao(self, monkeypatch):
+        monkeypatch.setattr(turno_de_voz, "_saudacoes", {})
+        monkeypatch.setattr("agente.services.piper_service.sintetizar_resposta",
+                            lambda texto, caminho: (caminho.write_bytes(b"voz"), caminho)[1])
+
+        async def chamada():
+            await turno_de_voz.saudar(self._conexao(), Atendimento())
+            await asyncio.gather(*turno_de_voz._aquecimentos)
+
+        asyncio.run(chamada())
+        assert self.aquecidos == [1]
+
+    def test_falha_ao_aquecer_nao_derruba_a_chamada(self, monkeypatch):
+        def falha():
+            raise ImportError("sem whisper")
+
+        monkeypatch.setattr(turno_de_voz, "carregar_agente", falha)
+        turno_de_voz._aquecer_agente()

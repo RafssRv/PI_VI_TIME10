@@ -343,7 +343,7 @@ class TestFechaOPedido:
         resposta = ana_identificada.responder("Troque duas águas por uma margherita")
         assert [(i["produto"], i["quantidade"], i["observacao"])
                 for i in ana_identificada.carrinho] == [
-            ("Pizza Margherita", 2, "sem tomate"), ("Agua Mineral 500ml", 1, None),
+            ("Pizza Margherita", 2, "sem tomate"), ("Água Mineral 500ml", 1, None),
             ("Pizza Margherita", 1, None)]
         assert "Quer algo mais?" in resposta
         assert "205 reais e 70 centavos" in ana_identificada.responder("pode fechar")
@@ -1288,7 +1288,7 @@ class TestConversaNatural:
 
     @pytest.mark.parametrize("fala, inicio", [
         ("quanto custa a margherita?", "A Pizza Margherita custa"),
-        ("quanto custa o guaraná?", "O Guarana 2 Litros custa"),
+        ("quanto custa o guaraná?", "O Guaraná 2 Litros custa"),
         ("quanto custa a coca?", "A Coca-Cola 2 Litros custa"),
         ("quanto custa o pudim?", "O Pudim de Leite custa"),
     ])
@@ -1429,3 +1429,126 @@ class TestConfirmacaoComErroDoWhisper:
         assert parece_confirmacao("poisito")
         assert not parece_confirmacao("poisito?")
         assert not parece_confirmacao("poisito agora")
+
+
+class TestPagamentoJuntoDoItem:
+    @pytest.mark.parametrize("fala, pagamento", [
+        ("uma coca em dinheiro", "dinheiro"), ("uma coca no dinheiro", "dinheiro"), ("uma coca com pix", "pix"),
+        ("uma coca pix", "pix"), ("uma coca no crédito", "cartao_credito"),
+        ("uma coca no cartão de débito", "cartao_debito"), ("uma coca, vou pagar no pix", "pix"),
+    ])
+    def test_item_e_pagamento_na_mesma_frase(self, ana_identificada, llama, fala, pagamento):
+        ana_identificada.responder(fala)
+        item_anotado = ana_identificada.carrinho[0]
+        assert (item_anotado["produto"], item_anotado["quantidade"]) == ("Coca-Cola 2 Litros", 1)
+        assert item_anotado["observacao"] is None
+        assert ana_identificada.pagamento == pagamento
+        assert llama.chamadas == []
+
+    def test_cartao_sem_dizer_qual_pergunta(self, ana_identificada):
+        assert "Crédito ou débito" in ana_identificada.responder("uma coca no cartão")
+        assert len(ana_identificada.carrinho) == 1
+
+    def test_observacao_continua_com_o_pagamento_junto(self, ana_identificada):
+        ana_identificada.responder("uma calabresa sem cebola no pix")
+        assert ana_identificada.carrinho[0]["observacao"] == "sem cebola"
+        assert ana_identificada.pagamento == "pix"
+
+
+class TestMudarEndereco:
+    def _no_resumo(self, atendimento):
+        atendimento.responder("uma coca no pix")
+        atendimento.responder("é só isso")
+        assert atendimento.etapa == "confirmando_pedido"
+
+    @pytest.mark.parametrize("fala", [
+        "quero mudar o endereço", "Quero mudar com o endereço.", "muda o endereço", "o endereço está errado",
+        "quero outro endereço", "troca o endereço",
+    ])
+    def test_no_resumo_pergunta_o_novo(self, ana_identificada, llama, fala):
+        self._no_resumo(ana_identificada)
+        assert ana_identificada.responder(fala) == "Claro! Qual é o novo endereço?"
+        assert llama.chamadas == []
+
+    @pytest.mark.parametrize("fala, esperado", [
+        ("rua das flores, 10", "rua das flores, 10"), ("a entrega é na Avenida Brasil, 500", "Avenida Brasil, 500"),
+        ("Condomínio Vila Verde, casa 3", "Condomínio Vila Verde, casa 3"),
+    ])
+    def test_proxima_fala_vira_o_endereco_e_volta_ao_resumo(self, ana_identificada, fala, esperado):
+        self._no_resumo(ana_identificada)
+        ana_identificada.responder("quero mudar o endereço")
+        resposta = ana_identificada.responder(fala)
+        assert "Seu pedido ficou assim" in resposta and esperado in resposta
+        assert ana_identificada.etapa == "confirmando_pedido"
+
+    def test_endereco_novo_vai_no_pedido_e_nao_muda_o_cadastro(self, ana_identificada, db):
+        self._no_resumo(ana_identificada)
+        ana_identificada.responder("quero mudar o endereço")
+        ana_identificada.responder("rua das flores, 10")
+        ana_identificada.responder("sim")
+        pedido = (db.query(Pedido).filter(Pedido.cliente_id == ana_identificada.cliente_id)
+                  .order_by(Pedido.id.desc()).first())
+        assert pedido.endereco_entrega == "rua das flores, 10"
+        assert pedido.cliente.endereco != "rua das flores, 10"
+
+    def test_antes_de_fechar_continua_pedindo_mais(self, ana_identificada):
+        ana_identificada.responder("uma coca")
+        ana_identificada.responder("quero mudar o endereço")
+        assert ana_identificada.responder("rua das flores, 10").endswith("Quer algo mais?")
+
+    def test_frase_com_a_rua_muda_direto(self, ana_identificada):
+        ana_identificada.responder("uma coca")
+        ana_identificada.responder("troca o endereço para a rua das flores, 10")
+        assert ana_identificada.endereco_entrega == "rua das flores, 10"
+        assert [i["produto"] for i in ana_identificada.carrinho] == ["Coca-Cola 2 Litros"]
+
+    def test_desistir_mantem_o_endereco(self, ana_identificada):
+        self._no_resumo(ana_identificada)
+        ana_identificada.responder("quero mudar o endereço")
+        resposta = ana_identificada.responder("não")
+        assert "Rua Barao de Jaguara" in resposta
+        assert ana_identificada.endereco_entrega is None
+
+    def test_endereco_curto_pede_de_novo(self, ana_identificada):
+        self._no_resumo(ana_identificada)
+        ana_identificada.responder("quero mudar o endereço")
+        assert "Não entendi o endereço" in ana_identificada.responder("oi")
+        assert "Seu pedido ficou assim" in ana_identificada.responder("rua das flores, 10")
+
+    def test_dica_do_cardapio_sai_enquanto_ouve_o_endereco(self, ana_identificada):
+        ana_identificada.responder("quero mudar o endereço")
+        assert ana_identificada.dica_de_transcricao() is None
+
+
+class TestCpfNaLegenda:
+    @pytest.mark.parametrize("fala", ["123.456.789-09", "meu cpf é 123 456 789 09", "um dois três quatro cinco seis"])
+    def test_cpf_nao_aparece_na_etapa_do_cpf(self, atendimento, fala):
+        atendimento.saudacao()
+        assert atendimento.texto_para_tela(fala) == "CPF informado"
+
+    def test_cumprimento_continua_aparecendo(self, atendimento):
+        atendimento.saudacao()
+        assert atendimento.texto_para_tela("oi, tudo bem?") == "oi, tudo bem?"
+
+    def test_depois_do_login_a_fala_continua_normal(self, ana_identificada):
+        fala = "2 pizzas de calabresa e 1 coca-cola 2 litros"
+        assert ana_identificada.texto_para_tela(fala) == fala
+
+    def test_cpf_dito_mais_tarde_tambem_some(self, ana_identificada):
+        assert "123" not in ana_identificada.texto_para_tela("meu cpf é 123.456.789-09")
+
+    def test_telefone_do_cadastro_aparece(self, atendimento):
+        atendimento.responder(CPF_NOVO)
+        atendimento.responder("sim")
+        atendimento.responder("João da Silva")
+        assert atendimento.texto_para_tela("19 99812 4477") == "19 99812 4477"
+
+
+class TestAcentosDoCardapio:
+    @pytest.mark.parametrize("fala, produto", [
+        ("um guaraná", "Guaraná 2 Litros"), ("um guarana", "Guaraná 2 Litros"), ("uma água", "Água Mineral 500ml"),
+        ("uma agua", "Água Mineral 500ml"), ("um mousse de maracujá", "Mousse de Maracujá"),
+    ])
+    def test_com_e_sem_acento_acham_o_produto(self, ana_identificada, fala, produto):
+        ana_identificada.responder(fala)
+        assert [i["produto"] for i in ana_identificada.carrinho] == [produto]

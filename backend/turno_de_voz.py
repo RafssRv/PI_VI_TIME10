@@ -5,6 +5,7 @@
 import asyncio
 import hashlib
 import logging
+import threading
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -15,22 +16,41 @@ logger = logging.getLogger(__name__)
 _agente = None
 # a saudacao so muda com o periodo do dia, entao a voz eh gerada uma vez e reaproveitada
 _saudacoes = {}
+# o aquecimento roda em paralelo com a chamada: a trava evita carregar o whisper duas vezes
+_trava_do_agente = threading.Lock()
+_aquecimentos = set()
 
 
 def carregar_agente():
     global _agente
-    if _agente is None:
-        from agente.services.audio_service import salvar_fala_em_wav
-        from agente.services.whisper_service import transcrever
-        from agente.services.piper_service import sintetizar_resposta
+    with _trava_do_agente:
+        if _agente is None:
+            from agente.services.audio_service import salvar_fala_em_wav
+            from agente.services.whisper_service import transcrever
+            from agente.services.piper_service import sintetizar_resposta
 
-        # a resposta nao sai mais direto do llama: quem decide eh o atendimento.py
-        _agente = {
-            "salvar_fala_em_wav": salvar_fala_em_wav,
-            "transcrever": transcrever,
-            "sintetizar_resposta": sintetizar_resposta,
-        }
+            # a resposta nao sai mais direto do llama: quem decide eh o atendimento.py
+            _agente = {
+                "salvar_fala_em_wav": salvar_fala_em_wav,
+                "transcrever": transcrever,
+                "sintetizar_resposta": sintetizar_resposta,
+            }
     return _agente
+
+
+def _aquecer_agente():
+    try:
+        carregar_agente()
+    except Exception:
+        # o primeiro turno tenta de novo e mostra o erro na tela
+        logger.warning("etapa=aquecer_agente categoria=carregamento")
+
+
+def aquecer_durante_a_saudacao():
+    # o whisper leva segundos pra carregar: assim a primeira fala do cliente nao paga por isso
+    tarefa = asyncio.create_task(asyncio.to_thread(_aquecer_agente))
+    _aquecimentos.add(tarefa)
+    tarefa.add_done_callback(_aquecimentos.discard)
 
 
 def _observar_conclusao(tarefa):
@@ -87,11 +107,13 @@ async def saudar(websocket, atendimento):
             logger.warning("chamada=%s etapa=saudacao categoria=sintese", atendimento.id_chamada)
             # a tela espera a saudacao de microfone fechado: sem audio, avisa que ja pode ouvir
             await websocket.send_json({"tipo": "estado", "etapa": "ouvindo"})
+            aquecer_durante_a_saudacao()
             return
         _saudacoes[texto] = audio
     await websocket.send_json({"tipo": "audio_resposta", "turno": 0, "formato": "audio/wav"})
     await websocket.send_bytes(audio)
     await websocket.send_json({"tipo": "fim_audio", "turno": 0})
+    aquecer_durante_a_saudacao()
 
 
 async def mandar_erro(websocket, onde, mensagem, chamada_id, turno, categoria):
@@ -154,7 +176,7 @@ async def _atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, ate
             "eventos": []}
     else:
         await websocket.send_json({"tipo": "transcricao", "turno": turno, "quem": "cliente",
-                                   "texto": texto_cliente, "parcial": False})
+                                   "texto": atendimento.texto_para_tela(texto_cliente), "parcial": False})
         # 3. atendimento: identifica/cadastra o cliente e depois interpreta o pedido.
         try:
             resultado = await rodar_sem_travar(

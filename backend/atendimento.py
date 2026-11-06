@@ -52,6 +52,11 @@ TAMANHO_NA_FALA = re.compile(r"(?<!em )\b(?:(?:de |do |no )?tamanho )?(?:grande|
 PERGUNTA_DE_TAMANHO = re.compile(r"\btamanhos?\b|\btem\b.*\b(?:grande|media|medio|pequena|pequeno|gigante|"
                                  r"familia|broto)\b")
 FRASE_TAMANHO_UNICO = "Nossas pizzas têm tamanho único."
+QUER_MUDAR_ENDERECO = re.compile(
+    r"\b(?:mudar|muda|trocar|troca|alterar|altera|corrigir|corrige|outro|novo)\b.*\bendereco\b|"
+    r"\bendereco\b.*\b(?:errado|outro|novo|diferente)\b"
+)
+CPF_ESCRITO = re.compile(r"\b\d{3}[.\s-]?\d{3}[.\s-]?\d{3}[.\s-]?\d{2}\b")
 # o que vem depois do endereco na mesma frase: "rua x, 10, e so isso"
 FIM_DO_ENDERECO = re.compile(r"[,.;]?\s*\b(?:[eé] s[oó] isso|s[oó] isso|por favor|pode fechar|pago|pagamento|"
                              r"vou pagar|no pix|em dinheiro|no cart[aã]o|no cr[eé]dito|no d[eé]bito)\b.*",
@@ -174,6 +179,7 @@ class Atendimento:
         self._pendencia = None
         self._sugestoes = []
         self._repetir = None
+        self._pedindo_endereco = False
         self._troca_pendente = False
         self._pendencia_antes_da_troca = None
         self._duvida_item = None
@@ -245,13 +251,19 @@ class Atendimento:
             "endereco_entrega": self.endereco_entrega or self.endereco_do_cadastro,
         }
 
+    def texto_para_tela(self, texto):
+        """a legenda pode estar projetada: o cpf nao aparece, mesmo ditado por extenso."""
+        if self.etapa in {"inicio", "aguardando_cpf", "oferecendo_cadastro"} and len(extrair_digitos(texto)) >= 3:
+            return "CPF informado"
+        return CPF_ESCRITO.sub("CPF informado", texto)
+
     def dica_de_transcricao(self):
         """
         o que o whisper deve esperar ouvir. so vale quando a fala eh sobre o cardapio: no cpf nao ajuda
         e em nome e endereco atrapalharia. nao colocar comandos aqui: testando, o modelo repetia o fim
         da dica quando so ouvia ruido, e "e so isso" fecharia o pedido sozinho.
         """
-        if self.etapa not in {"identificado", "confirmando_pedido", "sem_cadastro"}:
+        if self.etapa not in {"identificado", "confirmando_pedido", "sem_cadastro"} or self._pedindo_endereco:
             return None
         if self._dica is None:
             db = self._sessao()
@@ -507,6 +519,13 @@ class Atendimento:
         normalizado = _normalizar(texto).strip()
         if NAO_SOU_EU.search(normalizado):
             return self._desfazer_identificacao()
+        if self._pedindo_endereco:
+            return self._receber_novo_endereco(texto)
+        if QUER_MUDAR_ENDERECO.search(normalizado):
+            if ENDERECO_NA_FALA.search(texto):
+                return self._receber_novo_endereco(texto)
+            self._pedindo_endereco = True
+            return "Claro! Qual é o novo endereço?"
         sem_cortesia = re.sub(r"\bnao( nao)+\b", "nao", " ".join(CORTESIA.sub("", normalizado).split()))
         if (FIM_DO_PEDIDO.search(sem_cortesia) and not AINDA_NAO_ACABOU.search(texto)
                 and not mencoes(texto, repositorio.listar_cardapio(db))[1]):
@@ -679,6 +698,22 @@ class Atendimento:
 
         self.historico.append({"role": "assistant", "content": fala})
         return fala
+
+    def _receber_novo_endereco(self, texto):
+        desistiu = sim_ou_nao(texto) is False and len(_normalizar(texto).split()) <= 3
+        rua = ENDERECO_NA_FALA.search(texto)
+        endereco = None if desistiu else extrair_endereco(FIM_DO_ENDERECO.sub("", rua.group() if rua else texto))
+        if not endereco and not desistiu:
+            self._pedindo_endereco = True
+            return "Não entendi o endereço. Pode falar a rua e o número?"
+        self._pedindo_endereco = False
+        if endereco:
+            self.endereco_entrega = endereco
+        if self._fechamento_solicitado:
+            return self._fechar_pedido()
+        if desistiu:
+            return "Tudo bem, mantive o endereço. Quer algo mais?"
+        return "Certo, a entrega será em {}. Quer algo mais?".format(endereco)
 
     def _largar_duvida_de_produto(self):
         """
@@ -1021,6 +1056,7 @@ class Atendimento:
         if not self.pagamento:
             return FRASE_PEDE_PAGAMENTO
         if not (self.endereco_entrega or self.endereco_do_cadastro):
+            self._pedindo_endereco = True
             return "Qual é o endereço para entrega?"
         self.etapa = "confirmando_pedido"
         return self._resumo_do_pedido()

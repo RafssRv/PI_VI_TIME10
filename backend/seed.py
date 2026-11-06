@@ -23,12 +23,12 @@ SEMENTE = 10
 # (nome, descricao, categoria, preco, ativo)
 # preco em string pq Decimal("59.90") eh exato e Decimal(59.90) nao eh
 CARDAPIO = [
-    ("Pizza de Mussarela", "molho de tomate, mussarela e oregano", "pizza salgada", "59.90", True),
+    ("Pizza de Mussarela", "molho de tomate, mussarela e orégano", "pizza salgada", "59.90", True),
     ("Pizza de Calabresa", "calabresa fatiada, cebola e azeitona preta", "pizza salgada", "64.90", True),
-    ("Pizza Margherita", "mussarela, tomate em rodelas e manjericao fresco", "pizza salgada", "66.90", True),
+    ("Pizza Margherita", "mussarela, tomate em rodelas e manjericão fresco", "pizza salgada", "66.90", True),
     ("Pizza Portuguesa", "presunto, ovo, cebola, ervilha e mussarela", "pizza salgada", "72.90", True),
     ("Pizza de Frango com Catupiry", "frango desfiado com catupiry cremoso", "pizza salgada", "74.90", True),
-    ("Pizza Quatro Queijos", "mussarela, provolone, gorgonzola e parmesao", "pizza salgada", "78.90", True),
+    ("Pizza Quatro Queijos", "mussarela, provolone, gorgonzola e parmesão", "pizza salgada", "78.90", True),
     ("Pizza de Pepperoni", "mussarela com pepperoni picante", "pizza salgada", "79.90", True),
     # esse sai do cardapio de proposito: caso de teste do ria04, o modelo pode citar mas nao pode vender
     ("Pizza de Escarola com Bacon", "escarola refogada, bacon e mussarela", "pizza salgada", "73.90", False),
@@ -36,11 +36,11 @@ CARDAPIO = [
     ("Pizza de Brigadeiro", "brigadeiro cremoso com granulado", "pizza doce", "64.90", True),
     ("Pizza Romeu e Julieta", "goiabada cremosa com queijo minas", "pizza doce", "62.90", True),
     ("Coca-Cola 2 Litros", "refrigerante gelado, garrafa de 2 litros", "bebida", "14.90", True),
-    ("Guarana 2 Litros", "refrigerante gelado, garrafa de 2 litros", "bebida", "12.90", True),
+    ("Guaraná 2 Litros", "refrigerante gelado, garrafa de 2 litros", "bebida", "12.90", True),
     ("Suco de Laranja 1 Litro", "suco natural feito na hora", "bebida", "16.90", True),
-    ("Agua Mineral 500ml", "garrafa de agua sem gas", "bebida", "5.00", True),
+    ("Água Mineral 500ml", "garrafa de água sem gás", "bebida", "5.00", True),
     ("Pudim de Leite", "fatia de pudim de leite condensado", "sobremesa", "15.90", True),
-    ("Mousse de Maracuja", "pote individual de mousse", "sobremesa", "14.90", True),
+    ("Mousse de Maracujá", "pote individual de mousse", "sobremesa", "14.90", True),
     ("Borda de Catupiry", "borda recheada com catupiry", "borda", "12.00", True),
     ("Borda de Cheddar", "borda recheada com cheddar", "borda", "12.00", True),
 ]
