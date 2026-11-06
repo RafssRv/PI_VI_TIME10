@@ -19,6 +19,8 @@ from interpretacao import extrair_digitos, extrair_nome, juntar_segmentos, parec
 
 # valido no digito verificador e fora do seed (o mesmo q o seed sugere pra testar o rf04)
 CPF_NOVO = "11122233396"
+# o codigo nao resolve sozinho, entao ainda depende do modelo: serve pra testar a falha dele
+FALA_QUE_PRECISA_DO_MODELO = "não, a entrega é no meu trabalho"
 
 
 class LlamaDeMentira:
@@ -490,9 +492,9 @@ class TestFechaOPedido:
         ana_identificada._conversar = resposta_com_falha
         if falha == "timeout":
             with pytest.raises(TimeoutError):
-                ana_identificada.responder("não, tire as cocas")
+                ana_identificada.responder(FALA_QUE_PRECISA_DO_MODELO)
         else:
-            assert "repetir" in ana_identificada.responder("não, tire as cocas")
+            assert "repetir" in ana_identificada.responder(FALA_QUE_PRECISA_DO_MODELO)
 
         assert ana_identificada.carrinho == anterior
         assert ana_identificada.historico == historico
@@ -950,11 +952,51 @@ class TestQuandoOModeloEChamado:
         assert "confirmado" in ana_identificada.responder("sim, pode confirmar")
         assert _pedidos_da(db, ana_identificada.cliente_id) == antes + 1
 
-    def test_correcao_continua_passando_pelo_modelo(self, ana_identificada, llama):
+    @pytest.mark.parametrize("fala, itens", [
+        ("tire as cocas", [("Pizza Margherita", 1)]),
+        ("tira a margherita", [("Coca-Cola 2 Litros", 2)]),
+        ("tira uma coca", [("Pizza Margherita", 1), ("Coca-Cola 2 Litros", 1)]),
+        ("na verdade são três cocas", [("Pizza Margherita", 1), ("Coca-Cola 2 Litros", 3)]),
+    ])
+    def test_correcao_entendida_nao_espera_o_modelo(self, ana_identificada, llama, fala, itens):
         ana_identificada.responder("uma margherita e duas coca-colas")
-        llama.entende([item("margherita")])
-        ana_identificada.responder("tire as cocas")
-        assert len(llama.chamadas) == 1
+        ana_identificada.responder(fala)
+        assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == itens
+        assert llama.chamadas == []
+
+    def test_correcao_funciona_com_o_ollama_fora_do_ar(self, ana_identificada):
+        def indisponivel(*args, **kwargs):
+            raise TimeoutError("Ollama indisponível")
+        ana_identificada._conversar = indisponivel
+        ana_identificada.responder("uma margherita e duas coca-colas no pix")
+        ana_identificada.responder("é só isso")
+        resposta = ana_identificada.responder("não, tire as cocas")
+        assert [i["produto"] for i in ana_identificada.carrinho] == ["Pizza Margherita"]
+        assert "Seu pedido ficou assim" in resposta and "66 reais e 90 centavos" in resposta
+
+    def test_tirar_mais_do_que_tem_pergunta_e_nao_mexe(self, ana_identificada, llama):
+        ana_identificada.responder("uma margherita e duas coca-colas")
+        ana_identificada.responder("tira cinco cocas")
+        assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == [
+            ("Pizza Margherita", 1), ("Coca-Cola 2 Litros", 2)]
+        assert llama.chamadas == []
+
+    def test_tirar_o_que_nao_esta_no_pedido_avisa_sem_o_modelo(self, ana_identificada, llama):
+        ana_identificada.responder("uma margherita")
+        resposta = ana_identificada.responder("tira a coca")
+        assert resposta.startswith("Coca-Cola 2 Litros não está no seu pedido.")
+        assert [i["produto"] for i in ana_identificada.carrinho] == ["Pizza Margherita"]
+        assert llama.chamadas == []
+
+    def test_aviso_de_item_fora_do_pedido_nao_prende_a_conversa(self, ana_identificada):
+        ana_identificada.responder("uma margherita no pix")
+        ana_identificada.responder("tira a coca")
+        assert "Seu pedido ficou assim" in ana_identificada.responder("é só isso")
+
+    def test_item_certo_depois_do_aviso_segue_normal(self, ana_identificada):
+        ana_identificada.responder("uma margherita")
+        ana_identificada.responder("tira a coca")
+        assert "Anotei 1 Pudim" in ana_identificada.responder("um pudim")
 
     @pytest.mark.parametrize("fala, esperado", [
         ("a entrega é na rua das flores, 10", "rua das flores, 10"),

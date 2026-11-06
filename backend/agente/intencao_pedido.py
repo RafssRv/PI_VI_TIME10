@@ -159,7 +159,7 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
     texto = _numero_do_nome(texto)
     normal = _normalizar(texto)
     # "Não temos X" é aviso, não pergunta aberta: não pode prender as falas seguintes.
-    if pendente and pendente.get("nao_encontrado"):
+    if pendente and (pendente.get("nao_encontrado") or pendente.get("campo") == "fora_do_pedido"):
         pendente = None
     novo = deepcopy(atual)
     evidencias = []
@@ -252,7 +252,7 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
                            r"pode|poderia|por|favor|sim|nao|na|verdade|so|apenas|dessa|desse|daquela|daquele|igual|corrija|corrigir|"
                            r"altere|alterar|deixe|mude|tire|tira|tirar|retire|retira|retirar|"
                            r"remova|remover|exclua|me|ve|da|traz|traga|vou|querer|ser|vai|vamos|ah|oi|ola|"
-                           r"boa|bom|noite|tarde|dia|entao|hoje|tambem|agora|pra|para|mim)\b", "", permitido).strip()
+                           r"boa|bom|noite|tarde|dia|entao|hoje|tambem|agora|pra|para|mim|sao|fica|ficam)\b", "", permitido).strip()
         if permitido or re.match(r"e\s+(?!so isso|uma?\b|duas?\b|dois\b|tres\b|\d+\b)", sufixo):
             duvida = {"campo": "intencao"}
             continue
@@ -292,6 +292,7 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
                 duvida = {"campo": "observacao", "produto": produto.nome}
                 continue
             if not existentes:
+                duvida = {"campo": "fora_do_pedido", "produto": produto.nome}
                 continue
             if len(existentes) != 1 or (qtd is not None and qtd > existentes[0]["quantidade"]):
                 duvida = {"campo": "quantidade", "produto": produto.nome, "acao": "remover"}

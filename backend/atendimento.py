@@ -634,11 +634,10 @@ class Atendimento:
         if endereco_na_fala:
             endereco_falado = extrair_endereco(FIM_DO_ENDERECO.sub("", endereco_na_fala.group()))
         fala_de_endereco = bool(palavras & {"endereco", "entrega"}) and not endereco_falado
-        so_adicoes = bool(evidencias) and all(e["acao"] == "adicionar" for e in evidencias)
-        # item novo, pagamento e pergunta de esclarecimento ja saem do codigo, e esperar o modelo aqui
-        # custava ate 1 minuto por fala no notebook sem gpu. correcao e remocao continuam passando por
-        # ele: se o modelo falhar, o pedido fica como estava
-        resolvida = so_adicoes or (not evidencias and (duvida or fala_de_pagamento or endereco_falado))
+        # o que muda o pedido eh a evidencia da fala, nunca o json do modelo. entao, se o codigo ja entendeu
+        # (item novo, remocao, correcao, pagamento ou duvida), esperar o modelo so custava ate 1 minuto no
+        # notebook sem gpu. se nao entendeu, o modelo ainda eh chamado e a falha dele bloqueia o resumo
+        resolvida = bool(evidencias or duvida or fala_de_pagamento or endereco_falado)
         if resolvida and not fala_de_endereco:
             dados = {"itens": [], "endereco": None}
         else:
@@ -720,7 +719,9 @@ class Atendimento:
         desiste de um item que nem entrou no pedido, pra pessoa nunca ficar presa nele.
         correcao que falhou nao passa por aqui: essa continua bloqueando o resumo ate ser resolvida.
         """
-        if not self._pendencia or not self._duvida_item or self._duvida_item.get("campo") != "produto":
+        if not self._pendencia or not self._duvida_item:
+            return False
+        if self._duvida_item.get("campo") not in {"produto", "fora_do_pedido"}:
             return False
         self._pendencia = self._duvida_item = self._ultima_pergunta = None
         self._tentativas = 0
@@ -742,6 +743,8 @@ class Atendimento:
                 " de " + duvida["produto"] if duvida.get("produto") else "")
         if campo == "observacao":
             return "Qual é a observação para {}?".format(duvida["produto"])
+        if campo == "fora_do_pedido":
+            return "{} não está no seu pedido. Quer algo mais?".format(duvida["produto"])
         if campo == "intencao":
             return "Não entendi. Pode repetir o que você quer?"
         candidatos = duvida.get("candidatos", [])
