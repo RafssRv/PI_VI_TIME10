@@ -201,3 +201,19 @@ def test_duracao_inclui_processamento_sem_admitir_outro_turno(executar, monkeypa
     monkeypatch.setattr(voz, "atender_turno", lento)
     conferir_rejeicao(executar([texto(INICIO), audio(), texto(FIM), audio(), texto({**FIM, "turno": 2})]))
     assert executar.turnos == [1]
+
+
+def test_monitor_registra_por_que_a_chamada_terminou(executar, monkeypatch):
+    motivos = []
+    monkeypatch.setattr(voz.monitor, "encerrar_chamada",
+                        lambda chamada_id, motivo="finalizada", pedido_id=None: motivos.append(motivo))
+
+    async def quebrar(websocket, dados, inicio, turno, atendimento):
+        raise RuntimeError("falha")
+
+    executar([texto(INICIO), texto({"tipo": "encerrar_chamada", "motivo": "cliente_desligou"})])
+    executar([texto(INICIO)])
+    executar([texto(FIM)])
+    monkeypatch.setattr(voz, "atender_turno", quebrar)
+    executar([texto(INICIO), audio(), texto(FIM)])
+    assert motivos == ["finalizada", "conexao_perdida", "erro_protocolo", "erro_servidor"]
