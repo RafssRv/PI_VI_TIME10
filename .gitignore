@@ -38,3 +38,8 @@ desktop.ini
 .DS_Store
 .vscode/
 .idea/
+
+# estado local de assistentes de codigo (claude code e plugins)
+.claude/
+.claude-flow/
+.swarm/
