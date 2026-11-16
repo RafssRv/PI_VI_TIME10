@@ -245,12 +245,12 @@ def _pedidos_da(db, cliente_id):
 class TestMontaOPedido:
     def test_item_vai_pro_carrinho_com_o_nome_do_cardapio(self, ana_identificada, llama):
         llama.entende([item("margherita", 2)])
-        resposta = ana_identificada.responder("quero duas margheritas")
+        resposta = ana_identificada.responder("quero duas margheritas grandes")
         assert "Quer algo mais?" in resposta
         assert "pagar" not in resposta
         assert ana_identificada.carrinho == [{
             "produto": "Pizza Margherita", "quantidade": 2,
-            "preco": Decimal("66.90"), "observacao": None,
+            "preco": Decimal("66.90"), "observacao": None, "tamanho": "grande",
         }]
 
     def test_o_llama_ve_o_pedido_atual(self, ana_identificada, llama):
@@ -307,7 +307,7 @@ class TestMontaOPedido:
         llama.entende([item("margherita")])
         llama.entende([item("margherita"), item("coca cola")])
         ana_identificada.responder("margherita no pix")
-        ana_identificada.responder("e uma coca")
+        ana_identificada.responder("e uma coca de 2 litros")
         assert ana_identificada.pagamento == "pix"
 
 
@@ -322,7 +322,7 @@ class TestFechaOPedido:
     ):
         antes = _pedidos_da(db, ana_identificada.cliente_id)
         llama.entende([item("margherita"), item("água mineral")])
-        ana_identificada.responder("Uma margherita e uma água no pix, é só isso")
+        ana_identificada.responder("Uma margherita grande e uma água mineral no pix, é só isso")
 
         def nao_deve_reconstruir_carrinho(*args, **kwargs):
             raise AssertionError("A troca explícita não precisa da interpretação do LLM")
@@ -341,7 +341,7 @@ class TestFechaOPedido:
 
     def test_troca_parcial_preserva_resto_e_nao_transfere_observacao(self, ana_identificada, llama):
         llama.entende([item("margherita", 2, "sem tomate"), item("água mineral", 3)])
-        ana_identificada.responder("Duas margheritas sem tomate e três águas no pix")
+        ana_identificada.responder("Duas margheritas grandes sem tomate e três águas minerais no pix")
         resposta = ana_identificada.responder("Troque duas águas por uma margherita")
         assert [(i["produto"], i["quantidade"], i["observacao"])
                 for i in ana_identificada.carrinho] == [
@@ -396,7 +396,7 @@ class TestFechaOPedido:
         ana_identificada.responder("sim")
         assert ana_identificada.carrinho == anterior
         assert ana_identificada.etapa == "identificado"
-        resposta = ana_identificada.responder("Troque duas cocas por uma água")
+        resposta = ana_identificada.responder("Troque duas cocas de 2 litros por uma água mineral")
         assert "71 reais e 90 centavos" in resposta
         assert ana_identificada.etapa == "confirmando_pedido"
 
@@ -411,7 +411,7 @@ class TestFechaOPedido:
         assert ana_identificada.etapa == "confirmando_pedido"
         assert _pedidos_da(db, ana_identificada.cliente_id) == antes
 
-    @pytest.mark.parametrize("ultima_fala", ["cancele a troca", "troque uma coca por uma água"])
+    @pytest.mark.parametrize("ultima_fala", ["cancele a troca", "troque uma coca por uma água mineral"])
     def test_troca_nao_apaga_duvida_anterior(self, ana_identificada, llama, db, ultima_fala):
         antes = _pedidos_da(db, ana_identificada.cliente_id)
         self._pedir_e_fechar(ana_identificada, llama)
@@ -538,14 +538,14 @@ class TestFechaOPedido:
             db.commit()
 
     def _pedir_e_fechar(self, atendimento, llama, endereco=None,
-                        texto="uma margherita e duas cocas no pix, é só isso"):
+                        texto="uma margherita grande e duas cocas de 2 litros no pix, é só isso"):
         llama.entende([item("margherita"), item("coca cola 2 litros", 2)],
                       endereco=endereco, fechar=True)
         return atendimento.responder(texto)
 
     def test_le_o_resumo_com_total(self, ana_identificada, llama, db):
         resposta = self._pedir_e_fechar(ana_identificada, llama)
-        assert "1 Pizza Margherita e 2 Coca-Cola 2 Litros" in resposta
+        assert "1 Pizza Margherita grande e 2 Coca-Cola 2 Litros" in resposta
         assert "96 reais e 70 centavos" in resposta
         assert "no Pix" in resposta
         assert ana_identificada.etapa == "confirmando_pedido"
@@ -567,7 +567,7 @@ class TestFechaOPedido:
         assert pedido.total == Decimal("96.70")
         assert pedido.forma_pagamento == "pix"
         assert sorted((i.produto.nome, i.quantidade) for i in pedido.itens) == [
-            ("Coca-Cola 2 Litros", 2), ("Pizza Margherita", 1)]
+            ("Coca-Cola", 2), ("Pizza Margherita", 1)]
         # sem endereco novo, vai pro endereco do cadastro
         assert pedido.endereco_entrega == pedido.cliente.endereco
         # e o carrinho zera pro proximo pedido
@@ -576,14 +576,14 @@ class TestFechaOPedido:
 
     def test_endereco_novo_vai_no_pedido(self, ana_identificada, llama, db):
         self._pedir_e_fechar(ana_identificada, llama, endereco="Rua Nova, 45, Cambuí",
-                            texto="uma margherita e duas cocas no pix, entrega na Rua Nova, 45, Cambuí, é só isso")
+                            texto="uma margherita grande e duas cocas de 2 litros no pix, entrega na Rua Nova, 45, Cambuí, é só isso")
         ana_identificada.responder("sim")
         pedido = (db.query(Pedido).filter(Pedido.cliente_id == ana_identificada.cliente_id)
                   .order_by(Pedido.id.desc()).first())
         assert pedido.endereco_entrega == "Rua Nova, 45, Cambuí"
 
     def test_fechar_sem_pagamento_pergunta(self, ana_identificada, llama):
-        self._pedir_e_fechar(ana_identificada, llama, texto="margherita e duas cocas, só isso")
+        self._pedir_e_fechar(ana_identificada, llama, texto="margherita grande e duas cocas de 2 litros, só isso")
         assert ana_identificada.etapa == "identificado"
         assert ana_identificada.historico[-1]["content"].startswith("Como você vai pagar")
 
@@ -637,7 +637,7 @@ class TestHistoricoERecomendacao:
 
     def test_pedido_novo_aparece_no_historico(self, ana_identificada, llama):
         llama.entende([item("Pizza Portuguesa")])
-        ana_identificada.responder("uma pizza portuguesa no pix")
+        ana_identificada.responder("uma pizza portuguesa grande no pix")
         ana_identificada.responder("é só isso")
         ana_identificada.responder("sim, pode confirmar")
         assert "1 Pizza Portuguesa" in ana_identificada.responder("o que eu pedi da última vez?")
@@ -768,7 +768,7 @@ class TestFurosDoHistoricoERecomendacao:
 
     def test_fechar_meu_pedido_nao_vira_consulta(self, ana_identificada, llama):
         llama.entende([item("margherita")])
-        ana_identificada.responder("uma margherita no pix")
+        ana_identificada.responder("uma margherita grande no pix")
         assert "Seu pedido ficou assim" in ana_identificada.responder("pode fechar meu pedido")
 
     def test_sem_vendas_nao_sugere_agua_para_sobremesa(self, ana_identificada, monkeypatch):
@@ -946,7 +946,7 @@ class TestQuandoOModeloEChamado:
             raise TimeoutError("Ollama indisponível")
         ana_identificada._conversar = indisponivel
         antes = _pedidos_da(db, ana_identificada.cliente_id)
-        ana_identificada.responder("uma margherita e duas coca-colas")
+        ana_identificada.responder("uma margherita grande e duas coca-colas de 2 litros")
         ana_identificada.responder("vou pagar no pix")
         assert "96 reais e 70 centavos" in ana_identificada.responder("é só isso")
         assert "confirmado" in ana_identificada.responder("sim, pode confirmar")
@@ -954,12 +954,12 @@ class TestQuandoOModeloEChamado:
 
     @pytest.mark.parametrize("fala, itens", [
         ("tire as cocas", [("Pizza Margherita", 1)]),
-        ("tira a margherita", [("Coca-Cola 2 Litros", 2)]),
-        ("tira uma coca", [("Pizza Margherita", 1), ("Coca-Cola 2 Litros", 1)]),
-        ("na verdade são três cocas", [("Pizza Margherita", 1), ("Coca-Cola 2 Litros", 3)]),
+        ("tira a margherita", [("Coca-Cola", 2)]),
+        ("tira uma coca", [("Pizza Margherita", 1), ("Coca-Cola", 1)]),
+        ("na verdade são três cocas", [("Pizza Margherita", 1), ("Coca-Cola", 3)]),
     ])
     def test_correcao_entendida_nao_espera_o_modelo(self, ana_identificada, llama, fala, itens):
-        ana_identificada.responder("uma margherita e duas coca-colas")
+        ana_identificada.responder("uma margherita grande e duas coca-colas de 2 litros")
         ana_identificada.responder(fala)
         assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == itens
         assert llama.chamadas == []
@@ -968,28 +968,28 @@ class TestQuandoOModeloEChamado:
         def indisponivel(*args, **kwargs):
             raise TimeoutError("Ollama indisponível")
         ana_identificada._conversar = indisponivel
-        ana_identificada.responder("uma margherita e duas coca-colas no pix")
+        ana_identificada.responder("uma margherita grande e duas coca-colas de 2 litros no pix")
         ana_identificada.responder("é só isso")
         resposta = ana_identificada.responder("não, tire as cocas")
         assert [i["produto"] for i in ana_identificada.carrinho] == ["Pizza Margherita"]
         assert "Seu pedido ficou assim" in resposta and "66 reais e 90 centavos" in resposta
 
     def test_tirar_mais_do_que_tem_pergunta_e_nao_mexe(self, ana_identificada, llama):
-        ana_identificada.responder("uma margherita e duas coca-colas")
-        ana_identificada.responder("tira cinco cocas")
+        ana_identificada.responder("uma margherita grande e duas coca-colas de 2 litros")
+        ana_identificada.responder("tira cinco cocas de 2 litros")
         assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == [
-            ("Pizza Margherita", 1), ("Coca-Cola 2 Litros", 2)]
+            ("Pizza Margherita", 1), ("Coca-Cola", 2)]
         assert llama.chamadas == []
 
     def test_tirar_o_que_nao_esta_no_pedido_avisa_sem_o_modelo(self, ana_identificada, llama):
         ana_identificada.responder("uma margherita")
         resposta = ana_identificada.responder("tira a coca")
-        assert resposta.startswith("Coca-Cola 2 Litros não está no seu pedido.")
+        assert resposta.startswith("Coca-Cola não está no seu pedido.")
         assert [i["produto"] for i in ana_identificada.carrinho] == ["Pizza Margherita"]
         assert llama.chamadas == []
 
     def test_aviso_de_item_fora_do_pedido_nao_prende_a_conversa(self, ana_identificada):
-        ana_identificada.responder("uma margherita no pix")
+        ana_identificada.responder("uma margherita grande no pix")
         ana_identificada.responder("tira a coca")
         assert "Seu pedido ficou assim" in ana_identificada.responder("é só isso")
 
@@ -1011,7 +1011,7 @@ class TestQuandoOModeloEChamado:
         assert llama.chamadas == []
 
     def test_endereco_novo_vai_no_resumo(self, ana_identificada):
-        ana_identificada.responder("uma margherita no pix")
+        ana_identificada.responder("uma margherita grande no pix")
         ana_identificada.responder("a entrega é na rua das flores, 10")
         assert "rua das flores, 10" in ana_identificada.responder("é só isso")
 
@@ -1020,7 +1020,7 @@ class TestQuandoOModeloEChamado:
         assert len(llama.chamadas) == 1
 
     def test_pergunta_pendente_nao_muda_a_quantidade_da_remocao(self, ana_identificada, llama):
-        ana_identificada.responder("uma margherita e duas coca-colas")
+        ana_identificada.responder("uma margherita grande e duas coca-colas de 2 litros")
         ana_identificada.responder("quero uma pizza")
         llama.entende([item("margherita")])
         ana_identificada.responder("tire as cocas")
@@ -1041,44 +1041,186 @@ class TestQuandoOModeloEChamado:
         assert "Cardápio:" in primeiro[:cardapio]
 
 
+def _itens(atendimento):
+    return [(i["produto"], i["quantidade"], i["tamanho"]) for i in atendimento.carrinho]
+
+
 class TestTamanhoDaPizza:
-    @pytest.mark.parametrize("fala", [
-        "pizza de calabresa grande.", "uma pizza grande de calabresa", "quero uma calabresa média",
-        "pizza de calabresa tamanho família", "uma pizza de calabresa de tamanho grande",
+    @pytest.mark.parametrize("fala, tamanho", [
+        ("pizza de calabresa grande.", "grande"), ("uma pizza grande de calabresa", "grande"),
+        ("quero uma calabresa média", "média"), ("uma pizza de calabresa de tamanho grande", "grande"),
+        ("uma calabresa pequena", "pequena"), ("uma calabresa broto", "pequena"),
+        ("uma pizza média de calabresa", "média"), ("uma calabresa tamanho médio", "média"),
     ])
-    def test_tamanho_nao_impede_o_pedido(self, ana_identificada, llama, fala):
+    def test_tamanho_dito_junto_ja_entra_no_pedido(self, ana_identificada, llama, fala, tamanho):
         resposta = ana_identificada.responder(fala)
-        assert resposta.startswith("Nossas pizzas têm tamanho único.")
-        assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == [("Pizza de Calabresa", 1)]
+        assert resposta == "Anotei 1 Pizza de Calabresa {}. Quer algo mais?".format(tamanho)
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, tamanho)]
         assert llama.chamadas == []
 
+    def test_preco_sai_do_tamanho(self, ana_identificada):
+        ana_identificada.responder("uma calabresa média e uma calabresa pequena")
+        assert [(i["tamanho"], i["preco"]) for i in ana_identificada.carrinho] == [
+            ("média", Decimal("49.90")), ("pequena", Decimal("39.90"))]
+
+    def test_sem_tamanho_o_atendente_pergunta(self, ana_identificada, llama):
+        resposta = ana_identificada.responder("uma calabresa")
+        assert resposta == "Anotei 1 Pizza de Calabresa. Qual o tamanho: pequena, média ou grande?"
+        assert llama.chamadas == []
+
+    @pytest.mark.parametrize("fala, tamanho", [
+        ("grande", "grande"), ("média", "média"), ("a pequena", "pequena"), ("pode ser grande", "grande"),
+        ("tamanho médio", "média"), ("a calabresa é grande", "grande"), ("uma calabresa grande", "grande"),
+    ])
+    def test_resposta_da_pergunta_do_tamanho(self, ana_identificada, llama, fala, tamanho):
+        ana_identificada.responder("uma calabresa")
+        assert ana_identificada.responder(fala) == "Certo, 1 Pizza de Calabresa {}. Quer algo mais?".format(tamanho)
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, tamanho)]
+        assert llama.chamadas == []
+
+    def test_repetir_o_sabor_nao_vira_outra_pizza(self, ana_identificada):
+        ana_identificada.responder("uma calabresa")
+        assert "tamanho" in ana_identificada.responder("a calabresa")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, None)]
+
+    def test_resposta_com_outro_produto_anota_os_dois(self, ana_identificada):
+        ana_identificada.responder("uma calabresa")
+        ana_identificada.responder("grande, e uma coca lata")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande"), ("Coca-Cola", 1, "Lata")]
+
+    def test_dois_sabores_sem_tamanho_pergunta_um_de_cada_vez(self, ana_identificada):
+        resposta = ana_identificada.responder("uma calabresa e uma margherita")
+        assert resposta.endswith("Qual o tamanho da Pizza de Calabresa: pequena, média ou grande?")
+        resposta = ana_identificada.responder("grande")
+        assert resposta == ("Certo, 1 Pizza de Calabresa grande. "
+                            "Qual o tamanho da Pizza Margherita: pequena, média ou grande?")
+        ana_identificada.responder("média")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande"), ("Pizza Margherita", 1, "média")]
+
+    def test_duas_iguais_com_tamanhos_diferentes(self, ana_identificada):
+        ana_identificada.responder("duas calabresas")
+        ana_identificada.responder("uma grande e uma média")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande"), ("Pizza de Calabresa", 1, "média")]
+
+    def test_tamanhos_que_nao_fecham_a_conta_perguntam_de_novo(self, ana_identificada):
+        ana_identificada.responder("uma calabresa")
+        assert "Quantas de cada tamanho" in ana_identificada.responder("grande e média")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, None)]
+
+    @pytest.mark.parametrize("fala", ["família", "gigante"])
+    def test_tamanho_que_nao_existe_avisa(self, ana_identificada, fala):
+        ana_identificada.responder("uma calabresa")
+        resposta = ana_identificada.responder(fala)
+        assert resposta == "Não temos esse tamanho. A Pizza de Calabresa pode ser pequena, média ou grande?"
+        assert "Certo, 1 Pizza de Calabresa grande" in ana_identificada.responder("grande")
+
+    def test_tamanho_familia_na_mesma_frase_tambem_avisa(self, ana_identificada):
+        resposta = ana_identificada.responder("pizza de calabresa tamanho família")
+        assert "Não temos esse tamanho" in resposta
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, None)]
+
+    def test_nao_fecha_sem_o_tamanho_e_le_o_resumo_depois(self, ana_identificada, db):
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        ana_identificada.responder("uma calabresa no pix")
+        resposta = ana_identificada.responder("é só isso")
+        assert resposta == "Antes de fechar, qual o tamanho da Pizza de Calabresa: pequena, média ou grande?"
+        assert ana_identificada.etapa == "identificado"
+        assert "Seu pedido ficou assim: 1 Pizza de Calabresa média" in ana_identificada.responder("média")
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes
+
+    def test_resumo_e_pedido_gravado_tem_o_tamanho(self, ana_identificada, db):
+        ana_identificada.responder("uma calabresa média no pix")
+        resumo = ana_identificada.responder("é só isso")
+        assert "1 Pizza de Calabresa média" in resumo
+        assert "49 reais e 90 centavos" in resumo
+        assert "confirmado" in ana_identificada.responder("sim")
+        pedido = (db.query(Pedido).filter(Pedido.cliente_id == ana_identificada.cliente_id)
+                  .order_by(Pedido.id.desc()).first())
+        assert [(i.produto.nome, i.tamanho.nome, i.preco_unitario) for i in pedido.itens] == [
+            ("Pizza de Calabresa", "média", Decimal("49.90"))]
+
+    def test_mais_uma_igual_herda_o_tamanho(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        ana_identificada.responder("mais uma calabresa")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 2, "grande")]
+
+    def test_tirar_so_a_grande(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande e uma calabresa média")
+        ana_identificada.responder("tira a calabresa grande")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "média")]
+
+    def test_mudar_o_tamanho_depois(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        assert "Ajustei para 1 Pizza de Calabresa média" in ana_identificada.responder("na verdade a calabresa é média")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "média")]
+
+    def test_troca_de_sabor_mantem_o_tamanho(self, ana_identificada):
+        ana_identificada.responder("uma calabresa média")
+        ana_identificada.responder("troque a calabresa por uma margherita")
+        assert _itens(ana_identificada) == [("Pizza Margherita", 1, "média")]
+
+    def test_troca_de_bebida_por_pizza_pergunta_o_tamanho(self, ana_identificada):
+        ana_identificada.responder("uma coca de 2 litros")
+        resposta = ana_identificada.responder("troque a coca por uma margherita")
+        assert "Qual o tamanho da Pizza Margherita" in resposta
+        assert _itens(ana_identificada) == [("Pizza Margherita", 1, None)]
+
+    def test_agua_e_suco_tem_tamanho_unico(self, ana_identificada):
+        assert ana_identificada.responder("um suco de laranja") == "Anotei 1 Suco de Laranja 1 Litro. Quer algo mais?"
+        assert _itens(ana_identificada) == [("Suco de Laranja 1 Litro", 1, None)]
+
     def test_quantidade_e_mantida(self, ana_identificada):
-        ana_identificada.responder("duas pizzas grandes de calabresa e uma coca-cola")
-        ana_identificada.responder("duas pizzas de calabresa grande")
-        assert ("Pizza de Calabresa", 2) in [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho]
+        ana_identificada.responder("duas pizzas grandes de calabresa e uma coca-cola de 2 litros")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 2, "grande"), ("Coca-Cola", 1, "2 Litros")]
 
     def test_sabor_vago_com_tamanho_ainda_pergunta_o_sabor(self, ana_identificada):
         resposta = ana_identificada.responder("quero uma pizza grande")
-        assert "tamanho único" in resposta
         assert "sabor" in resposta
         assert ana_identificada.carrinho == []
 
     @pytest.mark.parametrize("fala", ["quais tamanhos vocês têm?", "tem pizza grande?", "qual o tamanho da pizza?"])
-    def test_pergunta_sobre_tamanho_nao_chama_o_modelo(self, ana_identificada, llama, fala):
-        assert ana_identificada.responder(fala) == "Nossas pizzas têm tamanho único."
+    def test_pergunta_sobre_tamanho_responde_com_o_banco(self, ana_identificada, llama, fala):
+        assert ana_identificada.responder(fala) == (
+            "As pizzas podem ser pequena, com 4 fatias, média, com 6 fatias e grande, com 8 fatias. "
+            "Os refrigerantes vêm em lata, 600 ml ou 2 litros.")
         assert llama.chamadas == []
 
+    def test_pergunta_de_tamanho_no_meio_repete_a_pergunta_pendente(self, ana_identificada):
+        ana_identificada.responder("uma calabresa")
+        resposta = ana_identificada.responder("quais tamanhos vocês têm?")
+        assert resposta.endswith("Qual o tamanho: pequena, média ou grande?")
+
     def test_so_o_tamanho_pede_o_produto(self, ana_identificada):
-        assert "produto e a quantidade" in ana_identificada.responder("grande")
+        assert "produto" in ana_identificada.responder("grande")
+        assert ana_identificada.carrinho == []
 
     def test_rua_com_nome_de_tamanho_continua_igual(self, ana_identificada):
         ana_identificada.responder("a entrega é na Rua Grande, 10")
         assert ana_identificada.endereco_entrega == "Rua Grande, 10"
 
-    def test_preco_com_tamanho_responde_o_preco(self, ana_identificada, llama):
-        resposta = ana_identificada.responder("quanto custa a pizza de calabresa grande?")
-        assert "64 reais e 90 centavos" in resposta
+    def test_preco_com_tamanho_responde_o_preco_dele(self, ana_identificada, llama):
+        assert "64 reais e 90 centavos" in ana_identificada.responder("quanto custa a pizza de calabresa grande?")
+        assert ana_identificada.responder("quanto custa a calabresa média?") == (
+            "A Pizza de Calabresa média custa 49 reais e 90 centavos.")
         assert llama.chamadas == []
+
+    def test_preco_sem_tamanho_fala_os_tres(self, ana_identificada):
+        assert ana_identificada.responder("quanto custa a calabresa?") == (
+            "A Pizza de Calabresa custa 64 reais e 90 centavos a grande, 49 reais e 90 centavos a média "
+            "e 39 reais e 90 centavos a pequena.")
+
+    def test_preco_do_refrigerante_por_tamanho(self, ana_identificada):
+        assert ana_identificada.responder("quanto custa a coca?") == (
+            "A Coca-Cola custa 14 reais e 90 centavos a 2 litros, 8 reais a 600 ml e 6 reais a lata.")
+        assert ana_identificada.responder("quanto custa a coca lata?") == "A Coca-Cola Lata custa 6 reais."
+
+    def test_preco_de_agua_continua_um_so(self, ana_identificada):
+        assert ana_identificada.responder("quanto custa a água mineral?") == "A Água Mineral 500ml custa 5 reais."
+
+    def test_modelo_recebe_os_tamanhos_no_prompt(self, ana_identificada, llama):
+        ana_identificada.responder("a entrega é no meu trabalho")
+        prompt = llama.chamadas[0][0]["content"]
+        assert "Tamanhos de pizza: pequena (4 fatias" in prompt
 
 
 class TestErrosDeTranscricaoNosNomes:
@@ -1145,15 +1287,15 @@ class TestMargemDeErroNaFala:
 
     @pytest.mark.parametrize("fala, produto", [
         ("pizza de mozarela", "Pizza de Mussarela"), ("pizza de muzzarela", "Pizza de Mussarela"),
-        ("coca 2 litros", "Coca-Cola 2 Litros"),
+        ("coca 2 litros", "Coca-Cola"),
     ])
     def test_grafias_e_volume(self, ana_identificada, fala, produto):
         ana_identificada.responder(fala)
         assert [i["produto"] for i in ana_identificada.carrinho] == [produto]
 
     def test_com_uma_coca_sao_dois_itens(self, ana_identificada):
-        ana_identificada.responder("uma calabresa com uma coca")
-        assert [i["produto"] for i in ana_identificada.carrinho] == ["Pizza de Calabresa", "Coca-Cola 2 Litros"]
+        ana_identificada.responder("uma calabresa com uma coca de 2 litros")
+        assert [i["produto"] for i in ana_identificada.carrinho] == ["Pizza de Calabresa", "Coca-Cola"]
 
     def test_sem_cebola_continua_observacao(self, ana_identificada):
         ana_identificada.responder("uma calabresa sem cebola")
@@ -1162,7 +1304,7 @@ class TestMargemDeErroNaFala:
 
     @pytest.mark.parametrize("fala", ["no pics", "no piques", "pics"])
     def test_pix_mal_transcrito(self, ana_identificada, fala):
-        ana_identificada.responder("uma calabresa")
+        ana_identificada.responder("uma calabresa grande")
         ana_identificada.responder(fala)
         assert ana_identificada.pagamento == "pix"
 
@@ -1171,7 +1313,7 @@ class TestMargemDeErroNaFala:
         "não quero mais nada", "só isso, obrigado", "era isso", "por enquanto é só", "tá bom assim", "é só",
     ])
     def test_jeitos_de_fechar(self, ana_identificada, llama, fala):
-        ana_identificada.responder("uma calabresa no pix")
+        ana_identificada.responder("uma calabresa grande no pix")
         assert "Seu pedido ficou assim" in ana_identificada.responder(fala)
         assert ana_identificada.etapa == "confirmando_pedido"
         assert llama.chamadas == []
@@ -1183,7 +1325,7 @@ class TestMargemDeErroNaFala:
     ])
     def test_jeitos_de_confirmar(self, ana_identificada, db, fala):
         antes = _pedidos_da(db, ana_identificada.cliente_id)
-        ana_identificada.responder("uma calabresa no pix")
+        ana_identificada.responder("uma calabresa grande no pix")
         ana_identificada.responder("é só isso")
         assert "confirmado" in ana_identificada.responder(fala)
         assert _pedidos_da(db, ana_identificada.cliente_id) == antes + 1
@@ -1191,7 +1333,7 @@ class TestMargemDeErroNaFala:
     @pytest.mark.parametrize("fala", ["sim?", "não", "sim, mas tira a calabresa", "pode ser que sim?", "espera", "calma aí"])
     def test_nao_confirma_com_duvida_ou_ressalva(self, ana_identificada, llama, db, fala):
         antes = _pedidos_da(db, ana_identificada.cliente_id)
-        ana_identificada.responder("uma calabresa no pix")
+        ana_identificada.responder("uma calabresa grande no pix")
         ana_identificada.responder("é só isso")
         ana_identificada.responder(fala)
         assert _pedidos_da(db, ana_identificada.cliente_id) == antes
@@ -1204,8 +1346,10 @@ class TestMargemDeErroNaFala:
 class TestDicaParaOWhisper:
     def test_com_o_cliente_identificado_a_dica_traz_o_cardapio(self, ana_identificada):
         dica = ana_identificada.dica_de_transcricao()
-        assert "Coca-Cola 2 Litros" in dica
-        assert "Pizza de Calabresa" in dica
+        assert "Coca-Cola" in dica and "Lata, 600 ml ou 2 litros" in dica
+        # "Pizza de" em todo sabor estourava o limite de dica do whisper
+        assert "Calabresa" in dica and "Pizza de Calabresa" not in dica
+        assert "Pequena, média ou grande" in dica
 
     def test_produto_desativado_fica_fora(self, ana_identificada):
         assert "Escarola" not in ana_identificada.dica_de_transcricao()
@@ -1260,30 +1404,30 @@ class TestNumeroNoNomeDoProduto:
 
 class TestQuerAlgoMais:
     def test_depois_de_anotar_pergunta_se_quer_mais(self, ana_identificada):
-        assert ana_identificada.responder("uma coca") == "Anotei 1 Coca-Cola 2 Litros. Quer algo mais?"
+        assert ana_identificada.responder("uma coca de 2 litros") == "Anotei 1 Coca-Cola 2 Litros. Quer algo mais?"
 
     @pytest.mark.parametrize("fala", ["não", "não, obrigado", "não quero", "agora não"])
     def test_nao_fecha_o_pedido(self, ana_identificada, fala):
-        ana_identificada.responder("uma calabresa no pix")
+        ana_identificada.responder("uma calabresa grande no pix")
         assert "Seu pedido ficou assim" in ana_identificada.responder(fala)
 
     def test_sim_pergunta_o_que_mais(self, ana_identificada):
-        ana_identificada.responder("uma calabresa")
+        ana_identificada.responder("uma calabresa grande")
         assert ana_identificada.responder("sim") == "Claro! O que mais vai querer?"
         assert len(ana_identificada.carrinho) == 1
 
     def test_pagamento_e_confirmado_na_fala(self, ana_identificada):
-        ana_identificada.responder("uma calabresa")
+        ana_identificada.responder("uma calabresa grande")
         assert ana_identificada.responder("vou pagar no pix") == "Certo, pagamento no Pix. Quer algo mais?"
 
     def test_depois_do_pagamento_vai_direto_para_o_resumo(self, ana_identificada):
-        ana_identificada.responder("uma calabresa")
+        ana_identificada.responder("uma calabresa grande")
         assert "Como você vai pagar" in ana_identificada.responder("não")
         assert "Seu pedido ficou assim" in ana_identificada.responder("no pix")
         assert ana_identificada.etapa == "confirmando_pedido"
 
     def test_nao_com_pergunta_pendente_nao_fecha(self, ana_identificada):
-        ana_identificada.responder("uma calabresa no pix")
+        ana_identificada.responder("uma calabresa grande no pix")
         ana_identificada.responder("quero uma pizza")
         ana_identificada.responder("não")
         assert ana_identificada.etapa == "identificado"
@@ -1313,10 +1457,10 @@ class TestConversaNatural:
 
     def test_cardapio_completo_continua_listando_tudo(self, ana_identificada):
         resposta = ana_identificada.responder("me fala o cardápio completo")
-        assert "Coca-Cola 2 Litros: 14 reais e 90 centavos" in resposta
+        assert "Coca-Cola: 14 reais e 90 centavos" in resposta
 
     @pytest.mark.parametrize("fala, esperado, fora", [
-        ("quais bebidas vocês têm?", "Coca-Cola 2 Litros", "Pizza"),
+        ("quais bebidas vocês têm?", "Coca-Cola", "Pizza"),
         ("quais são as sobremesas?", "Pudim de Leite", "Coca"),
         ("quais pizzas doces tem?", "Pizza de Brigadeiro", "Pizza Margherita"),
     ])
@@ -1330,15 +1474,15 @@ class TestConversaNatural:
 
     @pytest.mark.parametrize("fala, inicio", [
         ("quanto custa a margherita?", "A Pizza Margherita custa"),
-        ("quanto custa o guaraná?", "O Guaraná 2 Litros custa"),
-        ("quanto custa a coca?", "A Coca-Cola 2 Litros custa"),
+        ("quanto custa o guaraná?", "O Guaraná custa"),
+        ("quanto custa a coca?", "A Coca-Cola custa"),
         ("quanto custa o pudim?", "O Pudim de Leite custa"),
     ])
     def test_preco_usa_o_artigo_certo(self, ana_identificada, fala, inicio):
         assert ana_identificada.responder(fala).startswith(inicio)
 
     def test_fim_do_pedido(self, ana_identificada):
-        ana_identificada.responder("uma calabresa no pix")
+        ana_identificada.responder("uma calabresa grande no pix")
         ana_identificada.responder("é só isso")
         fala = ana_identificada.responder("sim")
         assert fala.endswith("confirmado! Obrigado, Ana, e bom apetite!")
@@ -1361,18 +1505,18 @@ class TestNuncaFicaPreso:
 
     def test_item_com_fim_na_mesma_frase_ainda_anota(self, ana_identificada):
         ana_identificada.responder("um pudim de leite no pix")
-        resposta = ana_identificada.responder("uma coca e só isso")
+        resposta = ana_identificada.responder("uma coca de 2 litros e só isso")
         assert "Seu pedido ficou assim" in resposta
         assert "Coca-Cola" in resposta
 
     def test_produto_que_nao_existe_nao_prende_as_proximas_falas(self, ana_identificada):
-        ana_identificada.responder("uma calabresa")
+        ana_identificada.responder("uma calabresa grande")
         assert "Não temos" in ana_identificada.responder("uma pizza de sushi")
-        assert "Anotei 1 Coca-Cola" in ana_identificada.responder("uma coca")
+        assert "Anotei 1 Coca-Cola" in ana_identificada.responder("uma coca de 2 litros")
         assert "pagamento no Pix" in ana_identificada.responder("no pix")
 
     def test_nao_depois_de_produto_inexistente_segue_a_conversa(self, ana_identificada):
-        ana_identificada.responder("uma calabresa")
+        ana_identificada.responder("uma calabresa grande")
         ana_identificada.responder("uma pizza de sushi")
         assert ana_identificada.responder("não") == "Tudo bem. Quer algo mais?"
         assert "Como você vai pagar" in ana_identificada.responder("não")
@@ -1382,7 +1526,7 @@ class TestNuncaFicaPreso:
         assert "isso aqui" not in resposta
 
     def test_desistir_do_sabor_nao_trava(self, ana_identificada):
-        ana_identificada.responder("uma calabresa no pix")
+        ana_identificada.responder("uma calabresa grande no pix")
         ana_identificada.responder("quero uma pizza")
         assert "Seu pedido ficou assim" in ana_identificada.responder("não quero mais nada")
         assert [i["produto"] for i in ana_identificada.carrinho] == ["Pizza de Calabresa"]
@@ -1460,8 +1604,8 @@ class TestConfirmacaoComErroDoWhisper:
 
     def test_acrescentar_item_no_resumo_continua_funcionando(self, ana_identificada):
         self._no_resumo(ana_identificada)
-        ana_identificada.responder("uma coca")
-        assert "Coca-Cola 2 Litros" in [i["produto"] for i in ana_identificada.carrinho]
+        ana_identificada.responder("uma coca de 2 litros")
+        assert "Coca-Cola" in [i["produto"] for i in ana_identificada.carrinho]
 
     def test_nao_continua_voltando_para_o_pedido(self, ana_identificada):
         self._no_resumo(ana_identificada)
@@ -1482,13 +1626,13 @@ class TestPagamentoJuntoDoItem:
     def test_item_e_pagamento_na_mesma_frase(self, ana_identificada, llama, fala, pagamento):
         ana_identificada.responder(fala)
         item_anotado = ana_identificada.carrinho[0]
-        assert (item_anotado["produto"], item_anotado["quantidade"]) == ("Coca-Cola 2 Litros", 1)
+        assert (item_anotado["produto"], item_anotado["quantidade"]) == ("Coca-Cola", 1)
         assert item_anotado["observacao"] is None
         assert ana_identificada.pagamento == pagamento
         assert llama.chamadas == []
 
     def test_cartao_sem_dizer_qual_pergunta(self, ana_identificada):
-        assert "Crédito ou débito" in ana_identificada.responder("uma coca no cartão")
+        assert "Crédito ou débito" in ana_identificada.responder("uma coca de 2 litros no cartão")
         assert len(ana_identificada.carrinho) == 1
 
     def test_observacao_continua_com_o_pagamento_junto(self, ana_identificada):
@@ -1499,7 +1643,7 @@ class TestPagamentoJuntoDoItem:
 
 class TestMudarEndereco:
     def _no_resumo(self, atendimento):
-        atendimento.responder("uma coca no pix")
+        atendimento.responder("uma coca de 2 litros no pix")
         atendimento.responder("é só isso")
         assert atendimento.etapa == "confirmando_pedido"
 
@@ -1534,15 +1678,15 @@ class TestMudarEndereco:
         assert pedido.cliente.endereco != "rua das flores, 10"
 
     def test_antes_de_fechar_continua_pedindo_mais(self, ana_identificada):
-        ana_identificada.responder("uma coca")
+        ana_identificada.responder("uma coca de 2 litros")
         ana_identificada.responder("quero mudar o endereço")
         assert ana_identificada.responder("rua das flores, 10").endswith("Quer algo mais?")
 
     def test_frase_com_a_rua_muda_direto(self, ana_identificada):
-        ana_identificada.responder("uma coca")
+        ana_identificada.responder("uma coca de 2 litros")
         ana_identificada.responder("troca o endereço para a rua das flores, 10")
         assert ana_identificada.endereco_entrega == "rua das flores, 10"
-        assert [i["produto"] for i in ana_identificada.carrinho] == ["Coca-Cola 2 Litros"]
+        assert [i["produto"] for i in ana_identificada.carrinho] == ["Coca-Cola"]
 
     def test_desistir_mantem_o_endereco(self, ana_identificada):
         self._no_resumo(ana_identificada)
@@ -1588,9 +1732,120 @@ class TestCpfNaLegenda:
 
 class TestAcentosDoCardapio:
     @pytest.mark.parametrize("fala, produto", [
-        ("um guaraná", "Guaraná 2 Litros"), ("um guarana", "Guaraná 2 Litros"), ("uma água", "Água Mineral 500ml"),
-        ("uma agua", "Água Mineral 500ml"), ("um mousse de maracujá", "Mousse de Maracujá"),
+        ("um guaraná", "Guaraná"), ("um guarana", "Guaraná"),
+        ("uma água mineral", "Água Mineral 500ml"), ("uma agua mineral", "Água Mineral 500ml"),
+        ("uma água com gás", "Água com Gás 500ml"), ("uma agua com gas", "Água com Gás 500ml"),
+        ("um mousse de maracujá", "Mousse de Maracujá"),
     ])
     def test_com_e_sem_acento_acham_o_produto(self, ana_identificada, fala, produto):
         ana_identificada.responder(fala)
         assert [i["produto"] for i in ana_identificada.carrinho] == [produto]
+
+    def test_so_agua_pergunta_com_ou_sem_gas(self, ana_identificada):
+        resposta = ana_identificada.responder("uma água")
+        assert "Água com Gás 500ml" in resposta and "Água Mineral 500ml" in resposta
+        assert ana_identificada.carrinho == []
+
+
+class TestRespostaDaAmbiguidade:
+    @pytest.mark.parametrize("resposta, produto", [
+        ("com gás", "Água com Gás 500ml"), ("sem gás", "Água Mineral 500ml"), ("a mineral", "Água Mineral 500ml"),
+        ("a com gás", "Água com Gás 500ml"),
+    ])
+    def test_agua_com_ou_sem_gas(self, ana_identificada, llama, resposta, produto):
+        ana_identificada.responder("duas águas")
+        assert ana_identificada.responder(resposta) == "Anotei 2 {}. Quer algo mais?".format(produto)
+        assert [(i["produto"], i["quantidade"]) for i in ana_identificada.carrinho] == [(produto, 2)]
+        assert llama.chamadas == []
+
+    def test_borda_pelo_recheio(self, ana_identificada):
+        ana_identificada.responder("quero borda")
+        assert ana_identificada.responder("catupiry") == "Anotei 1 Borda de Catupiry. Quer algo mais?"
+
+    def test_resposta_que_serve_pras_duas_nao_escolhe(self, ana_identificada):
+        ana_identificada.responder("uma água")
+        ana_identificada.responder("500ml")
+        assert ana_identificada.carrinho == []
+
+
+class TestTamanhoDoRefrigerante:
+    @pytest.mark.parametrize("fala, tamanho", [
+        ("uma coca lata", "Lata"), ("uma coca de lata", "Lata"), ("uma coca latinha", "Lata"),
+        ("uma coca em lata", "Lata"), ("uma coca 600", "600 ml"), ("uma coca de 600 ml", "600 ml"),
+        ("uma coca 600ml", "600 ml"), ("uma coca de seiscentos", "600 ml"), ("uma coca de 2 litros", "2 Litros"),
+        ("uma coca de dois litros", "2 Litros"),
+    ])
+    def test_tamanho_dito_junto(self, ana_identificada, llama, fala, tamanho):
+        assert ana_identificada.responder(fala) == "Anotei 1 Coca-Cola {}. Quer algo mais?".format(tamanho)
+        assert _itens(ana_identificada) == [("Coca-Cola", 1, tamanho)]
+        assert llama.chamadas == []
+
+    def test_sem_tamanho_pergunta_as_opcoes_de_refrigerante(self, ana_identificada):
+        assert ana_identificada.responder("um guaraná") == (
+            "Anotei 1 Guaraná. Qual o tamanho: lata, 600 ml ou 2 litros?")
+        assert ana_identificada.responder("lata") == "Certo, 1 Guaraná Lata. Quer algo mais?"
+
+    def test_pergunta_usa_o_artigo_do_produto(self, ana_identificada):
+        resposta = ana_identificada.responder("uma calabresa grande e um guaraná e uma coca")
+        assert resposta.endswith("Qual o tamanho do Guaraná: lata, 600 ml ou 2 litros?")
+        assert ana_identificada.responder("600").endswith("Qual o tamanho da Coca-Cola: lata, 600 ml ou 2 litros?")
+
+    def test_preco_sai_do_tamanho(self, ana_identificada):
+        ana_identificada.responder("duas cocas lata e uma coca de 600")
+        assert [(i["tamanho"], i["quantidade"], i["preco"]) for i in ana_identificada.carrinho] == [
+            ("Lata", 2, Decimal("6.00")), ("600 ml", 1, Decimal("8.00"))]
+
+    def test_tamanho_de_pizza_nao_serve_pra_refrigerante(self, ana_identificada):
+        ana_identificada.responder("uma coca")
+        assert ana_identificada.responder("grande") == (
+            "Não temos esse tamanho. A Coca-Cola pode ser lata, 600 ml ou 2 litros?")
+        assert _itens(ana_identificada) == [("Coca-Cola", 1, None)]
+
+    def test_lata_nao_serve_pra_pizza(self, ana_identificada):
+        ana_identificada.responder("uma calabresa")
+        assert "Não temos esse tamanho" in ana_identificada.responder("lata")
+
+    def test_duas_latas_e_uma_de_dois_litros(self, ana_identificada):
+        ana_identificada.responder("três cocas")
+        ana_identificada.responder("duas latas e uma de 2 litros")
+        assert _itens(ana_identificada) == [("Coca-Cola", 2, "Lata"), ("Coca-Cola", 1, "2 Litros")]
+
+    def test_resumo_e_pedido_gravado_tem_o_tamanho(self, ana_identificada, db):
+        ana_identificada.responder("uma calabresa grande e duas cocas lata no pix")
+        resumo = ana_identificada.responder("é só isso")
+        assert "1 Pizza de Calabresa grande e 2 Coca-Cola Lata" in resumo
+        assert "76 reais e 90 centavos" in resumo
+        assert "confirmado" in ana_identificada.responder("sim")
+        pedido = (db.query(Pedido).filter(Pedido.cliente_id == ana_identificada.cliente_id)
+                  .order_by(Pedido.id.desc()).first())
+        assert sorted((i.produto.nome, i.tamanho.nome, i.preco_unitario) for i in pedido.itens) == [
+            ("Coca-Cola", "Lata", Decimal("6.00")), ("Pizza de Calabresa", "grande", Decimal("64.90"))]
+
+    def test_troca_de_refrigerante_mantem_o_tamanho(self, ana_identificada):
+        ana_identificada.responder("uma coca lata")
+        ana_identificada.responder("troque a coca por um guaraná")
+        assert _itens(ana_identificada) == [("Guaraná", 1, "Lata")]
+
+    def test_tirar_so_a_lata(self, ana_identificada):
+        ana_identificada.responder("uma coca lata e uma coca de 2 litros")
+        ana_identificada.responder("tira a coca lata")
+        assert _itens(ana_identificada) == [("Coca-Cola", 1, "2 Litros")]
+
+    def test_quantidade_nao_vira_o_volume(self, ana_identificada):
+        # "duas cocas de 2 litros": o 2 dos litros nao eh a quantidade
+        ana_identificada.responder("três cocas de 2 litros")
+        assert _itens(ana_identificada) == [("Coca-Cola", 3, "2 Litros")]
+
+
+class TestTamanhoJuntoDoFechamento:
+    def test_tamanho_pagamento_e_fim_na_mesma_fala(self, ana_identificada, llama):
+        ana_identificada.responder("uma calabresa média e uma coca")
+        resposta = ana_identificada.responder("lata, no pix, é só isso")
+        assert resposta.startswith("Seu pedido ficou assim: 1 Pizza de Calabresa média e 1 Coca-Cola Lata.")
+        assert "55 reais e 90 centavos" in resposta
+        assert ana_identificada.etapa == "confirmando_pedido"
+        assert llama.chamadas == []
+
+    def test_tamanho_de_pizza_e_fim_na_mesma_fala(self, ana_identificada):
+        ana_identificada.responder("uma calabresa no pix")
+        assert "Seu pedido ficou assim: 1 Pizza de Calabresa grande" in ana_identificada.responder("grande, é só isso")

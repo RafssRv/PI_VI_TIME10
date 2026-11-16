@@ -48,6 +48,20 @@ AINDA_NAO_ACABOU = re.compile(r"\bn[aã]o\s+(?:[eé]\s+)?s[oó]\b", re.IGNORECAS
 FIM_DO_PEDIDO = re.compile(r"\b(?:mais nada|nada mais|so isso|quero pagar|pode cobrar|"
                            r"fecha(?:r)? a conta|quero fechar|quero encerrar)\b")
 REMOVER = re.compile(r"\b(?:tire|tira|tirar|retire|retira|retirar|remova|remover|exclua|nao quero)\b")
+# Tamanho dito na fala: de pizza ("grande") ou de refrigerante ("lata", "de 600", "2 litros").
+# "Em média" não é tamanho, e o endereço ("Rua Grande") nem é olhado.
+TAMANHO_FALADO = re.compile(
+    r"(?<!em )\b(?:(?:(?:de|do|no|na)\s+)?tamanho\s+)?"
+    r"(pequen[ao]s?|brotos?|m[eé]di[ao]s?|grandes?|gigantes?|fam[ií]lia)\b"
+    r"|\b(?:(?:de|da|na|em)\s+)?(latas?|latinhas?|(?:600|seiscentos)(?:\s*ml|\s+mililitros)?|(?:2|dois)\s+litros?)\b",
+    re.IGNORECASE)
+# Cada tamanho só vale para os produtos do grupo dele: pizza não vem em lata.
+GRUPO_DO_TAMANHO = {"pequena": "pizza", "média": "pizza", "grande": "pizza",
+                    "Lata": "refrigerante", "600 ml": "refrigerante", "2 Litros": "refrigerante"}
+ENDERECO_NA_FALA = re.compile(r"\b(?:rua|avenida|av|travessa|alameda|estrada|rodovia)\b", re.IGNORECASE)
+# Gigante e família não existem no cardápio: o atendente avisa e pergunta de novo.
+TAMANHO_INDISPONIVEL = "indisponivel"
+PEDE_MAIS_UM = re.compile(r"\b(?:mais|outra|outro|outras|outros|adicione|acrescente|quero|queria)\b")
 CORRIGIR = re.compile(r"\b(?:na verdade|so|apenas|corrija|corrigir|altere|alterar|deixe|mude)\b")
 
 
@@ -101,6 +115,148 @@ def acao_do_trecho(texto, anterior="adicionar"):
 def _numero_do_nome(texto):
     # O Whisper escreve "Pizza 4 Queijos": esse 4 faz parte do nome, não é a quantidade.
     return re.sub(r"\b4\s+queijos?\b", "quatro queijos", texto, flags=re.IGNORECASE)
+
+
+def grupo_do_produto(produto):
+    """Qual tabela de tamanhos vale: "pizza", "refrigerante" ou None (tamanho único)."""
+    grupo = getattr(produto, "grupo_tamanho", None)
+    if grupo:
+        return grupo
+    return "pizza" if _normalizar(getattr(produto, "categoria", "") or "").startswith("pizza") else None
+
+
+def eh_pizza(produto):
+    return grupo_do_produto(produto) == "pizza"
+
+
+def tamanho_canonico(palavra):
+    palavra = _normalizar(palavra)
+    if palavra.startswith(("pequen", "broto")):
+        return "pequena"
+    if palavra.startswith("medi"):
+        return "média"
+    if palavra.startswith("grande"):
+        return "grande"
+    if palavra.startswith(("lata", "latinha")):
+        return "Lata"
+    if palavra.startswith(("600", "seiscentos")):
+        return "600 ml"
+    if palavra.startswith(("2 litro", "dois litro")):
+        return "2 Litros"
+    return TAMANHO_INDISPONIVEL
+
+
+def serve_para(tamanho, produto):
+    """Tamanho "família" serve pra avisar qualquer produto com tamanho; o resto só o do grupo."""
+    grupo = grupo_do_produto(produto)
+    return bool(grupo) and (tamanho == TAMANHO_INDISPONIVEL or GRUPO_DO_TAMANHO.get(tamanho) == grupo)
+
+
+def separar_tamanhos(texto):
+    """
+    Tira o tamanho da fala para os nomes do cardápio continuarem inteiros ("pizza grande de
+    calabresa" vira "pizza de calabresa"). Devolve o texto limpo e [(posição, tamanho)], onde
+    posição é o índice da palavra seguinte no texto limpo, já normalizado.
+    """
+    texto = texto or ""
+    endereco = ENDERECO_NA_FALA.search(texto)
+    corte = endereco.start() if endereco else len(texto)
+    partes, achados, ultimo = [], [], 0
+    for achado in TAMANHO_FALADO.finditer(texto, 0, corte):
+        partes.append(texto[ultimo:achado.start()])
+        posicao = len(_normalizar(_numero_do_nome("".join(partes))).split())
+        achados.append((posicao, tamanho_canonico(achado.group(1) or achado.group(2))))
+        ultimo = achado.end()
+    if not achados:
+        return texto, []
+    partes.append(texto[ultimo:])
+    limpo = re.sub(r"\s+([.,!?])", r"\1", re.sub(r"\s+", " ", "".join(partes))).strip()
+    return limpo, achados
+
+
+def _donos_dos_tamanhos(tamanhos, achados, palavras):
+    """
+    Cada tamanho vale para a pizza onde foi dito: colado no nome ("calabresa grande"), no meio
+    dele ("pizza grande de calabresa"), logo antes ("uma grande de calabresa") ou depois de um
+    verbo de ligação ("a calabresa é média"). Tamanho colado em outro produto ("coca grande") ou
+    sem produto nenhum ("grande") fica solto.
+    """
+    ligacao = {"e", "eh", "fica", "ficam", "seja", "sejam", "sera", "vai", "ser", "a", "o", "as", "os",
+               "ela", "elas", "essa", "esse", "pizza", "pizzas"}
+    donos, soltos, errados = {}, [], {}
+    for posicao, tamanho in tamanhos:
+        dono = None
+        colado = next((i for i, (inicio, fim, _) in enumerate(achados) if inicio <= posicao <= fim), None)
+        if colado is None:
+            dono = next((i for i, (inicio, _, _) in enumerate(achados) if inicio >= posicao), None)
+            anteriores = [i for i, (_, fim, _) in enumerate(achados) if fim <= posicao]
+            if dono is None and anteriores and set(palavras[achados[anteriores[-1]][1]:posicao]) <= ligacao:
+                dono = anteriores[-1]
+        else:
+            dono = colado
+        if dono is not None:
+            candidatos = achados[dono][2]
+            no_nome = f" {_normalizar(tamanho).replace('litros', 'litro')} " in f" {_normalizar(candidatos[0].nome).replace('litros', 'litro')} "
+            if (len(candidatos) == 1 and not serve_para(tamanho, candidatos[0]) and not no_nome
+                    and GRUPO_DO_TAMANHO.get(tamanho) == "refrigerante"):
+                # "agua de 2 litros", "suco 600": esse volume nao existe no cardapio pra esse produto
+                errados[dono] = tamanho
+            if len(candidatos) != 1 or not serve_para(tamanho, candidatos[0]):
+                dono = None
+        if dono is None:
+            soltos.append((posicao, tamanho))
+        else:
+            donos.setdefault(dono, []).append(tamanho)
+    return donos, soltos, errados
+
+
+def _juntar_iguais(itens):
+    """Duas linhas do mesmo produto, tamanho e observação viram uma, somando as quantidades."""
+    juntos = []
+    for item in itens:
+        igual = next((i for i in juntos if i["produto"] == item["produto"]
+                      and i.get("observacao") == item.get("observacao")
+                      and i.get("tamanho") == item.get("tamanho")), None)
+        if igual:
+            igual["quantidade"] += item["quantidade"]
+        else:
+            juntos.append(item)
+    itens[:] = juntos
+
+
+def _responder_tamanho(novo, pendente, soltos, palavras, texto, produtos):
+    """
+    Resposta a "qual o tamanho?". Devolve (dúvida que continua, evidências). Com dois tamanhos
+    para a mesma linha ("uma grande e uma média"), só separa quando as quantidades fecham.
+    """
+    alvos = [i for i in novo if i["produto"] == pendente.get("produto") and not i.get("tamanho")]
+    if not alvos:
+        return None, []
+    produto = next((p for p in produtos if p.nome == pendente.get("produto")), None)
+    distintos = list(dict.fromkeys(t for _, t in soltos))
+    # "grande" para a coca não é tamanho de refrigerante: avisa e pergunta de novo
+    if TAMANHO_INDISPONIVEL in distintos or (produto and not all(serve_para(t, produto) for t in distintos)):
+        return {"campo": "tamanho", "produto": pendente["produto"], "indisponivel": True}, []
+    if len(distintos) == 1:
+        for alvo in alvos:
+            alvo["tamanho"] = distintos[0]
+        _juntar_iguais(novo)
+        return None, [{"acao": "tamanho", "produto": pendente["produto"], "tamanho": distintos[0],
+                       "quantidade": sum(a["quantidade"] for a in alvos), "observacao": alvos[0]["observacao"],
+                       "trecho": texto}]
+    pares = []
+    for posicao, tamanho in soltos:
+        anterior = palavras[posicao - 1] if posicao > 0 else ""
+        pares.append((quantidade(anterior) if re.fullmatch(NUMERO, anterior) else None, tamanho))
+    if (len(alvos) == 1 and all(q for q, _ in pares) and len(distintos) == len(pares)
+            and sum(q for q, _ in pares) == alvos[0]["quantidade"]):
+        base = alvos[0]
+        posicao = novo.index(base)
+        novo[posicao:posicao + 1] = [{**base, "quantidade": q, "tamanho": t} for q, t in pares]
+        _juntar_iguais(novo)
+        return None, [{"acao": "tamanho", "produto": base["produto"], "tamanho": t, "quantidade": q,
+                       "observacao": base["observacao"], "trecho": texto} for q, t in pares]
+    return {"campo": "tamanho", "produto": pendente["produto"], "misto": True}, []
 
 
 def mencoes(texto, produtos):
@@ -157,6 +313,7 @@ def cardapio_completo(texto):
 def interpretar(texto, produtos, atual, pendente=None, referencia=None):
     """Retorna (rascunho, pendência de campo, evidências) sem efeitos externos."""
     texto = _numero_do_nome(texto)
+    texto, tamanhos = separar_tamanhos(texto)
     normal = _normalizar(texto)
     # "Não temos X" é aviso, não pergunta aberta: não pode prender as falas seguintes.
     if pendente and (pendente.get("nao_encontrado") or pendente.get("campo") == "fora_do_pedido"):
@@ -207,6 +364,18 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
             continue  # Nome usado como ingrediente/observação do produto anterior.
         filtrados.append(achado)
     achados = filtrados
+    donos, soltos, errados = _donos_dos_tamanhos(tamanhos, achados, palavras)
+    # guardada antes da resposta: "a calabresa é grande" responde e não pode virar mais uma calabresa
+    pergunta_de_tamanho = pendente if pendente and pendente.get("campo") == "tamanho" else None
+    respondeu_tamanho = False
+    if pendente and pendente.get("campo") == "tamanho" and soltos:
+        # "grande" responde a "qual o tamanho?"; o resto da fala ("e uma coca") segue normal
+        duvida_tamanho, evidencias = _responder_tamanho(novo, pendente, soltos, palavras, texto, produtos)
+        respondeu_tamanho = bool(duvida_tamanho or evidencias)
+        if respondeu_tamanho:
+            pendente = duvida_tamanho
+            if pendente or not achados:
+                return novo, pendente, evidencias
     if not achados and re.search(r"\b(?:dessa|desse|daquela|daquele|igual)\b", normal):
         if referencia and len([i for i in atual if i['produto'] == referencia]) == 1:
             produto = next((p for p in produtos if p.nome == referencia), None)
@@ -222,7 +391,8 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
         duvida = {"campo": "produto", "quantidade": quantidade(incompleto.group())}
 
     for fragmento in re.split(r"\s+e\s+(?=" + NUMERO + r"|quero\b)", normal):
-        if quantidade(fragmento) is not None and not mencoes(fragmento, produtos)[1] and not esclarecendo_quantidade:
+        if (quantidade(fragmento) is not None and not mencoes(fragmento, produtos)[1] and not esclarecendo_quantidade
+                and not respondeu_tamanho):
             if not re.search(r"\b(?:pix|dinheiro|credito|debito|rua|avenida|av|travessa|alameda|estrada|rodovia)\b",
                              fragmento):
                 duvida = {"campo": "produto", "quantidade": quantidade(fragmento)}
@@ -284,6 +454,47 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
         existentes = [i for i in novo if i["produto"] == produto.nome]
         if re.search(r"\bnao\b", prefixo) and not REMOVER.search(prefixo):
             continue
+        if indice in errados:
+            duvida = {"campo": "produto", "quantidade": qtd or 1,
+                      "nao_encontrado": "{} {}".format(trecho, errados[indice].lower())}
+            continue
+        # Só pizza e refrigerante têm tamanho: "coca grande" pede o tamanho de refrigerante depois.
+        tamanho = None
+        ditos = set(donos.get(indice, [])) if grupo_do_produto(produto) else set()
+        if TAMANHO_INDISPONIVEL in ditos or len(ditos) > 1:
+            duvida = {"campo": "tamanho", "produto": produto.nome,
+                      ("indisponivel" if TAMANHO_INDISPONIVEL in ditos else "misto"): True}
+        elif ditos:
+            tamanho = ditos.pop()
+        elif grupo_do_produto(produto) and acao == "adicionar" and re.search(r"\bmais\b", prefixo):
+            # "mais uma margherita" é igual à que já está no pedido, se só houver um tamanho dela
+            ja_pedidos = {i.get("tamanho") for i in existentes if i.get("tamanho")}
+            if len(ja_pedidos) == 1:
+                tamanho = ja_pedidos.pop()
+        if tamanho and acao == "remover":
+            # "tire a calabresa grande" mexe só na grande, mesmo com uma média no pedido
+            existentes = [i for i in existentes if i.get("tamanho") == tamanho]
+        sem_tamanho = [i for i in existentes if not i.get("tamanho")]
+        pergunta_deste = (pergunta_de_tamanho or {}).get("produto") == produto.nome
+        mais_uma = re.search(r"\b(?:mais|outra|outro|outras|outros)\b", prefixo)
+        quantos_sem_tamanho = sum(i["quantidade"] for i in sem_tamanho)
+        # "uma calabresa grande" logo depois de "qual o tamanho da calabresa?" responde a pergunta
+        if (tamanho and acao == "adicionar" and sem_tamanho and not mais_uma
+                and ((pergunta_deste and qtd in (None, quantos_sem_tamanho))
+                     or (qtd is None and not PEDE_MAIS_UM.search(prefixo)))):
+            # "a calabresa é grande": é o tamanho da pizza já anotada, não mais uma pizza
+            for item in sem_tamanho:
+                item["tamanho"] = tamanho
+            _juntar_iguais(novo)
+            evidencias.append({"acao": "tamanho", "produto": produto.nome, "tamanho": tamanho,
+                               "quantidade": sum(i["quantidade"] for i in sem_tamanho),
+                               "observacao": sem_tamanho[0]["observacao"], "trecho": prefixo + " " + trecho})
+            continue
+        if pergunta_deste and not tamanho and qtd is None and acao == "adicionar" and not PEDE_MAIS_UM.search(prefixo):
+            # repetir o nome da pizza não pede outra pizza: ou já respondeu o tamanho, ou ainda falta
+            if not respondeu_tamanho:
+                duvida = pendente
+            continue
         if acao == "remover":
             # "Tire cebola da pizza" não é autorização para tirar a pizza.
             resto = REMOVER.sub("", prefixo).strip()
@@ -305,7 +516,7 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
             alvo["quantidade"] -= retirar
             if not alvo["quantidade"]:
                 novo.remove(alvo)
-            evidencias.append({"acao": "remover", "produto": produto.nome,
+            evidencias.append({"acao": "remover", "produto": produto.nome, "tamanho": alvo.get("tamanho"),
                                "quantidade": retirar, "trecho": prefixo + " " + trecho})
             continue
 
@@ -335,18 +546,22 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
             existentes[0]["quantidade"] = qtd
             if observacao:
                 existentes[0]["observacao"] = observacao
+            if tamanho:
+                existentes[0]["tamanho"] = tamanho
+            tamanho = existentes[0].get("tamanho")
         else:
-            alvo = next((i for i in existentes if i["observacao"] == observacao), None)
+            alvo = next((i for i in existentes if i["observacao"] == observacao
+                         and i.get("tamanho") == tamanho), None)
             if alvo:
                 alvo["quantidade"] += qtd
             else:
                 novo.append({"produto": produto.nome, "quantidade": qtd,
-                             "observacao": observacao, "preco": produto.preco})
+                             "observacao": observacao, "preco": produto.preco, "tamanho": tamanho})
         evidencias.append({"acao": "corrigir" if corrigindo else "adicionar",
-                           "produto": produto.nome, "quantidade": qtd,
+                           "produto": produto.nome, "quantidade": qtd, "tamanho": tamanho,
                            "observacao": observacao, "trecho": prefixo + " " + trecho + " " + sufixo})
 
-    if not achados:
+    if not achados and not respondeu_tamanho:
         # Pagamento, endereço e fechamento são tratados pelo roteiro, sem reconstruir itens.
         if not FECHAR.search(normal) and not re.search(
                 r"\b(?:pix|pics|picks|piques|pixe|dinheiro|cartao|credito|debito|endereco|rua|avenida|av|travessa|"

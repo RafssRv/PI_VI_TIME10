@@ -20,6 +20,14 @@ npm run dev
 
 Abra [localhost:3000](http://localhost:3000) e permita o microfone. Execute `seed` na preparação inicial; os demais comandos npm estão em [package.json](package.json).
 
+Quem já tinha o banco antes dos tamanhos de pizza e de refrigerante pode atualizá-lo sem perder clientes e pedidos:
+
+```powershell
+docker cp database/migracao_tamanhos.sql pizzaria-db:/tmp/migracao_tamanhos.sql
+docker exec pizzaria-db psql -U pizzaria -d pizzaria -f /tmp/migracao_tamanhos.sql
+python backend/seed.py --completar
+```
+
 O Whisper baixa o modelo `base` no primeiro uso. A voz do Piper fica em `backend/agente/models/piper/`.
 
 ## Configuração
@@ -37,7 +45,7 @@ Variáveis de ambiente lidas por [backend/config.py](backend/config.py):
 - `backend/`: API, atendimento, banco e regras de pedido.
 - `backend/agente/`: prompt, interpretação de pedidos, serviços de voz e modelos.
 - `frontend/`: interface da chamada, estilos e recursos visuais.
-- `database/banco.sql`: esquema aplicado pelo Docker e pelos testes.
+- `database/banco.sql`: esquema aplicado pelo Docker e pelos testes; `database/migracao_tamanhos.sql` atualiza um banco criado antes dos tamanhos de pizza.
 - `scripts/diagnostico/`: página de diagnóstico do WebSocket, disponível em `/teste` durante o desenvolvimento.
 - `tests/`: testes Python; `tests/frontend/` reúne os testes JavaScript.
 

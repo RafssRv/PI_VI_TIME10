@@ -84,9 +84,10 @@ def banco_de_teste():
     sessao = SessionLocal()
     try:
         seed.limpar_banco(sessao)
+        tamanhos = seed.inserir_tamanhos(sessao)
         produtos = seed.inserir_produtos(sessao)
         clientes = seed.inserir_clientes(sessao)
-        seed.inserir_pedidos(sessao, clientes, produtos)
+        seed.inserir_pedidos(sessao, clientes, produtos, tamanhos)
         sessao.commit()
         marca = {
             "pedido": sessao.query(Pedido).count() and max(p.id for p in sessao.query(Pedido)),

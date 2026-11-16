@@ -30,6 +30,8 @@ class ItemResumo:
     quantidade: int
     preco_unitario: Decimal
     observacao: str = ""
+    # só pizza tem tamanho; o preço unitário já vem no tamanho escolhido
+    tamanho: str = ""
 
     @property
     def subtotal(self) -> Decimal:
@@ -54,8 +56,9 @@ class ResumoPedido:
         partes = []
         for item in self.itens:
             observacao = f" (solicitação: {item.observacao})" if item.observacao else ""
+            tamanho = f" {item.tamanho}" if item.tamanho else ""
             partes.append(
-                f"{item.quantidade} de {item.nome}{observacao}, "
+                f"{item.quantidade} de {item.nome}{tamanho}{observacao}, "
                 f"{_reais(item.preco_unitario)} por unidade, {_reais(item.subtotal)}"
             )
         return (
@@ -161,22 +164,43 @@ class ControlePedido:
         # Uma operação válida não resolve automaticamente outra dúvida pendente.
         return resultado
 
-    def _incluir(self, itens, produto_id, quantidade, observacao) -> str:
+    @staticmethod
+    def _preco(preco: Decimal) -> None:
+        if (
+            not isinstance(preco, Decimal)
+            or not preco.is_finite()
+            or preco <= 0
+            or preco.as_tuple().exponent < -2
+        ):
+            raise ErroPedido("O preço do tamanho deve ser Decimal positivo com até dois decimais.")
+
+    def _incluir(self, itens, produto_id, quantidade, observacao, tamanho="", preco=None) -> str:
         produto = self._produto(produto_id)
         self._quantidade(quantidade)
         observacao = self._observacao(observacao)
+        if not isinstance(tamanho, str):
+            raise ErroPedido("O tamanho deve ser um texto.")
+        tamanho = tamanho.strip()
+        # o preço de cada tamanho vem do cardápio do banco, nunca do modelo
+        if preco is None:
+            preco = produto.preco
+        else:
+            self._preco(preco)
         for item in itens.values():
-            if item.produto_id == produto_id and item.observacao == observacao:
+            if (item.produto_id == produto_id and item.observacao == observacao
+                    and item.tamanho == tamanho):
                 itens[item.id] = replace(item, quantidade=item.quantidade + quantidade)
                 return item.id
         item_id = uuid4().hex
         itens[item_id] = ItemResumo(
-            item_id, produto.id, produto.nome, quantidade, produto.preco, observacao
+            item_id, produto.id, produto.nome, quantidade, preco, observacao, tamanho
         )
         return item_id
 
-    def adicionar(self, produto_id: int, quantidade: int, observacao: str = "") -> str:
-        return self._editar(lambda itens: self._incluir(itens, produto_id, quantidade, observacao))
+    def adicionar(self, produto_id: int, quantidade: int, observacao: str = "",
+                  tamanho: str = "", preco: Decimal | None = None) -> str:
+        return self._editar(lambda itens: self._incluir(
+            itens, produto_id, quantidade, observacao, tamanho, preco))
 
     def definir_quantidade(self, item_id: str, quantidade: int) -> None:
         def alterar(itens):
@@ -208,11 +232,12 @@ class ControlePedido:
     def substituir(
         self, item_id: str, quantidade_retirar: int, produto_id: int,
         quantidade_adicionar: int, observacao: str = "",
+        tamanho: str = "", preco: Decimal | None = None,
     ) -> str:
         """Troca quantidades explícitas; não transfere observações ao novo produto."""
         def trocar(itens):
             self._retirar(itens, item_id, quantidade_retirar)
-            return self._incluir(itens, produto_id, quantidade_adicionar, observacao)
+            return self._incluir(itens, produto_id, quantidade_adicionar, observacao, tamanho, preco)
         return self._editar(trocar)
 
     def limpar(self) -> str:

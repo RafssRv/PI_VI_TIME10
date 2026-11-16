@@ -91,7 +91,7 @@ def test_cadastro_e_pedido_preservam_dados_na_tela_mas_nao_nos_logs(
                   if e["tipo"] == "transcricao" and e["quem"] == "atendente")
     assert NOME in resumo and ENDERECO in resumo and "(19) 98765-4321" in resumo
     falar("sim")
-    falar("uma margherita no pix")
+    falar("uma margherita grande no pix")
     falar("finalizar")
     eventos = falar("sim")
     assert any(e["tipo"] == "pedido_salvo" for e in eventos)
@@ -152,7 +152,7 @@ def test_falhas_do_repositorio_nao_registram_parametros_pessoais(
         entrada = CPF
     else:
         falar(cpf_da_ana)
-        entrada = "uma margherita no pix"
+        entrada = "uma margherita grande no pix"
         if operacao == "salvar_pedido":
             falar(entrada)
             falar("finalizar")

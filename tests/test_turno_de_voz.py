@@ -216,12 +216,13 @@ def test_identificacao_e_rascunho_chegam_a_comanda(chamada, cpf_da_ana, db):
     assert identificado["itens"] == []
     assert "cpf" not in json.dumps(identificado).lower()
 
-    eventos = falar("duas margheritas sem tomate no pix, entrega na Rua Nova, 45")
+    eventos = falar("duas margheritas grandes sem tomate no pix, entrega na Rua Nova, 45")
     pedido = evento_pedido(eventos)
     assert pedido["turno"] == 2
     assert pedido["pedido_id"] is None
     assert pedido["itens"] == [{"produto": "Pizza Margherita", "quantidade": 2,
-                                "preco_unitario": "66.90", "observacao": "sem tomate"}]
+                                "preco_unitario": "66.90", "observacao": "sem tomate",
+                                "tamanho": "grande"}]
     assert pedido["total"] == "133.80"
     assert pedido["forma_pagamento"] == "pix"
     assert pedido["endereco_entrega"] == "Rua Nova, 45"
@@ -235,7 +236,7 @@ def test_confirmacao_chega_apos_gravar_mesmo_se_a_voz_falhar(
 ):
     atendimento, falar, agente = chamada
     falar(cpf_da_ana)
-    falar("duas margheritas no pix")
+    falar("duas margheritas grandes no pix")
     falar("finalizar")
     if falha_voz:
         def falhar(texto, caminho=None):
@@ -264,14 +265,14 @@ def test_confirmacao_chega_apos_gravar_mesmo_se_a_voz_falhar(
     assert evento_pedido(despedida)["pedido_id"] == gravado.id
     assert evento_pedido(despedida)["total"] == "133.80"
     assert not any(e["tipo"] == "pedido_salvo" for e in despedida)
-    novo = evento_pedido(falar("duas margheritas no pix"))
+    novo = evento_pedido(falar("duas margheritas grandes no pix"))
     assert novo["pedido_id"] is None
 
 
 def test_falha_no_banco_nao_anuncia_pedido_salvo(chamada, cpf_da_ana, db, monkeypatch):
     _, falar, _ = chamada
     falar(cpf_da_ana)
-    falar("duas margheritas no pix")
+    falar("duas margheritas grandes no pix")
     falar("finalizar")
     antes = db.query(Pedido).count()
 

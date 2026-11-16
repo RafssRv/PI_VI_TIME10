@@ -18,9 +18,10 @@ from uuid import uuid4
 
 from agente.controle_pedido import ControlePedido, ErroPedido, ProdutoCardapio
 from agente.intencao_pedido import (CONSULTA_HISTORICO, CONSULTA_PEDIDO_ATUAL, CONSULTA_RECOMENDACAO, FALAS_DE_FECHAR,
-                                   AINDA_NAO_ACABOU, FECHAR, FIM_DO_PEDIDO, RECLAMA_DO_PEDIDO, cardapio_completo, comando_negado,
-                                   eh_consulta,
-                                   interpretar, mencoes)
+                                   AINDA_NAO_ACABOU, FECHAR, FIM_DO_PEDIDO, GRUPO_DO_TAMANHO, RECLAMA_DO_PEDIDO,
+                                   TAMANHO_INDISPONIVEL,
+                                   cardapio_completo, comando_negado, eh_consulta, interpretar, mencoes,
+                                   separar_tamanhos)
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -46,12 +47,13 @@ CUMPRIMENTO = re.compile(r"^(?:oi|ola|alo|opa|e ai|bom dia|boa tarde|boa noite|t
 CORTESIA = re.compile(r"\b(?:obrigad[oa]|valeu|por favor|viu)\b")
 SINONIMOS_DE_CATEGORIA = {"refrigerante": "bebida", "refri": "bebida", "suco": "bebida", "agua": "bebida"}
 ENDERECO_NA_FALA = re.compile(r"\b(?:rua|avenida|av|travessa|alameda|estrada|rodovia)\b.*", re.IGNORECASE)
-# o cardapio nao tem tamanhos: "pizza de calabresa grande" eh a calabresa, nao um produto desconhecido
-TAMANHO_NA_FALA = re.compile(r"(?<!em )\b(?:(?:de |do |no )?tamanho )?(?:grande|m[eé]dia|m[eé]dio|pequena|pequeno|"
-                             r"gigante|fam[ií]lia|broto)\b", re.IGNORECASE)
+# "quais tamanhos tem?", "tem pizza grande?": responde com a tabela de tamanhos do banco
 PERGUNTA_DE_TAMANHO = re.compile(r"\btamanhos?\b|\btem\b.*\b(?:grande|media|medio|pequena|pequeno|gigante|"
-                                 r"familia|broto)\b")
-FRASE_TAMANHO_UNICO = "Nossas pizzas têm tamanho único."
+                                 r"familia|broto|lata|latinha)\b")
+FRASE_PEDE_TAMANHO = "pequena, média ou grande?"
+# usadas ate o carrinho ler os tamanhos do banco pela primeira vez
+OPCOES_DE_TAMANHO = {"pizza": FRASE_PEDE_TAMANHO, "refrigerante": "lata, 600 ml ou 2 litros?"}
+EXEMPLO_DE_TAMANHOS = {"pizza": "uma grande e uma média", "refrigerante": "uma lata e uma de 2 litros"}
 QUER_MUDAR_ENDERECO = re.compile(
     r"\b(?:mudar|muda|trocar|troca|alterar|altera|corrigir|corrige|outro|novo)\b.*\bendereco\b|"
     r"\bendereco\b.*\b(?:errado|outro|novo|diferente)\b"
@@ -100,17 +102,21 @@ PAGAMENTO_FALADO = {
 
 def _com_artigo(nome):
     # o cardapio nao guarda genero: esses comecos sao femininos, o resto (guarana, pudim, suco) masculino
-    feminino = _normalizar(nome).split()[0] in {"pizza", "borda", "coca", "agua"}
-    return ("A " if feminino else "O ") + nome
+    return ("A " if _feminino(nome) else "O ") + nome
 
 
-def remover_tamanho(texto):
-    """tira o tamanho da fala e diz se tinha algum. nao mexe no endereco: "Rua Grande, 10" fica igual."""
-    endereco = ENDERECO_NA_FALA.search(texto)
-    corte = endereco.start() if endereco else len(texto)
-    limpo, quantos = TAMANHO_NA_FALA.subn("", texto[:corte])
-    limpo = re.sub(r"\s+([.,!?])", r"\1", re.sub(r"\s+", " ", limpo + texto[corte:])).strip()
-    return limpo, quantos > 0
+def _feminino(nome):
+    return _normalizar(nome).split()[0] in {"pizza", "borda", "coca", "agua", "fanta"}
+
+
+def _da(nome):
+    # "qual o tamanho da Coca-Cola" / "do Guaraná"
+    return ("da " if _feminino(nome) else "do ") + nome
+
+
+def _com_tamanho(nome, tamanho):
+    # "Pizza de Calabresa grande": o tamanho vai depois do nome, como o cliente fala
+    return "{} {}".format(nome, tamanho) if tamanho else nome
 
 
 def _prompt_base():
@@ -166,6 +172,10 @@ class Atendimento:
         self.turno_id = 0
         self.ultimo_rastro = None
         self._pedido_salvo = None
+        # produto do cardapio -> grupo de tamanhos ("pizza", "refrigerante"), pra saber quem precisa de
+        # tamanho, e as opcoes faladas de cada grupo ("lata, 600 ml ou 2 litros?")
+        self._grupos = {}
+        self._opcoes_tamanho = dict(OPCOES_DE_TAMANHO)
         self._limpar_pedido()
 
     def _limpar_pedido(self):
@@ -244,7 +254,7 @@ class Atendimento:
             "cliente": {"nome": self.nome, "telefone": self.telefone},
             "itens": [{"produto": i["produto"], "quantidade": i["quantidade"],
                        "preco_unitario": format(i["preco"], ".2f"),
-                       "observacao": i["observacao"]} for i in self.carrinho],
+                       "observacao": i["observacao"], "tamanho": i.get("tamanho")} for i in self.carrinho],
             "total": format(sum((i["preco"] * i["quantidade"] for i in self.carrinho),
                                 Decimal("0.00")), ".2f"),
             "forma_pagamento": self.pagamento,
@@ -268,14 +278,18 @@ class Atendimento:
         if self._dica is None:
             db = self._sessao()
             try:
-                nomes = [p.nome for p in repositorio.listar_cardapio(db)]
+                produtos = repositorio.listar_cardapio(db)
             except Exception:
                 logger.warning("chamada=%s etapa=dica_transcricao categoria=banco", self.id_chamada)
                 return None
             finally:
                 db.close()
-            self._dica = ("Cardápio da pizzaria: {}. Pix, dinheiro, crédito e débito. "
-                          "O cliente diz o pedido:").format(", ".join(nomes))
+            # o whisper so le uns 220 tokens de dica: "Pizza de" em todo sabor gastava metade disso
+            sabores = [re.sub(r"^Pizza (?:de |do |da )?", "", p.nome) for p in produtos if repositorio.eh_pizza(p)]
+            outros = [p.nome for p in produtos if not repositorio.eh_pizza(p)]
+            self._dica = ("Pizzas: {}. Pequena, média ou grande. {}. Lata, 600 ml ou 2 litros. "
+                          "Pix, dinheiro, crédito e débito. O cliente diz o pedido:").format(
+                ", ".join(sabores), ", ".join(outros))
         return self._dica
 
     # --- banco ---
@@ -501,13 +515,11 @@ class Atendimento:
         db = self._sessao()
         try:
             if eh_consulta(texto) and PERGUNTA_DE_TAMANHO.search(_normalizar(texto)):
-                return FRASE_TAMANHO_UNICO
-            sem_tamanho, citou_tamanho = remover_tamanho(texto)
-            if not citou_tamanho:
-                return self._montar_pedido_com(db, texto)
-            if not _normalizar(sem_tamanho):
-                return FRASE_TAMANHO_UNICO + " Pode falar o produto e a quantidade?"
-            return FRASE_TAMANHO_UNICO + " " + self._montar_pedido_com(db, sem_tamanho)
+                fala = self._falar_tamanhos(db)
+                if self._duvida_item and self._duvida_item.get("campo") == "tamanho":
+                    fala += " " + self._pendencia
+                return fala
+            return self._montar_pedido_com(db, texto)
         except SQLAlchemyError:
             # erro do llama (ollama fechado) sobe de proposito: o turno_de_voz avisa na tela
             logger.warning("chamada=%s etapa=montar_pedido categoria=banco", self.id_chamada)
@@ -527,7 +539,9 @@ class Atendimento:
             self._pedindo_endereco = True
             return "Claro! Qual é o novo endereço?"
         sem_cortesia = re.sub(r"\bnao( nao)+\b", "nao", " ".join(CORTESIA.sub("", normalizado).split()))
-        if (FIM_DO_PEDIDO.search(sem_cortesia) and not AINDA_NAO_ACABOU.search(texto)
+        # "lata, no pix, é só isso" responde o tamanho e fecha: o tamanho não pode se perder no caminho
+        responde_tamanho = bool((self._duvida_item or {}).get("campo") == "tamanho" and separar_tamanhos(texto)[1])
+        if (FIM_DO_PEDIDO.search(sem_cortesia) and not AINDA_NAO_ACABOU.search(texto) and not responde_tamanho
                 and not mencoes(texto, repositorio.listar_cardapio(db))[1]):
             self._largar_duvida_de_produto()
             problemas = self._atualizar_pagamento(texto)
@@ -546,6 +560,10 @@ class Atendimento:
                 self._sugestoes = sugestoes
                 return "Qual você quer: {}?".format(_juntar(sugestoes, "ou"))
             texto = "uma " + sugestoes[0]
+            normalizado = _normalizar(texto)
+        escolhido = self._resposta_da_ambiguidade(texto)
+        if escolhido:
+            texto = escolhido
             normalizado = _normalizar(texto)
         if comando_negado(texto):
             self._fechamento_solicitado = False
@@ -596,6 +614,9 @@ class Atendimento:
                 self._pendencia_antes_da_troca = None
             if self._controle:
                 self._controle.definir_pendencia(self._pendencia)
+            if not self._pendencia:
+                # trocou a coca por uma pizza: falta saber o tamanho dela
+                self._perguntar_tamanho_que_falta()
             fala = self._esclarecer(self._pendencia) if self._pendencia else self._continuar_pedido()
             self.historico.extend([{"role": "user", "content": texto},
                                    {"role": "assistant", "content": fala}])
@@ -616,7 +637,7 @@ class Atendimento:
         cardapio = repositorio.listar_cardapio(db)
 
         turno = {"role": "user", "content": texto}
-        mensagens = [{"role": "system", "content": self._prompt_do_pedido(cardapio)}]
+        mensagens = [{"role": "system", "content": self._prompt_do_pedido(cardapio, repositorio.listar_tamanhos(db))}]
         # Uma fala ainda não interpretada impede confirmar o carrinho anterior,
         # inclusive se o Ollama falhar ou devolver uma resposta inválida.
         proposto, duvida, evidencias = interpretar(
@@ -657,6 +678,14 @@ class Atendimento:
         # O retrato COMPLETO do modelo é apenas uma proposta auditável. Somente a
         # transcrição e os campos pendentes da sessão autorizam editar o rascunho.
         problemas = self._atualizar_carrinho(db, proposto) if evidencias else []
+        if not duvida and not problemas:
+            # pizza sem tamanho nao tem preco: pergunta antes de seguir, uma pizza por vez
+            faltando = [i for i in self.carrinho if self._falta_tamanho(i)]
+            if faltando:
+                # "Anotei 1 Pizza de Calabresa. Qual o tamanho?" so quando nao tem como confundir a pizza
+                curta = (len(faltando) == 1 and len(evidencias) == 1
+                         and evidencias[0]["produto"] == faltando[0]["produto"])
+                duvida = {"campo": "tamanho", "produto": faltando[0]["produto"], "curta": curta}
         self._duvida_item = duvida
         if self.ultimo_rastro is not None:
             self.ultimo_rastro["alteracoes_autorizadas"] = evidencias
@@ -729,9 +758,51 @@ class Atendimento:
             self._controle.definir_pendencia(None)
         return True
 
+    def _resposta_da_ambiguidade(self, texto):
+        """
+        "qual agua: com gas ou mineral?" -> "com gas". a resposta so traz o que diferencia as opcoes,
+        e sozinha nao bate com nenhum nome inteiro do cardapio. vira "1 Agua com Gas 500ml" e segue
+        pelas mesmas validacoes de qualquer pedido falado.
+        """
+        duvida = self._duvida_item or {}
+        candidatos = duvida.get("candidatos") or []
+        if duvida.get("campo") != "produto" or len(candidatos) < 2 or eh_consulta(texto):
+            return None
+
+        def palavras_de(nome):
+            return {p.removesuffix("s") for p in _normalizar(nome).split()}
+
+        enchimento = {"a", "o", "de", "da", "do", "uma", "um", "quero", "pode", "ser", "essa", "esse", "e",
+                      "isso", "aquela", "aquele", "mesmo", "por", "favor", "sim", "pra", "mim"}
+        falado = palavras_de(texto) - enchimento
+        if not falado:
+            return None
+        sem = re.search(r"\bsem (\w+)", _normalizar(texto))
+        escolhas = []
+        for nome in candidatos:
+            minhas = palavras_de(nome)
+            outras = set().union(*(palavras_de(c) for c in candidatos if c != nome))
+            if sem:
+                # "sem gas" escolhe a unica opcao que nao tem gas no nome
+                if sem[1].removesuffix("s") not in minhas and falado <= minhas | {"sem", sem[1].removesuffix("s")}:
+                    escolhas.append(nome)
+            elif falado <= minhas and falado & (minhas - outras):
+                escolhas.append(nome)
+        if len(escolhas) != 1:
+            return None
+        return "{} {}".format(duvida.get("quantidade") or 1, escolhas[0])
+
+    def _falta_tamanho(self, item):
+        return item["produto"] in self._grupos and not item.get("tamanho")
+
+    def _opcoes(self, produto):
+        grupo = self._grupos.get(produto, "pizza")
+        return self._opcoes_tamanho.get(grupo, FRASE_PEDE_TAMANHO)
+
     def _reconhecer_alteracoes(self, evidencias):
-        verbos = {"adicionar": "Anotei", "remover": "Tirei", "corrigir": "Ajustei para"}
-        return " ".join("{} {} {}{}.".format(verbos[e["acao"]], e["quantidade"], e["produto"],
+        verbos = {"adicionar": "Anotei", "remover": "Tirei", "corrigir": "Ajustei para", "tamanho": "Certo,"}
+        return " ".join("{} {} {}{}.".format(verbos[e["acao"]], e["quantidade"],
+                                              _com_tamanho(e["produto"], e.get("tamanho")),
                         " ({})".format(e["observacao"]) if e.get("observacao") else "") for e in evidencias)
 
     def _pergunta_do_campo(self, duvida):
@@ -745,6 +816,16 @@ class Atendimento:
             return "Qual é a observação para {}?".format(duvida["produto"])
         if campo == "fora_do_pedido":
             return "{} não está no seu pedido. Quer algo mais?".format(duvida["produto"])
+        if campo == "tamanho":
+            produto = duvida["produto"]
+            if duvida.get("misto"):
+                return "Quantas de cada tamanho? Por exemplo: {}.".format(
+                    EXEMPLO_DE_TAMANHOS.get(self._grupos.get(produto, "pizza"), EXEMPLO_DE_TAMANHOS["pizza"]))
+            if duvida.get("indisponivel"):
+                return "Não temos esse tamanho. {} pode ser {}".format(_com_artigo(produto), self._opcoes(produto))
+            if duvida.get("curta"):
+                return "Qual o tamanho: " + self._opcoes(produto)
+            return "Qual o tamanho {}: {}".format(_da(produto), self._opcoes(produto))
         if campo == "intencao":
             return "Não entendi. Pode repetir o que você quer?"
         candidatos = duvida.get("candidatos", [])
@@ -780,10 +861,37 @@ class Atendimento:
             return self._esclarecer(self._pendencia)
         return self._fechar_pedido() if self._fechamento_solicitado else "Alteração anotada. Quer algo mais?"
 
+    def _falar_tamanhos(self, db):
+        tamanhos = repositorio.listar_tamanhos(db)
+        if not tamanhos:
+            return "Não consegui consultar os tamanhos agora."
+        frases = []
+        pizzas = ["{}, com {} fatias".format(t.nome, t.fatias) for t in tamanhos if t.grupo == "pizza"]
+        if pizzas:
+            frases.append("As pizzas podem ser {}.".format(_juntar(pizzas)))
+        bebidas = [t.nome.lower() for t in tamanhos if t.grupo == "refrigerante"]
+        if bebidas:
+            frases.append("Os refrigerantes vêm em {}.".format(_juntar(bebidas, "ou")))
+        return " ".join(frases)
+
+    def _precos_por_tamanho(self, produto, tamanhos, so=None):
+        # o cardapio guarda o preco do maior tamanho; os outros saem do desconto de cada tamanho
+        grupo = repositorio.grupo_tamanho(produto)
+        tamanhos = [t for t in tamanhos if t.grupo == grupo]
+        escolhidos = [t for t in tamanhos if t.nome == so]
+        if so and escolhidos:
+            return "{} custa {}.".format(_com_artigo(_com_tamanho(produto.nome, so)),
+                                         preco_falado(repositorio.preco_no_tamanho(produto, escolhidos[0])))
+        precos = ["{} a {}".format(preco_falado(repositorio.preco_no_tamanho(produto, t)), t.nome.lower())
+                  for t in sorted(tamanhos, key=lambda t: t.desconto)]
+        return "{} custa {}.".format(_com_artigo(produto.nome), _juntar(precos))
+
     def _consultar(self, db, texto):
         produtos = repositorio.listar_cardapio(db)
         normalizado = _normalizar(texto)
-        _, citados = mencoes(texto, produtos)
+        # "quanto custa a pizza grande de calabresa": o tamanho sai antes de procurar o nome
+        sem_tamanho, tamanhos_ditos = separar_tamanhos(texto)
+        _, citados = mencoes(sem_tamanho, produtos)
         if RECLAMA_DO_PEDIDO.search(normalizado):
             fala = self._falar_pedido_atual(" O que você quer mudar?")
         elif CONSULTA_PEDIDO_ATUAL.search(normalizado):
@@ -796,8 +904,14 @@ class Atendimento:
             if not produtos:
                 fala = "Não há produtos disponíveis no cardápio neste momento."
             elif re.search(r"\b(?:todos|todas|completo|inteiro|precos)\b", normalizado):
-                fala = "Cardápio completo. " + " ".join(
+                fala = "Cardápio completo, com as pizzas no tamanho grande e os refrigerantes de 2 litros. " + " ".join(
                     "{}: {}.".format(p.nome, preco_falado(p.preco)) for p in produtos)
+                tamanhos = sorted((t for t in repositorio.listar_tamanhos(db) if t.desconto),
+                                  key=lambda t: (t.grupo != "pizza", t.desconto))
+                if tamanhos:
+                    fala += " " + " ".join("{} {}: {} a menos.".format(
+                        "Pizza" if t.grupo == "pizza" else "Refrigerante", t.nome.lower(), preco_falado(t.desconto))
+                        for t in tamanhos)
             else:
                 # ler 18 produtos em voz alta cansa: fala as categorias e deixa a pessoa escolher
                 categorias = sorted({p.categoria for p in produtos}, key=lambda c: (not c.startswith("pizza"), c))
@@ -805,8 +919,13 @@ class Atendimento:
                 fala = "Temos {}. O que você quer saber?".format(_juntar(nomes))
         elif re.search(r"\b(?:preco|precos|custa|custam|quanto)\b", normalizado) and citados:
             unicos = {p.id: p for _, _, candidatos in citados for p in candidatos}
-            fala = " ".join("{} custa {}.".format(_com_artigo(p.nome), preco_falado(p.preco))
-                            for p in unicos.values())
+            tamanhos = repositorio.listar_tamanhos(db)
+            so = tamanhos_ditos[0][1] if len({t for _, t in tamanhos_ditos}) == 1 else None
+            fala = " ".join(
+                self._precos_por_tamanho(p, tamanhos, so)
+                if any(t.grupo == repositorio.grupo_tamanho(p) for t in tamanhos) else
+                "{} custa {}.".format(_com_artigo(p.nome), preco_falado(p.preco))
+                for p in unicos.values())
         elif re.search(r"\b(?:ingredientes|contem|leva|tem cebola)\b", normalizado) and citados:
             unicos = {p.id: p for _, _, candidatos in citados for p in candidatos}
             fala = " ".join("{}: {}.".format(p.nome, p.descricao or "ingredientes não informados")
@@ -818,7 +937,8 @@ class Atendimento:
             fala = ("Temos {}. Quer saber o preço de alguma opção?".format(_juntar(nomes)) if nomes
                     else "Não temos opções de {} disponíveis agora.".format(categoria))
         else:
-            mensagens = [{"role": "system", "content": self._prompt_do_pedido(produtos)}] + self.historico + [
+            mensagens = [{"role": "system", "content": self._prompt_do_pedido(
+                produtos, repositorio.listar_tamanhos(db))}] + self.historico + [
                 {"role": "user", "content": texto}]
             if self.ultimo_rastro is not None:
                 self.ultimo_rastro["mensagens_modelo"] = deepcopy(mensagens)
@@ -837,7 +957,7 @@ class Atendimento:
     def _falar_pedido_atual(self, complemento):
         if not self.carrinho:
             return "Ainda não anotei nada neste pedido. O que vai querer?"
-        itens = ["{} {}".format(i["quantidade"], i["produto"]) for i in self.carrinho]
+        itens = ["{} {}".format(i["quantidade"], _com_tamanho(i["produto"], i.get("tamanho"))) for i in self.carrinho]
         total = sum((i["preco"] * i["quantidade"] for i in self.carrinho), Decimal("0.00"))
         return "Até agora anotei {}, subtotal de {}.".format(_juntar(itens), preco_falado(total)) + complemento
 
@@ -857,14 +977,17 @@ class Atendimento:
         if not pedidos:
             return "Você ainda não tem pedidos anteriores."
 
+        def nome_do_item(item):
+            return _com_tamanho(item.produto.nome, item.tamanho.nome if item.tamanho else None)
+
         def descrever(pedido):
-            itens = ["{} {}".format(i.quantidade, i.produto.nome) for i in pedido.itens]
+            itens = ["{} {}".format(i.quantidade, nome_do_item(i)) for i in pedido.itens]
             return "em {}: {}, total de {}.".format(
                 pedido.criado_em.astimezone().strftime("%d/%m"), _juntar(itens) or "sem itens registrados",
                 preco_falado(pedido.total))
 
         if len(pedidos) == 1:
-            itens = ["{} {}".format(i.quantidade, i.produto.nome) for i in pedidos[0].itens]
+            itens = ["{} {}".format(i.quantidade, nome_do_item(i)) for i in pedidos[0].itens]
             if not itens:
                 return "Seu último pedido foi " + descrever(pedidos[0])
             # o sim na fala seguinte repete: passa pelas mesmas validacoes de um pedido falado
@@ -893,7 +1016,10 @@ class Atendimento:
         if favoritos:
             produto = favoritos[0][0]
             self._sugestoes = [produto.nome]
-            return "Você costuma pedir {}, que está {}.".format(produto.nome, preco_falado(produto.preco)) + convite
+            maior = next((t.nome.lower() for t in repositorio.listar_tamanhos(db, repositorio.grupo_tamanho(produto))
+                          if not t.desconto), None) if repositorio.grupo_tamanho(produto) else None
+            return "Você costuma pedir {}, que está {}{}.".format(
+                produto.nome, preco_falado(produto.preco), " a " + maior if maior else "") + convite
 
         # cliente novo, sem conta ou sem nada daquela categoria: vale o que a casa mais vende
         campeoes = repositorio.itens_mais_pedidos_da_casa(db, 2, categoria)
@@ -929,11 +1055,19 @@ class Atendimento:
         )
         if not partes or not self._controle or not self._controle.itens:
             return ["Pode dizer qual produto deseja trocar e por qual produto, com as quantidades?"]
-        retirar, origem = _item_da_troca(partes[1])
-        acrescentar, destino = _item_da_troca(partes[2])
+        # "troque a calabresa grande por uma mussarela media": o tamanho nao faz parte do nome
+        lado_origem, tamanhos_origem = separar_tamanhos(partes[1])
+        lado_destino, tamanhos_destino = separar_tamanhos(partes[2])
+        retirar, origem = _item_da_troca(lado_origem)
+        acrescentar, destino = _item_da_troca(lado_destino)
         origem, destino = _nome_na_troca(origem), _nome_na_troca(destino)
+        tamanho_origem = tamanhos_origem[0][1] if tamanhos_origem else None
+        tamanho_destino = tamanhos_destino[0][1] if tamanhos_destino else None
+        if TAMANHO_INDISPONIVEL in (tamanho_origem, tamanho_destino):
+            return ["Não temos esse tamanho. Pode repetir a troca com um tamanho do cardápio?"]
         itens = [i for i in self._controle.itens
-                 if origem and f" {origem} " in f" {_nome_na_troca(i.nome)} "]
+                 if origem and f" {origem} " in f" {_nome_na_troca(i.nome)} "
+                 and (tamanho_origem is None or i.tamanho == tamanho_origem)]
         if len(itens) != 1:
             return ["Qual item do pedido você deseja trocar? Informe também a quantidade."]
         item = itens[0]
@@ -950,13 +1084,24 @@ class Atendimento:
             return [self._pergunta_de_ambiguidade(destino, produtos)]
         if acrescentar is None:
             return ["Quantas unidades de {} deseja acrescentar na troca?".format(produtos[0].nome)]
+        # trocar de sabor mantem o tamanho da pizza que saiu; "mais uma margherita" eh igual a que ja
+        # esta no pedido. sem nenhum dos dois, a pizza entra sem tamanho e o atendente pergunta
+        # (coca de 2 litros por guarana continua 2 litros; coca por pizza pergunta o tamanho da pizza)
+        novo_tamanho = ""
+        grupo = repositorio.grupo_tamanho(produtos[0])
+        if grupo:
+            dito = tamanho_destino if GRUPO_DO_TAMANHO.get(tamanho_destino) == grupo else ""
+            herdado = item.tamanho if self._grupos.get(item.nome) == grupo else ""
+            iguais = {i.tamanho for i in self._controle.itens if i.produto_id == produtos[0].id and i.tamanho}
+            novo_tamanho = dito or herdado or (iguais.pop() if len(iguais) == 1 else "")
         controle = deepcopy(self._controle)
         try:
-            controle.substituir(item.id, retirar, produtos[0].id, acrescentar)
+            controle.substituir(item.id, retirar, produtos[0].id, acrescentar, tamanho=novo_tamanho or "")
         except ErroPedido as erro:
             return [str(erro)]
         return self._atualizar_carrinho(db, [
-            {"produto": i.nome, "quantidade": i.quantidade, "observacao": i.observacao}
+            {"produto": i.nome, "quantidade": i.quantidade, "observacao": i.observacao,
+             "tamanho": i.tamanho or None}
             for i in controle.itens
         ])
 
@@ -967,6 +1112,8 @@ class Atendimento:
         """
         novo = []
         problemas = []
+        todos_tamanhos = repositorio.listar_tamanhos(db)
+        tamanhos = {(t.grupo, _normalizar(t.nome)): t for t in todos_tamanhos}
 
         for item in itens:
             if not isinstance(item, dict):
@@ -996,29 +1143,48 @@ class Atendimento:
                 continue
             observacao = (item.get("observacao") or "").strip() or None
 
+            # pizza e refrigerante tem tamanho. sem tamanho ainda, o item entra e o atendente pergunta
+            tamanho = None
+            grupo = repositorio.grupo_tamanho(produto)
+            if grupo and item.get("tamanho"):
+                tamanho = tamanhos.get((grupo, _normalizar(item["tamanho"])))
+                if tamanho is None:
+                    problemas.append("Qual o tamanho {}: {}".format(
+                        _da(produto.nome), self._opcoes_tamanho.get(grupo, FRASE_PEDE_TAMANHO)))
+                    continue
+
             repetido = next((i for i in novo if i["produto"] == produto.nome
-                             and i["observacao"] == observacao), None)
+                             and i["observacao"] == observacao
+                             and i["tamanho"] == (tamanho.nome if tamanho else None)), None)
             if repetido:
                 repetido["quantidade"] += quantidade
             else:
                 novo.append({
                     "produto": produto.nome,
                     "quantidade": quantidade,
-                    "preco": Decimal(str(produto.preco)),
+                    "preco": repositorio.preco_no_tamanho(produto, tamanho),
                     "observacao": observacao,
+                    "tamanho": tamanho.nome if tamanho else None,
                 })
 
         # Uma extração incompleta nunca substitui parte do pedido anterior.
         if not problemas:
+            cardapio = repositorio.listar_cardapio(db)
             controle = ControlePedido([
                 ProdutoCardapio(p.id, p.nome, Decimal(str(p.preco)))
-                for p in repositorio.listar_cardapio(db)
+                for p in cardapio
             ])
             for item in novo:
                 produto = repositorio.buscar_produtos(db, item["produto"])[0]
-                controle.adicionar(produto.id, item["quantidade"], item["observacao"] or "")
+                controle.adicionar(produto.id, item["quantidade"], item["observacao"] or "",
+                                   tamanho=item["tamanho"] or "", preco=item["preco"])
             self.carrinho = novo
             self._controle = controle
+            self._grupos = {p.nome: repositorio.grupo_tamanho(p) for p in cardapio if repositorio.grupo_tamanho(p)}
+            for grupo in {t.grupo for t in todos_tamanhos}:
+                # listar_tamanhos ja vem do menor pro maior: "lata, 600 ml ou 2 litros?"
+                nomes = [t.nome.lower() for t in todos_tamanhos if t.grupo == grupo]
+                self._opcoes_tamanho[grupo] = _juntar(nomes, "ou") + "?"
             # Agradecimentos sem itens não apagam a última venda da comanda.
             if novo:
                 self._pedido_salvo = None
@@ -1048,9 +1214,27 @@ class Atendimento:
                 return ["Crédito ou débito?"]
             return [FRASE_PEDE_PAGAMENTO]
 
+    def _perguntar_tamanho_que_falta(self):
+        """pizza sem tamanho nao tem preco: vira a pendencia do pedido, uma pizza por vez."""
+        sem_tamanho = next((i for i in self.carrinho if self._falta_tamanho(i)), None)
+        if not sem_tamanho:
+            return False
+        self._duvida_item = {"campo": "tamanho", "produto": sem_tamanho["produto"]}
+        self._pendencia = self._pergunta_do_campo(self._duvida_item)
+        if self._controle:
+            self._controle.definir_pendencia(self._pendencia)
+        return True
+
     def _fechar_pedido(self):
         # so le o resumo quando nao falta nada: o cliente confirma o pedido inteiro de uma vez
+        if not self._pendencia:
+            self._perguntar_tamanho_que_falta()
         if self._pendencia:
+            if self._duvida_item and self._duvida_item.get("campo") == "tamanho":
+                # quem pediu pra fechar ouve o resumo logo depois de dizer o tamanho
+                self._fechamento_solicitado = True
+                produto = self._duvida_item["produto"]
+                return "Antes de fechar, qual o tamanho {}: {}".format(_da(produto), self._opcoes(produto))
             return self._esclarecer(self._pendencia)
         if not self.carrinho:
             return "Você ainda não pediu nada. O que vai querer?"
@@ -1067,7 +1251,7 @@ class Atendimento:
     def _resumo_do_pedido(self):
         resumo = self._controle.resumir()
         self._token_resumo = resumo.token
-        itens = ["{} {}{}".format(i.quantidade, i.nome,
+        itens = ["{} {}{}".format(i.quantidade, _com_tamanho(i.nome, i.tamanho),
                  " (solicitação: {})".format(i.observacao) if i.observacao else "")
                  for i in resumo.itens]
         return ("Seu pedido ficou assim: {}. Total de {}, entrega em {}, "
@@ -1114,7 +1298,8 @@ class Atendimento:
                 db,
                 self.cliente_id,
                 [{"produto": i["produto"], "quantidade": i["quantidade"],
-                  "observacao": i["observacao"], "preco_confirmado": i["preco"]}
+                  "observacao": i["observacao"], "preco_confirmado": i["preco"],
+                  "tamanho": i.get("tamanho")}
                  for i in self.carrinho],
                 endereco_entrega=self.endereco_entrega,
                 forma_pagamento=self.pagamento,
@@ -1148,11 +1333,11 @@ class Atendimento:
         return "Pedido número {} confirmado! Obrigado, {}, e bom apetite!".format(
             numero, self._primeiro_nome())
 
-    def _prompt_do_pedido(self, cardapio):
+    def _prompt_do_pedido(self, cardapio, tamanhos=()):
         if self.carrinho:
             atual = "\n".join(
                 "- {} {}{}".format(
-                    i["quantidade"], i["produto"],
+                    i["quantidade"], _com_tamanho(i["produto"], i.get("tamanho")),
                     " ({})".format(i["observacao"]) if i["observacao"] else "")
                 for i in self.carrinho
             )
@@ -1188,6 +1373,7 @@ class Atendimento:
             # o que nao muda fica antes: o ollama reaproveita o inicio igual do prompt entre as falas
             "Cardápio:",
             _cardapio_em_texto(cardapio),
+            _tamanhos_em_texto(tamanhos),
             "",
             "Cliente: {}".format(self.nome),
             "Pedido atual:",
@@ -1213,7 +1399,8 @@ class Atendimento:
                     CONSULTA_RECOMENDACAO.search(normalizado) or
                     re.search(r"\b(?:preco|precos|custa|custam|quanto)\b", normalizado)):
                 return self._consultar(db, texto)
-            cardapio = _cardapio_em_texto(repositorio.listar_cardapio(db))
+            cardapio = "\n".join([_cardapio_em_texto(repositorio.listar_cardapio(db)),
+                                  _tamanhos_em_texto(repositorio.listar_tamanhos(db))])
         except SQLAlchemyError:
             logger.warning("chamada=%s etapa=ler_cardapio categoria=banco", self.id_chamada)
             return "Não consegui consultar o cardápio no sistema agora. Tente novamente em instantes."
@@ -1239,6 +1426,22 @@ class Atendimento:
         self.historico.append(turno)
         self.historico.append({"role": "assistant", "content": resposta})
         return resposta
+
+
+def _tamanhos_em_texto(tamanhos):
+    # o modelo so le o cardapio: sem isso ele dizia que a pizza tem tamanho unico ou inventava preco
+    if not tamanhos:
+        return ""
+    linhas = []
+    for grupo, rotulo, maior in (("pizza", "pizza", "o da grande"), ("refrigerante", "refrigerante", "o de 2 litros")):
+        partes = ["{} ({}{})".format(
+            t.nome, "{} fatias, ".format(t.fatias) if t.fatias else "",
+            "{} a menos".format(_formatar_preco(t.desconto)) if t.desconto else "preço do cardápio")
+            for t in tamanhos if t.grupo == grupo]
+        if partes:
+            linhas.append("Tamanhos de {}: {}. O preço de {} no cardápio é {}.".format(
+                rotulo, _juntar(partes), rotulo, maior))
+    return "\n".join(linhas)
 
 
 def _cardapio_em_texto(produtos):

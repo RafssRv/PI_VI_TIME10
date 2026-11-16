@@ -678,7 +678,7 @@ function desenharPedido(pedido, destino) {
   const chavesAgora = [];
 
   itens.forEach((item) => {
-    const chave = `${item.produto}|${item.quantidade}|${item.observacao || ""}`;
+    const chave = `${item.produto}|${item.tamanho || ""}|${item.quantidade}|${item.observacao || ""}`;
     chavesAgora.push(chave);
     const ehNovo = naComanda && chavesDosItens.indexOf(chave) === -1;
 
@@ -695,7 +695,8 @@ function desenharPedido(pedido, destino) {
 
     const produto = document.createElement("div");
     produto.className = "produto";
-    produto.textContent = item.produto;
+    // so pizza tem tamanho, e ele aparece do lado do nome: "Pizza de Calabresa (grande)"
+    produto.textContent = item.tamanho ? `${item.produto} (${item.tamanho})` : item.produto;
     if (ehNovo) {
       const selo = document.createElement("span");
       selo.className = "selo-novo";

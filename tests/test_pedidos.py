@@ -20,8 +20,8 @@ class TestPedidoQueDaCerto:
         pedido = repositorio.salvar_pedido(
             db, ana.id,
             [
-                {"produto": "margherita", "quantidade": 2, "observacao": "sem cebola"},
-                {"produto": "coca cola", "quantidade": 1},
+                {"produto": "margherita", "tamanho": "grande", "quantidade": 2, "observacao": "sem cebola"},
+                {"produto": "coca cola", "tamanho": "2 Litros", "quantidade": 1},
             ],
             endereco_entrega="Rua das Palmeiras, 120",
             forma_pagamento="pix",
@@ -37,27 +37,27 @@ class TestPedidoQueDaCerto:
         nao pode reescrever o historico.
         """
         produto = repositorio.buscar_produto(db, "margherita")
-        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "quantidade": 1}])
+        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "tamanho": "grande", "quantidade": 1}])
         assert pedido.itens[0].preco_unitario == produto.preco
 
     def test_guarda_a_observacao(self, db, ana):
         pedido = repositorio.salvar_pedido(
-            db, ana.id, [{"produto": "margherita", "quantidade": 1, "observacao": "bem assada"}]
+            db, ana.id, [{"produto": "margherita", "tamanho": "grande", "quantidade": 1, "observacao": "bem assada"}]
         )
         assert pedido.itens[0].observacao == "bem assada"
 
     def test_sem_endereco_usa_o_do_cadastro(self, db, ana):
         # o Sr. Antonio das personas nao quer ditar o endereco toda vez
-        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "quantidade": 1}])
+        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "tamanho": "grande", "quantidade": 1}])
         assert pedido.endereco_entrega == ana.endereco
 
     def test_nasce_aberto(self, db, ana):
-        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "quantidade": 1}])
+        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "tamanho": "grande", "quantidade": 1}])
         assert pedido.status == "aberto"
 
     def test_aceita_quantidade_em_texto(self, db, ana):
         # o modelo de linguagem devolve "3" com frequencia
-        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "quantidade": "3"}])
+        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "tamanho": "grande", "quantidade": "3"}])
         assert pedido.itens[0].quantidade == 3
 
 
@@ -86,11 +86,11 @@ class TestValidacaoContraOCardapio:
 class TestQuantidade:
     def test_zero_nao_passa(self, db, ana):
         with pytest.raises(ValueError, match="maior que zero"):
-            repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "quantidade": 0}])
+            repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "tamanho": "grande", "quantidade": 0}])
 
     def test_negativa_nao_passa(self, db, ana):
         with pytest.raises(ValueError):
-            repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "quantidade": -2}])
+            repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "tamanho": "grande", "quantidade": -2}])
 
     def test_quebrada_nao_e_truncada_em_silencio(self, db, ana):
         """
@@ -98,15 +98,15 @@ class TestQuantidade:
         melhor devolver a duvida para o cliente.
         """
         with pytest.raises(ValueError, match="quebrada"):
-            repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "quantidade": 1.5}])
+            repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "tamanho": "grande", "quantidade": 1.5}])
 
     def test_inteiro_disfarcado_de_float_passa(self, db, ana):
-        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "quantidade": 2.0}])
+        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "tamanho": "grande", "quantidade": 2.0}])
         assert pedido.itens[0].quantidade == 2
 
     def test_texto_que_nao_e_numero_nao_passa(self, db, ana):
         with pytest.raises(ValueError):
-            repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "quantidade": "duas"}])
+            repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "tamanho": "grande", "quantidade": "duas"}])
 
 
 class TestPedidoInvalido:
@@ -116,7 +116,7 @@ class TestPedidoInvalido:
 
     def test_cliente_inexistente_nao_grava(self, db):
         with pytest.raises(ValueError, match="nao existe"):
-            repositorio.salvar_pedido(db, 999999, [{"produto": "margherita", "quantidade": 1}])
+            repositorio.salvar_pedido(db, 999999, [{"produto": "margherita", "tamanho": "grande", "quantidade": 1}])
 
     def test_um_item_ruim_derruba_o_pedido_inteiro(self, db, ana):
         """ACID: ou grava tudo, ou nao grava nada. nao existe pedido pela metade."""
@@ -125,7 +125,7 @@ class TestPedidoInvalido:
             repositorio.salvar_pedido(
                 db, ana.id,
                 [
-                    {"produto": "margherita", "quantidade": 1},
+                    {"produto": "margherita", "tamanho": "grande", "quantidade": 1},
                     {"produto": "pizza de unicornio", "quantidade": 1},
                 ],
             )
@@ -134,15 +134,70 @@ class TestPedidoInvalido:
     def test_a_sessao_sobrevive_ao_erro(self, db, ana):
         with pytest.raises(ValueError):
             repositorio.salvar_pedido(db, ana.id, [])
-        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "quantidade": 1}])
+        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "tamanho": "grande", "quantidade": 1}])
         assert pedido.id is not None
 
 
 class TestDinheiro:
     def test_total_e_decimal_e_nao_float(self, db, ana):
-        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "quantidade": 3}])
+        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "tamanho": "grande", "quantidade": 3}])
         assert isinstance(pedido.total, Decimal)
 
     def test_total_com_duas_casas(self, db, ana):
-        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "quantidade": 3}])
+        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "tamanho": "grande", "quantidade": 3}])
         assert pedido.total == pedido.total.quantize(Decimal("0.01"))
+
+
+class TestTamanhoDaPizza:
+    def test_preco_sai_do_tamanho_escolhido(self, db, ana):
+        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "calabresa", "tamanho": "média", "quantidade": 2}])
+        item = pedido.itens[0]
+        assert item.preco_unitario == Decimal("49.90")
+        assert item.tamanho.nome == "média"
+        assert pedido.total == Decimal("99.80")
+
+    def test_tamanho_falado_sem_acento_tambem_vale(self, db, ana):
+        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "calabresa", "tamanho": "media", "quantidade": 1}])
+        assert pedido.itens[0].tamanho.nome == "média"
+
+    def test_pizza_sem_tamanho_nao_grava(self, db, ana):
+        antes = quantos_pedidos(db)
+        with pytest.raises(ValueError, match="tamanho"):
+            repositorio.salvar_pedido(db, ana.id, [{"produto": "calabresa", "quantidade": 1}])
+        assert quantos_pedidos(db) == antes
+
+    def test_tamanho_que_nao_existe_nao_grava(self, db, ana):
+        with pytest.raises(ValueError, match="tamanho"):
+            repositorio.salvar_pedido(db, ana.id, [{"produto": "calabresa", "tamanho": "gigante", "quantidade": 1}])
+
+    def test_agua_nao_tem_tamanho(self, db, ana):
+        with pytest.raises(ValueError, match="tamanho"):
+            repositorio.salvar_pedido(db, ana.id, [{"produto": "agua mineral", "tamanho": "grande", "quantidade": 1}])
+
+    def test_agua_grava_sem_tamanho(self, db, ana):
+        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "agua mineral", "quantidade": 1}])
+        assert pedido.itens[0].tamanho_id is None
+
+    def test_refrigerante_sem_tamanho_nao_grava(self, db, ana):
+        with pytest.raises(ValueError, match="tamanho"):
+            repositorio.salvar_pedido(db, ana.id, [{"produto": "coca cola", "quantidade": 1}])
+
+    def test_refrigerante_grava_com_o_preco_do_tamanho(self, db, ana):
+        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "guarana", "tamanho": "Lata", "quantidade": 3}])
+        assert (pedido.itens[0].tamanho.nome, pedido.itens[0].preco_unitario, pedido.total) == (
+            "Lata", Decimal("4.00"), Decimal("12.00"))
+
+    def test_tamanho_de_pizza_nao_vale_pra_refrigerante(self, db, ana):
+        with pytest.raises(ValueError, match="tamanho"):
+            repositorio.salvar_pedido(db, ana.id, [{"produto": "coca cola", "tamanho": "grande", "quantidade": 1}])
+
+    def test_preco_confirmado_de_outro_tamanho_nao_grava(self, db, ana):
+        # o cliente ouviu o preco da media; gravar o da grande seria cobrar diferente do resumo
+        with pytest.raises(ValueError, match="preço mudou"):
+            repositorio.salvar_pedido(db, ana.id, [{"produto": "calabresa", "tamanho": "grande", "quantidade": 1,
+                                                    "preco_confirmado": Decimal("49.90")}])
+
+    def test_historico_traz_o_tamanho(self, db, ana):
+        repositorio.salvar_pedido(db, ana.id, [{"produto": "calabresa", "tamanho": "pequena", "quantidade": 1}])
+        ultimo = repositorio.historico_cliente(db, ana.id, limite=1)[0]
+        assert ultimo.itens[0].tamanho.nome == "pequena"
