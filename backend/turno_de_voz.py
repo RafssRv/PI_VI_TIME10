@@ -183,9 +183,11 @@ async def _atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, ate
             atendimento._pendencia or "Não consegui ouvir palavras nessa fala. Pode falar mais perto do microfone?"),
             "eventos": []}
     else:
-        monitor.registrar_transcricao(atendimento.id_chamada, "cliente", texto_cliente, turno)
+        # o painel do admin tambem fica aberto numa tela: recebe a mesma legenda, sem o cpf
+        texto_na_tela = atendimento.texto_para_tela(texto_cliente)
+        monitor.registrar_transcricao(atendimento.id_chamada, "cliente", texto_na_tela, turno)
         await websocket.send_json({"tipo": "transcricao", "turno": turno, "quem": "cliente",
-                                   "texto": atendimento.texto_para_tela(texto_cliente), "parcial": False})
+                                   "texto": texto_na_tela, "parcial": False})
         # 3. atendimento: identifica/cadastra o cliente e depois interpreta o pedido.
         monitor.atualizar_etapa(atendimento.id_chamada, "pensando", turno)
         t_llm = time.perf_counter()

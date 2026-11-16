@@ -354,3 +354,41 @@ class TestAtendenteFalaPrimeiro:
 
         monkeypatch.setattr(turno_de_voz, "carregar_agente", falha)
         turno_de_voz._aquecer_agente()
+
+
+def test_cpf_ditado_nao_chega_ao_monitor_do_admin(tmp_path, monkeypatch):
+    registros = []
+
+    class Monitor:
+        def registrar_transcricao(self, chamada_id, quem, texto, turno):
+            registros.append((quem, texto))
+
+        def __getattr__(self, nome):
+            return lambda *argumentos, **opcoes: None
+
+    def sintetizar(texto, caminho):
+        caminho.write_bytes(audio_wav(111))
+        return caminho
+
+    class Socket:
+        async def send_json(self, mensagem):
+            pass
+
+        async def send_bytes(self, dados):
+            pass
+
+    atendimento = Atendimento(conversar=lambda *a, **k: pytest.fail("o modelo não deve ser chamado"))
+    atendimento.saudacao()
+    # cpf com digito verificador errado: recusado antes de consultar o banco
+    cpf = "529.982.247-26"
+    monkeypatch.setattr(turno_de_voz, "monitor", Monitor())
+    monkeypatch.setattr(turno_de_voz, "_agente", {
+        "salvar_fala_em_wav": audio_service.salvar_fala_em_wav,
+        "transcrever": lambda caminho, dica=None: "meu cpf é " + cpf,
+        "sintetizar_resposta": sintetizar,
+    })
+
+    asyncio.run(turno_de_voz.atender_turno(Socket(), audio_wav(111), 0, 1, atendimento))
+
+    assert ("cliente", "CPF informado") in registros
+    assert all("529" not in texto for _, texto in registros)
