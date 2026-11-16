@@ -1,11 +1,8 @@
-from fastapi import APIRouter, File, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import asyncio
 import logging
-import shutil
 from tempfile import TemporaryFile
 from time import monotonic
-from uuid import uuid4
 
 from atendimento import Atendimento
 from turno_de_voz import atender_turno, saudar
@@ -17,33 +14,6 @@ from protocolo import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-# --- rota 2: mock pra processar o audio inteiro (fases 1 e 2) ---
-@router.post("/api/v1/falar")
-async def processar_audio(audio: UploadFile = File(...)):
-    """
-    endpoint http padrao (fase 2).
-    recebe o arquivo de audio inteiro, salva temporariamente e devolve de volta.
-    """
-    requisicao_id = uuid4().hex
-    try:
-        logger.info("requisicao=%s etapa=upload status=recebido", requisicao_id)
-
-        caminho_temporario = f"temp_{audio.filename}"
-        with open(caminho_temporario, "wb") as buffer:
-            shutil.copyfileobj(audio.file, buffer)
-
-        logger.info("requisicao=%s etapa=upload status=salvo", requisicao_id)
-
-        return FileResponse(
-            path=caminho_temporario,
-            media_type=audio.content_type,
-            filename=f"resposta_da_ia_{audio.filename}"
-        )
-
-    except Exception:
-        logger.warning("requisicao=%s etapa=upload categoria=arquivo", requisicao_id)
-        return JSONResponse(status_code=500, content={"erro": "Não consegui processar o áudio enviado."})
 
 # Os controles de entrada são validados por protocolo.py.
 @router.websocket("/ws/falar")

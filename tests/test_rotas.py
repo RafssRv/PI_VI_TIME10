@@ -64,11 +64,12 @@ def test_diagnostico_so_e_servido_em_desenvolvimento(aplicativo, tmp_path, monke
         assert requisitar(app, caminho)[0] == 404
 
 
-def test_upload_permanece_na_rota_http(aplicativo, tmp_path, monkeypatch):
+def test_upload_http_de_teste_nao_existe_mais(aplicativo, tmp_path, monkeypatch):
+    # a rota gravava no disco um arquivo com o nome enviado pelo cliente e nunca apagava
     monkeypatch.chdir(tmp_path)
     corpo = (b"--teste\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"teste.webm\"\r\n"
              b"Content-Type: audio/webm\r\n\r\naudio de teste\r\n--teste--\r\n")
-    status, recebido = requisitar(aplicativo("dev"), "/api/v1/falar", "POST", corpo,
-                                  [(b"content-type", b"multipart/form-data; boundary=teste")])
-    assert status == 200 and recebido == b"audio de teste"
-    assert (tmp_path / "temp_teste.webm").read_bytes() == b"audio de teste"
+    status, _ = requisitar(aplicativo("dev"), "/api/v1/falar", "POST", corpo,
+                           [(b"content-type", b"multipart/form-data; boundary=teste")])
+    assert status in (404, 405)
+    assert not list(tmp_path.iterdir())

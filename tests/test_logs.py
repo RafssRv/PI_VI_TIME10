@@ -2,7 +2,6 @@
 
 import asyncio
 import gc
-import io
 import json
 import logging
 import sys
@@ -10,7 +9,6 @@ import threading
 import types
 
 import pytest
-from fastapi import UploadFile
 from sqlalchemy.exc import StatementError
 
 from rotas import voz
@@ -200,25 +198,6 @@ def test_json_invalido_do_modelo_nao_vaza_documento(
     falar("a entrega é no meu trabalho")
     conferir_logs(capsys, caplog)
     assert "categoria=modelo_invalido" in caplog.text
-
-
-@pytest.mark.parametrize("falha", [False, True])
-def test_upload_nao_registra_nome_do_arquivo_ou_detalhe_da_falha(
-    monkeypatch, tmp_path, capsys, caplog, falha,
-):
-    caplog.set_level(logging.INFO)
-    monkeypatch.chdir(tmp_path)
-    if falha:
-        def falhar(*a, **k):
-            raise OSError(DADOS)
-        monkeypatch.setattr(voz.shutil, "copyfileobj", falhar)
-    arquivo = UploadFile(io.BytesIO(b"audio"), filename=CPF + ".webm")
-    resposta = asyncio.run(voz.processar_audio(arquivo))
-    assert resposta.status_code == (500 if falha else 200)
-    if falha:
-        assert not any(s in resposta.body.decode() for s in SEGREDOS)
-    conferir_logs(capsys, caplog)
-    assert "etapa=upload" in caplog.text
 
 
 def test_falha_inesperada_da_chamada_nao_escapa_para_traceback_do_servidor(
