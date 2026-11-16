@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import AMBIENTE
 from rotas.voz import router as rotas_de_voz
+from rotas.admin import router as rotas_do_admin
 
 RAIZ = Path(__file__).resolve().parent.parent
 app = FastAPI(title="Backend Pizzaria - Agente de Voz", version="0.1.0")
@@ -25,5 +26,8 @@ if AMBIENTE == "dev":
 
 
 app.include_router(rotas_de_voz)
+# o painel ainda nao tem login: so existe em desenvolvimento, igual a pagina /teste
+if AMBIENTE == "dev":
+    app.include_router(rotas_do_admin)
 # O mount fica por último para não capturar as rotas HTTP/WebSocket da API.
 app.mount("/", StaticFiles(directory=RAIZ / "frontend", html=True), name="frontend")
