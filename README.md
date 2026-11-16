@@ -32,13 +32,17 @@ O Whisper baixa o modelo `base` no primeiro uso. A voz do Piper fica em `backend
 
 ## Configuração
 
-Variáveis de ambiente lidas por [backend/config.py](backend/config.py):
+Variáveis de ambiente do backend, a maioria lida por [backend/config.py](backend/config.py):
 
 | Variável | Uso |
 | :-- | :-- |
 | `DATABASE_URL` | Padrão: `postgresql+psycopg://pizzaria:pizzaria123@127.0.0.1:5432/pizzaria`. |
 | `AMBIENTE` | Padrão `dev`, que habilita a página de diagnóstico `/teste`. |
 | `CPF_HMAC_SECRET` | Obrigatório fora de `dev`. Mantenha o mesmo segredo na carga dos dados e no servidor. |
+| `OLLAMA_URL` | Padrão: `http://127.0.0.1:11434`. |
+| `OLLAMA_MODEL` | Padrão: `llama3.2:3b`. Rode `ollama pull` do modelo antes de trocar. |
+| `WHISPER_MODEL` | Padrão: `base`. Lida por `backend/agente/services/whisper_service.py`. |
+| `WHISPER_DEVICE` | Padrão: `cuda`, com retorno automático para CPU. |
 
 ## Estrutura
 
