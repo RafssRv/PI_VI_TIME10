@@ -5,8 +5,10 @@
 import asyncio
 import hashlib
 import logging
+import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from monitor import monitor
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +75,7 @@ async def rodar_sem_travar(websocket, turno, etapa, funcao, *argumentos):
 async def saudar(websocket, atendimento):
     """o atendente fala primeiro. se a voz falhar, o texto ja esta na tela e a chamada segue."""
     texto = atendimento.saudacao()
+    monitor.registrar_transcricao(atendimento.id_chamada, "atendente", texto, 0)
     await websocket.send_json({"tipo": "transcricao", "turno": 0, "quem": "atendente",
                                "texto": texto, "parcial": False})
     audio = _saudacoes.get(texto)
@@ -116,6 +119,8 @@ async def atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, aten
 
 
 async def _atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, atendimento, pasta):
+    inicio_turno_global = time.perf_counter()
+    metricas = {"turno": turno}
     try:
         agente = carregar_agente()
     except ImportError:
@@ -125,6 +130,8 @@ async def _atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, ate
         return amostra_inicio
 
     # 1. salva a fala do cliente no diretorio exclusivo deste turno.
+    monitor.atualizar_etapa(atendimento.id_chamada, "transcrevendo", turno)
+    t0 = time.perf_counter()
     try:
         caminho_wav, amostra_fim = await rodar_sem_travar(
             websocket, turno, "transcrevendo",
@@ -144,6 +151,7 @@ async def _atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, ate
                           atendimento.id_chamada, turno, "transcricao")
         return amostra_fim
 
+    metricas["whisper_ms"] = round((time.perf_counter() - t0) * 1000)
     texto_cliente = texto_cliente.strip()
     logger.info("chamada=%s turno=%s etapa=transcricao status=concluida",
                 atendimento.id_chamada, turno)
@@ -153,9 +161,12 @@ async def _atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, ate
             atendimento._pendencia or "Não consegui ouvir palavras nessa fala. Pode falar mais perto do microfone?"),
             "eventos": []}
     else:
+        monitor.registrar_transcricao(atendimento.id_chamada, "cliente", texto_cliente, turno)
         await websocket.send_json({"tipo": "transcricao", "turno": turno, "quem": "cliente",
                                    "texto": texto_cliente, "parcial": False})
         # 3. atendimento: identifica/cadastra o cliente e depois interpreta o pedido.
+        monitor.atualizar_etapa(atendimento.id_chamada, "pensando", turno)
+        t_llm = time.perf_counter()
         try:
             resultado = await rodar_sem_travar(
                 websocket, turno, "pensando", atendimento.responder_com_eventos, texto_cliente)
@@ -164,21 +175,27 @@ async def _atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, ate
                               "Não consegui concluir o atendimento. Pode tentar novamente?",
                               atendimento.id_chamada, turno, "atendimento")
             return amostra_fim
+        metricas["llm_ms"] = round((time.perf_counter() - t_llm) * 1000)
         if getattr(atendimento, "ultimo_rastro", None) is not None:
             atendimento.ultimo_rastro["audio_cliente_sha256"] = hashlib.sha256(caminho_wav.read_bytes()).hexdigest()
 
     # A gravação já terminou: a tela precisa saber mesmo se a síntese falhar depois.
     for evento in resultado["eventos"]:
         await websocket.send_json({**evento, "turno": turno})
+        if evento.get("tipo") in ("pedido", "pedido_salvo"):
+            monitor.atualizar_comanda(atendimento.id_chamada, evento)
 
     texto_resposta = resultado["texto"].strip()
     logger.info("chamada=%s turno=%s etapa=atendimento status=concluida",
                 atendimento.id_chamada, turno)
 
+    monitor.registrar_transcricao(atendimento.id_chamada, "atendente", texto_resposta, turno)
     await websocket.send_json({"tipo": "transcricao", "turno": turno, "quem": "atendente",
                                "texto": texto_resposta, "parcial": False})
 
     # 4. piper: gera a voz no mesmo diretorio exclusivo.
+    monitor.atualizar_etapa(atendimento.id_chamada, "respondendo", turno)
+    t_tts = time.perf_counter()
     try:
         caminho_resposta = await rodar_sem_travar(
             websocket, turno, "respondendo", agente["sintetizar_resposta"], texto_resposta,
@@ -188,6 +205,10 @@ async def _atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, ate
                           atendimento.id_chamada, turno, "sintese")
         return amostra_fim
 
+    metricas["piper_ms"] = round((time.perf_counter() - t_tts) * 1000)
+    metricas["total_ms"] = round((time.perf_counter() - inicio_turno_global) * 1000)
+    monitor.registrar_metricas(atendimento.id_chamada, turno, metricas)
+
     # 5. manda o audio pra tela: avisa q vai chegar, manda o arquivo e avisa q acabou
     await websocket.send_json({"tipo": "audio_resposta", "turno": turno, "formato": "audio/wav"})
     audio_resposta = caminho_resposta.read_bytes()
@@ -196,4 +217,5 @@ async def _atender_turno(websocket, audio_da_chamada, amostra_inicio, turno, ate
     await websocket.send_bytes(audio_resposta)
     await websocket.send_json({"tipo": "fim_audio", "turno": turno})
 
+    monitor.atualizar_etapa(atendimento.id_chamada, "ouvindo", turno)
     return amostra_fim

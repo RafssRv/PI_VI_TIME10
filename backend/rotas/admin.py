@@ -3,16 +3,31 @@
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
 import painel
 import repositorio
 from database import get_db
+from monitor import monitor
 
 router = APIRouter(prefix="/api/admin")
 logger = logging.getLogger(__name__)
+
+
+@router.websocket("/ws/monitor")
+async def websocket_monitor(websocket: WebSocket):
+    """Canal WebSocket para o monitoramento em tempo real das chamadas."""
+    await monitor.conectar(websocket)
+    try:
+        while True:
+            # Mantém conexão viva escutando pings ou mensagens do cliente admin
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        monitor.desconectar(websocket)
+    except Exception:
+        monitor.desconectar(websocket)
 
 
 @router.get("/painel")

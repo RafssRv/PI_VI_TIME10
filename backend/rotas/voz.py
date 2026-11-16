@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from atendimento import Atendimento
 from turno_de_voz import atender_turno, saudar
+from monitor import monitor
 from protocolo import (
     DURACAO_MAXIMA_CHAMADA_S, LIMITE_AUDIO_CHAMADA_BYTES, LIMITE_BLOCO_AUDIO_BYTES,
     VERSAO_PROTOCOLO, ErroProtocolo, validar_controle,
@@ -52,6 +53,7 @@ async def websocket_audio(websocket: WebSocket):
     prazo = monotonic() + DURACAO_MAXIMA_CHAMADA_S
     atendimento = Atendimento()
     logger.info("chamada=%s etapa=conexao status=aberta", atendimento.id_chamada)
+    monitor.iniciar_chamada(atendimento.id_chamada)
     await websocket.send_json({"tipo": "pronto", "versao_protocolo": VERSAO_PROTOCOLO})
     iniciada = False
     ultimo_turno = 0
@@ -100,6 +102,7 @@ async def websocket_audio(websocket: WebSocket):
                     if iniciada:
                         raise ErroProtocolo("A chamada já foi iniciada.")
                     iniciada = True
+                    monitor.atualizar_etapa(atendimento.id_chamada, "saudando", 0)
                     await saudar(websocket, atendimento)
                     continue
                 if tipo == "encerrar_chamada":
@@ -118,6 +121,7 @@ async def websocket_audio(websocket: WebSocket):
                     bytes_no_ultimo_turno = len(audio_da_chamada)
                     # Não interromper uma gravação no banco quando o prazo vencer.
                     # O loop encerra a recepção assim que o turno em andamento terminar.
+                    monitor.atualizar_etapa(atendimento.id_chamada, "transcrevendo", turno)
                     amostra_inicio = await atender_turno(
                         websocket, audio_da_chamada, amostra_inicio, turno, atendimento)
                 else:
@@ -143,3 +147,6 @@ async def websocket_audio(websocket: WebSocket):
             await websocket.close(code=1011)
         except Exception:
             logger.warning("chamada=%s etapa=conexao categoria=envio_erro", atendimento.id_chamada)
+    finally:
+        pedido_id = getattr(atendimento, "_pedido_salvo", {}).get("pedido_id") if getattr(atendimento, "_pedido_salvo", None) else None
+        monitor.encerrar_chamada(atendimento.id_chamada, "finalizada", pedido_id)

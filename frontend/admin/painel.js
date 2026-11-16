@@ -1,7 +1,7 @@
-// painel do administrador: le /api/admin/painel e desenha tudo em SVG/HTML, sem biblioteca
-// (o projeto roda sem internet). as funcoes de cima sao puras e testadas em tests/frontend.
+// painel do administrador: Dashboard de Vendas + Monitoramento de Atendimentos ao Vivo
+// (o projeto roda sem biblioteca externa, 100% nativo para funcionar sem internet).
 
-const ATUALIZAR_A_CADA_MS = 30000;   // pedido feito na ligacao aparece sozinho durante a apresentacao
+const ATUALIZAR_A_CADA_MS = 30000;
 const CORES = ["#c8442b", "#d99a2b", "#2e9e61", "#5b5e57", "#8e2a1c", "#9a9d95"];
 
 const PAGAMENTOS = {
@@ -22,7 +22,7 @@ const STATUS = {
   cancelado: "Cancelado"
 };
 
-// ---------- formatacao ----------
+// ---------- formatacao basica ----------
 function escapar(texto) {
   return String(texto ?? "").replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
@@ -47,7 +47,6 @@ function rotuloPeriodo(dias) {
   return dias ? `vs. ${dias} dias anteriores` : "";
 }
 
-// {texto, classe} da variacao contra o periodo anterior
 function formatarVariacao(percentual, dias) {
   if (percentual === null || percentual === undefined || !dias) {
     return { texto: dias ? "sem comparação" : "", classe: "neutra" };
@@ -76,7 +75,6 @@ function capitalizar(texto) {
   return String(texto || "").replace(/^\p{L}/u, (c) => c.toUpperCase());
 }
 
-// teto "redondo" pro eixo: 37 -> 40, 812 -> 1000, assim as linhas de grade caem em numeros limpos
 function tetoDoEixo(maximo) {
   if (!(maximo > 0)) return 1;
   const potencia = 10 ** Math.floor(Math.log10(maximo));
@@ -84,8 +82,7 @@ function tetoDoEixo(maximo) {
   return passo * potencia;
 }
 
-// ---------- graficos (devolvem string SVG/HTML) ----------
-// barras verticais. pontos: [{valor, rotulo, dica}]
+// ---------- graficos svg (dashboard) ----------
 function graficoBarras(pontos, opcoes = {}) {
   const largura = opcoes.largura || 640;
   const altura = opcoes.altura || 220;
@@ -96,7 +93,6 @@ function graficoBarras(pontos, opcoes = {}) {
   const teto = tetoDoEixo(Math.max(0, ...pontos.map((p) => p.valor)));
   const fatia = areaL / Math.max(pontos.length, 1);
   const larguraBarra = Math.max(1, Math.min(fatia * 0.72, 36));
-  // no maximo ~10 rotulos no eixo x, senao 90 dias viram um borrao
   const pulo = Math.ceil(pontos.length / 10);
 
   const partes = [`<svg viewBox="0 0 ${largura} ${altura}" role="img" aria-label="${escapar(opcoes.descricao || "")}">`];
@@ -120,7 +116,6 @@ function graficoBarras(pontos, opcoes = {}) {
   return partes.join("");
 }
 
-// rosca com legenda. fatias: [{rotulo, valor, detalhe}]
 function graficoRosca(fatias, centro) {
   const total = fatias.reduce((soma, f) => soma + f.valor, 0);
   if (!total) return `<div class="vazio">Sem pedidos neste período.</div>`;
@@ -145,7 +140,6 @@ function graficoRosca(fatias, centro) {
     </svg><ul class="legenda">${legenda.join("")}</ul>`;
 }
 
-// barras horizontais. linhas: [{nome, valor, texto, detalhe}]
 function barrasHorizontais(linhas) {
   if (!linhas.length) return `<li class="vazio">Sem vendas neste período.</li>`;
   const maximo = Math.max(...linhas.map((l) => l.valor), 1);
@@ -158,19 +152,53 @@ function barrasHorizontais(linhas) {
     </li>`).join("");
 }
 
-// ---------- tela ----------
+// ========================================================
+// CONTROLE DO PAINEL: DASHBOARD E MONITOR
+// ========================================================
 function iniciarPainel(documento, janela) {
   const $ = (id) => documento.getElementById(id);
-  const painel = $("painel");
+  const secaoDashboard = $("secao-dashboard");
+  const secaoMonitor = $("secao-monitor");
+  const btnAbaDashboard = $("aba-btn-dashboard");
+  const btnAbaMonitor = $("aba-btn-monitor");
+  const controlesPeriodo = $("controles-periodo");
   const aviso = $("aviso");
   const dica = $("dica");
-  const botoes = Array.from(documento.querySelectorAll(".periodos button"));
+
+  let abaAtiva = "dashboard";
   let dias = Number(janela.localStorage?.getItem("painel-dias") ?? 30);
   if (![7, 30, 90, 0].includes(dias)) dias = 30;
-  let pedindo = null;
+  let pedindoDashboard = null;
 
+  // Alternar abas
+  function alternarAba(aba) {
+    abaAtiva = aba;
+    if (aba === "dashboard") {
+      btnAbaDashboard.classList.add("ativa");
+      btnAbaDashboard.setAttribute("aria-selected", "true");
+      btnAbaMonitor.classList.remove("ativa");
+      btnAbaMonitor.setAttribute("aria-selected", "false");
+      secaoDashboard.hidden = false;
+      secaoMonitor.hidden = true;
+      controlesPeriodo.hidden = false;
+    } else {
+      btnAbaMonitor.classList.add("ativa");
+      btnAbaMonitor.setAttribute("aria-selected", "true");
+      btnAbaDashboard.classList.remove("ativa");
+      btnAbaDashboard.setAttribute("aria-selected", "false");
+      secaoMonitor.hidden = false;
+      secaoDashboard.hidden = true;
+      controlesPeriodo.hidden = true;
+    }
+  }
+
+  btnAbaDashboard?.addEventListener("click", () => alternarAba("dashboard"));
+  btnAbaMonitor?.addEventListener("click", () => alternarAba("monitor"));
+
+  // ---------- 1. DASHBOARD ----------
+  const botoesPeriodo = Array.from(documento.querySelectorAll(".periodos button"));
   function marcarPeriodo() {
-    botoes.forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.dias) === dias)));
+    botoesPeriodo.forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.dias) === dias)));
   }
 
   function mostrarAviso(texto) {
@@ -178,7 +206,7 @@ function iniciarPainel(documento, janela) {
     aviso.hidden = !texto;
   }
 
-  function desenhar(dados) {
+  function desenharDashboard(dados) {
     const r = dados.resumo;
     const d = dados.periodo.dias;
     $("kpi-pedidos").textContent = formatarNumero(r.pedidos);
@@ -251,40 +279,40 @@ function iniciarPainel(documento, janela) {
     $("atualizado").textContent = `atualizado às ${String(hora.getHours()).padStart(2, "0")}:${String(hora.getMinutes()).padStart(2, "0")}`;
   }
 
-  async function carregar() {
-    if (pedindo) pedindo.abort();
+  async function carregarDashboard() {
+    if (pedindoDashboard) pedindoDashboard.abort();
     const controle = new AbortController();
-    pedindo = controle;
-    painel.setAttribute("aria-busy", "true");
+    pedindoDashboard = controle;
+    secaoDashboard.setAttribute("aria-busy", "true");
     try {
       const resposta = await fetch(`/api/admin/painel?dias=${dias}`, { signal: controle.signal, cache: "no-store" });
-      if (resposta.status === 404) throw new Error("O painel só está disponível com AMBIENTE=dev (ainda não tem login).");
-      if (resposta.status === 503) throw new Error("Não consegui consultar o banco. Ele está rodando? (npm run banco)");
+      if (resposta.status === 404) throw new Error("O painel só está disponível com AMBIENTE=dev.");
+      if (resposta.status === 503) throw new Error("Não consegui consultar o banco de dados.");
       if (!resposta.ok) throw new Error("O servidor não conseguiu montar o painel.");
-      desenhar(await resposta.json());
+      desenharDashboard(await resposta.json());
       mostrarAviso("");
     } catch (erro) {
       if (erro.name === "AbortError") return;
-      mostrarAviso(erro instanceof TypeError ? "Não consegui falar com o servidor. Confira se o backend está rodando (npm run dev)." : erro.message);
+      mostrarAviso(erro instanceof TypeError ? "Não consegui falar com o servidor backend." : erro.message);
       $("atualizado").textContent = "sem conexão";
     } finally {
-      if (pedindo === controle) {
-        pedindo = null;
-        painel.classList.remove("carregando");
-        painel.setAttribute("aria-busy", "false");
+      if (pedindoDashboard === controle) {
+        pedindoDashboard = null;
+        secaoDashboard.classList.remove("carregando");
+        secaoDashboard.setAttribute("aria-busy", "false");
       }
     }
   }
 
-  botoes.forEach((botao) => botao.addEventListener("click", () => {
+  botoesPeriodo.forEach((botao) => botao.addEventListener("click", () => {
     dias = Number(botao.dataset.dias);
     janela.localStorage?.setItem("painel-dias", String(dias));
     marcarPeriodo();
-    carregar();
+    carregarDashboard();
   }));
 
-  // dica das barras: o texto vem em partes separadas por "|" (titulo|linha|linha)
-  painel.addEventListener("mousemove", (evento) => {
+  // Tooltip
+  documento.addEventListener("mousemove", (evento) => {
     const alvo = evento.target.closest ? evento.target.closest("[data-dica]") : null;
     if (!alvo || !alvo.dataset.dica) {
       dica.hidden = true;
@@ -296,18 +324,230 @@ function iniciarPainel(documento, janela) {
     dica.style.top = `${evento.clientY}px`;
     dica.hidden = false;
   });
-  painel.addEventListener("mouseleave", () => { dica.hidden = true; });
+  documento.addEventListener("mouseleave", () => { dica.hidden = true; });
 
   marcarPeriodo();
-  carregar();
+  carregarDashboard();
   janela.setInterval(() => {
-    if (documento.visibilityState !== "hidden") carregar();
+    if (documento.visibilityState !== "hidden" && abaAtiva === "dashboard") carregarDashboard();
   }, ATUALIZAR_A_CADA_MS);
-  documento.addEventListener("visibilitychange", () => {
-    if (documento.visibilityState === "visible") carregar();
-  });
+
+  // ---------- 2. MONITORAMENTO AO VIVO (WEBSOCKET) ----------
+  let socketMonitor = null;
+  const chamadasAtivasMap = new Map();
+  let historicoChamadasList = [];
+
+  const monitorBolinha = $("monitor-bolinha");
+  const monitorStatusTexto = $("monitor-status-texto");
+  const statQtdAtivas = $("stat-qtd-ativas");
+  const statQtdHistorico = $("stat-qtd-historico");
+  const badgeAtivas = $("badge-ativas");
+  const pulsoAtivas = $("pulso-ativas");
+  const containerAtivas = $("container-chamadas-ativas");
+  const containerHistorico = $("container-historico-atendimentos");
+
+  function atualizarBadgesAtivas() {
+    const total = chamadasAtivasMap.size;
+    statQtdAtivas.textContent = total;
+    if (total > 0) {
+      badgeAtivas.textContent = total;
+      badgeAtivas.hidden = false;
+      pulsoAtivas.hidden = false;
+    } else {
+      badgeAtivas.hidden = true;
+      pulsoAtivas.hidden = true;
+    }
+  }
+
+  function renderizarChamadasAtivas() {
+    if (chamadasAtivasMap.size === 0) {
+      containerAtivas.innerHTML = `
+        <div class="vazio-monitor">
+          <span class="icone-vazio">🎧</span>
+          <p>Nenhuma chamada acontecendo no momento.</p>
+          <small class="fraco">Quando um cliente iniciar a ligação pelo navegador, ela aparecerá aqui em tempo real com transcrição e latências.</small>
+        </div>`;
+      atualizarBadgesAtivas();
+      return;
+    }
+
+    const cards = Array.from(chamadasAtivasMap.values()).map((ch) => {
+      const etapa = ch.etapa || "ouvindo";
+      const m = ch.metricas_turno || {};
+      const latWhisper = m.whisper_ms ? `${m.whisper_ms} ms` : "—";
+      const latLlm = m.llm_ms ? `${m.llm_ms} ms` : "—";
+      const latPiper = m.piper_ms ? `${m.piper_ms} ms` : "—";
+      const latTotal = m.total_ms ? `${(m.total_ms / 1000).toFixed(1)} s` : "—";
+
+      // Renderizar transcrições recentes
+      const dialogos = (ch.transcricoes || []).map((t) => `
+        <div class="msg-linha ${t.quem}">
+          <span class="msg-autor">${t.quem === "cliente" ? "Cliente" : "Atendente IA"}</span>
+          ${escapar(t.texto)}
+        </div>
+      `).join("") || `<p class="fraco" style="text-align:center;padding:10px;">Aguardando falas...</p>`;
+
+      // Renderizar itens do pedido se houver
+      let comandaHtml = "";
+      if (ch.comanda && ch.comanda.itens && ch.comanda.itens.length > 0) {
+        const itensStr = ch.comanda.itens.map((i) => `${i.quantidade}x ${i.produto}`).join(", ");
+        comandaHtml = `
+          <div class="chamada-comanda-resumo">
+            🛒 <strong>Carrinho em montagem:</strong> ${escapar(itensStr)} | Total: <strong>${formatarDinheiro(ch.comanda.total || 0)}</strong>
+          </div>`;
+      }
+
+      return `
+        <article class="card-chamada-ativa" id="card-ch-${ch.id}">
+          <div class="chamada-cabecalho">
+            <div>
+              <span class="chamada-id-titulo">Chamada #${ch.id.slice(0, 8)}</span>
+              <span class="selo ${etapa}" style="margin-left:8px;">${etapa.toUpperCase()}</span>
+            </div>
+            <span class="chamada-duracao">Turno: <strong>#${ch.turno_atual || 0}</strong></span>
+          </div>
+
+          <div class="pipeline-status-etapas">
+            <div class="etapa-item ${etapa === 'ouvindo' ? 'ativa' : ''}">1. Ouvindo</div>
+            <div class="etapa-item ${etapa === 'transcrevendo' ? 'ativa' : ''}">2. Whisper</div>
+            <div class="etapa-item ${etapa === 'pensando' ? 'ativa' : ''}">3. Llama</div>
+            <div class="etapa-item ${etapa === 'respondendo' ? 'ativa' : ''}">4. Piper</div>
+          </div>
+
+          <div class="metricas-barra-latencias">
+            <div class="metrica-chip"><span>Whisper (STT)</span><strong>${latWhisper}</strong></div>
+            <div class="metrica-chip"><span>Llama 3.2 (LLM)</span><strong>${latLlm}</strong></div>
+            <div class="metrica-chip"><span>Piper (TTS)</span><strong>${latPiper}</strong></div>
+            <div class="metrica-chip destaque-total"><span>Total do Turno</span><strong>${latTotal}</strong></div>
+          </div>
+
+          <div class="dialogo-ao-vivo">
+            ${dialogos}
+          </div>
+
+          ${comandaHtml}
+        </article>`;
+    });
+
+    containerAtivas.innerHTML = cards.join("");
+    atualizarBadgesAtivas();
+
+    // Rola as caixas de diálogo para baixo
+    containerAtivas.querySelectorAll(".dialogo-ao-vivo").forEach((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+  }
+
+  function renderizarHistorico() {
+    statQtdHistorico.textContent = historicoChamadasList.length;
+    if (historicoChamadasList.length === 0) {
+      containerHistorico.innerHTML = `<div class="vazio-monitor"><p>Nenhuma chamada recente registrada.</p></div>`;
+      return;
+    }
+
+    containerHistorico.innerHTML = historicoChamadasList.slice(0, 15).map((ch) => {
+      const hora = ch.fim ? formatarQuando(ch.fim) : (ch.inicio ? formatarQuando(ch.inicio) : "—");
+      const pedidoBadge = ch.pedido_id
+        ? `<span class="hist-pedido-criado">✓ Pedido #${ch.pedido_id} gravado</span>`
+        : `<span class="fraco">Sem pedido gravado</span>`;
+
+      return `
+        <div class="item-historico-chamada">
+          <div class="hist-topo">
+            <span class="hist-id">Chamada #${ch.id.slice(0, 8)}</span>
+            <span class="fraco">${hora}</span>
+          </div>
+          <div class="hist-corpo">
+            <span>Turnos realizados: <strong>${ch.turno_atual || 0}</strong></span> · ${pedidoBadge}
+          </div>
+        </div>`;
+    }).join("");
+  }
+
+  function conectarWebSocketMonitor() {
+    const protocolo = janela.location.protocol === "https:" ? "wss:" : "ws:";
+    const urlWS = `${protocolo}//${janela.location.host}/api/admin/ws/monitor`;
+
+    monitorBolinha.className = "bolinha desconectado";
+    monitorStatusTexto.textContent = "Conectando ao canal em tempo real...";
+
+    try {
+      socketMonitor = new WebSocket(urlWS);
+    } catch (e) {
+      monitorStatusTexto.textContent = "Falha ao iniciar conexão WebSocket.";
+      return;
+    }
+
+    socketMonitor.onopen = () => {
+      monitorBolinha.className = "bolinha conectado";
+      monitorStatusTexto.textContent = "Monitoramento ao vivo conectado";
+    };
+
+    socketMonitor.onmessage = (evento) => {
+      let msg = null;
+      try {
+        msg = JSON.parse(evento.data);
+      } catch (e) {
+        return;
+      }
+
+      if (msg.tipo === "snapshot") {
+        chamadasAtivasMap.clear();
+        (msg.ativas || []).forEach((ch) => chamadasAtivasMap.set(ch.id, ch));
+        historicoChamadasList = msg.historico || [];
+        renderizarChamadasAtivas();
+        renderizarHistorico();
+      } else if (msg.tipo === "chamada_iniciada") {
+        chamadasAtivasMap.set(msg.chamada.id, msg.chamada);
+        renderizarChamadasAtivas();
+      } else if (msg.tipo === "etapa_atualizada") {
+        if (chamadasAtivasMap.has(msg.chamada_id)) {
+          const ch = chamadasAtivasMap.get(msg.chamada_id);
+          ch.etapa = msg.etapa;
+          ch.turno_atual = msg.turno;
+          renderizarChamadasAtivas();
+        }
+      } else if (msg.tipo === "transcricao") {
+        if (chamadasAtivasMap.has(msg.chamada_id)) {
+          const ch = chamadasAtivasMap.get(msg.chamada_id);
+          ch.transcricoes = ch.transcricoes || [];
+          ch.transcricoes.push(msg.registro);
+          renderizarChamadasAtivas();
+        }
+      } else if (msg.tipo === "metricas_turno") {
+        if (chamadasAtivasMap.has(msg.chamada_id)) {
+          const ch = chamadasAtivasMap.get(msg.chamada_id);
+          ch.metricas_turno = msg.metricas;
+          renderizarChamadasAtivas();
+        }
+      } else if (msg.tipo === "comanda_atualizada") {
+        if (chamadasAtivasMap.has(msg.chamada_id)) {
+          const ch = chamadasAtivasMap.get(msg.chamada_id);
+          ch.comanda = msg.comanda;
+          renderizarChamadasAtivas();
+        }
+      } else if (msg.tipo === "chamada_encerrada") {
+        chamadasAtivasMap.delete(msg.chamada.id);
+        historicoChamadasList.unshift(msg.chamada);
+        renderizarChamadasAtivas();
+        renderizarHistorico();
+      }
+    };
+
+    socketMonitor.onclose = () => {
+      monitorBolinha.className = "bolinha desconectado";
+      monitorStatusTexto.textContent = "Desconectado. Tentando reconectar em 5s...";
+      setTimeout(conectarWebSocketMonitor, 5000);
+    };
+
+    socketMonitor.onerror = () => {
+      socketMonitor.close();
+    };
+  }
+
+  conectarWebSocketMonitor();
 }
 
-if (typeof document !== "undefined" && document.getElementById("painel")) {
+if (typeof document !== "undefined" && document.getElementById("secao-dashboard")) {
   iniciarPainel(document, window);
 }

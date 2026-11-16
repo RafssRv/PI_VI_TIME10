@@ -1,6 +1,38 @@
+import os
+import shutil
 import threading
 import wave
 from pathlib import Path
+
+# Configura o caminho de dados foneticos do espeak-ng.
+# No Windows, caminhos contendo acentos (ex: "Área de Trabalho") causam erro de
+# "Illegal byte sequence" ou "No such file" na lib C do espeak-ng.
+# Copiamos para o %LOCALAPPDATA% (sem acentos) se necessario.
+def _garantir_dados_espeak():
+    try:
+        import piper
+        origem = Path(piper.__file__).parent / "espeak-ng-data"
+        if not origem.exists():
+            return
+
+        # Verifica se o caminho original contem caracteres nao-ascii
+        str_origem = str(origem)
+        try:
+            str_origem.encode("ascii")
+            caminho_final = origem
+        except UnicodeEncodeError:
+            # Tem acento no caminho: usa pasta segura no LOCALAPPDATA
+            base_local = os.environ.get("LOCALAPPDATA") or os.environ.get("TEMP") or "C:\\"
+            destino = Path(base_local) / "pizzaria-espeak-ng-data"
+            if not (destino / "phontab").exists():
+                shutil.copytree(origem, destino, dirs_exist_ok=True)
+            caminho_final = destino
+
+        os.environ["ESPEAK_DATA_PATH"] = str(caminho_final)
+    except Exception:
+        pass
+
+_garantir_dados_espeak()
 
 # pasta "agente". os caminhos partem daqui pra funcionar rodando de qualquer pasta
 PASTA_AGENTE = Path(__file__).resolve().parent.parent
