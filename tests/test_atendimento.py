@@ -574,6 +574,17 @@ class TestFechaOPedido:
         assert ana_identificada.carrinho == []
         assert ana_identificada.etapa == "identificado"
 
+    def test_pedido_gravado_continua_conhecido_depois_de_comecar_outro(self, ana_identificada, llama, db):
+        assert ana_identificada.ultimo_pedido_id is None
+        self._pedir_e_fechar(ana_identificada, llama)
+        ana_identificada.responder("sim, pode confirmar")
+        gravado = (db.query(Pedido).filter(Pedido.cliente_id == ana_identificada.cliente_id)
+                   .order_by(Pedido.id.desc()).first())
+        ana_identificada.responder("quero mais uma coca lata")
+        # a comanda ja eh do pedido novo, mas o monitor ainda precisa do que foi gravado
+        assert ana_identificada._pedido_salvo is None
+        assert ana_identificada.ultimo_pedido_id == gravado.id
+
     def test_endereco_novo_vai_no_pedido(self, ana_identificada, llama, db):
         self._pedir_e_fechar(ana_identificada, llama, endereco="Rua Nova, 45, Cambuí",
                             texto="uma margherita grande e duas cocas de 2 litros no pix, entrega na Rua Nova, 45, Cambuí, é só isso")

@@ -123,5 +123,4 @@ async def websocket_audio(websocket: WebSocket):
         except Exception:
             logger.warning("chamada=%s etapa=conexao categoria=envio_erro", atendimento.id_chamada)
     finally:
-        pedido_id = (getattr(atendimento, "_pedido_salvo", None) or {}).get("pedido_id")
-        monitor.encerrar_chamada(atendimento.id_chamada, motivo, pedido_id)
+        monitor.encerrar_chamada(atendimento.id_chamada, motivo, atendimento.ultimo_pedido_id)

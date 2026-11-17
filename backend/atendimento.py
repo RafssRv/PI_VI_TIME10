@@ -174,6 +174,8 @@ class Atendimento:
         self.turno_id = 0
         self.ultimo_rastro = None
         self._pedido_salvo = None
+        # o monitor mostra o pedido da chamada mesmo se o cliente comecar outro depois
+        self.ultimo_pedido_id = None
         # produto do cardapio -> grupo de tamanhos ("pizza", "refrigerante"), pra saber quem precisa de
         # tamanho, e as opcoes faladas de cada grupo ("lata, 600 ml ou 2 litros?")
         self._grupos = {}
@@ -1336,7 +1338,7 @@ class Atendimento:
                 endereco_entrega=self.endereco_entrega,
                 forma_pagamento=self.pagamento,
             )
-            numero = pedido.id
+            numero = self.ultimo_pedido_id = pedido.id
             # Preserve a comanda antes de limpar o carrinho para o próximo pedido.
             self._pedido_salvo = {
                 **self._dados_do_pedido(), "pedido_id": numero,

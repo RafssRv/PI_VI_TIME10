@@ -217,3 +217,18 @@ def test_monitor_registra_por_que_a_chamada_terminou(executar, monkeypatch):
     monkeypatch.setattr(voz, "atender_turno", quebrar)
     executar([texto(INICIO), audio(), texto(FIM)])
     assert motivos == ["finalizada", "conexao_perdida", "erro_protocolo", "erro_servidor"]
+
+
+def test_monitor_recebe_o_pedido_gravado_na_chamada(executar, monkeypatch):
+    pedidos = []
+    monkeypatch.setattr(voz.monitor, "encerrar_chamada",
+                        lambda chamada_id, motivo="finalizada", pedido_id=None: pedidos.append(pedido_id))
+
+    async def gravar(websocket, dados, inicio, turno, atendimento):
+        atendimento.ultimo_pedido_id = 42
+        return inicio + 1
+
+    executar([texto(INICIO)])
+    monkeypatch.setattr(voz, "atender_turno", gravar)
+    executar([texto(INICIO), audio(), texto(FIM)])
+    assert pedidos == [None, 42]
