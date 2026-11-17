@@ -1862,6 +1862,52 @@ class TestTamanhoJuntoDoFechamento:
         assert "Seu pedido ficou assim: 1 Pizza de Calabresa grande" in ana_identificada.responder("grande, é só isso")
 
 
+class TestEsvaziaOPedido:
+    @pytest.mark.parametrize("fala", [
+        "cancela o pedido", "pode cancelar o pedido, por favor", "tira tudo", "limpa o pedido",
+        "não quero mais nada, cancela tudo", "quero começar de novo", "esquece o pedido", "cancela",
+    ])
+    def test_cliente_consegue_esvaziar_o_pedido(self, ana_identificada, llama, db, fala):
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        ana_identificada.responder("uma calabresa média e uma coca lata no pix")
+        resposta = ana_identificada.responder(fala)
+        assert resposta == "Tudo bem, esvaziei o seu pedido. Nada foi registrado. O que vai querer?"
+        assert ana_identificada.carrinho == [] and ana_identificada.pagamento is None
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes
+        assert llama.chamadas == []
+        # e a chamada segue: da pra pedir de novo
+        ana_identificada.responder("uma mussarela grande")
+        assert _itens(ana_identificada) == [("Pizza de Mussarela", 1, "grande")]
+
+    def test_esvaziar_na_hora_da_confirmacao_nao_grava(self, ana_identificada, db):
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        ana_identificada.responder("uma calabresa média no pix, é só isso")
+        assert ana_identificada.etapa == "confirmando_pedido"
+        assert "esvaziei" in ana_identificada.responder("cancela")
+        assert ana_identificada.etapa == "identificado" and ana_identificada.carrinho == []
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes
+
+    def test_sem_itens_avisa_que_ja_esta_vazio(self, ana_identificada):
+        assert ana_identificada.responder("cancela o pedido") == "Seu pedido já está vazio. O que vai querer?"
+
+    @pytest.mark.parametrize("fala", ["não cancela o pedido", "não precisa cancelar o pedido", "não tira tudo"])
+    def test_pedido_negado_nao_esvazia(self, ana_identificada, fala):
+        ana_identificada.responder("uma calabresa média")
+        ana_identificada.responder(fala)
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "média")]
+
+    def test_cancelar_a_troca_nao_esvazia_o_pedido(self, ana_identificada):
+        ana_identificada.responder("uma calabresa média")
+        ana_identificada.responder("troca a calabresa")
+        ana_identificada.responder("cancele a troca")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "média")]
+
+    def test_tirar_um_item_continua_tirando_so_ele(self, ana_identificada):
+        ana_identificada.responder("uma calabresa média e uma coca lata")
+        ana_identificada.responder("tira a coca")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "média")]
+
+
 @pytest.fixture
 def tamanhos_novos(db):
     """tamanhos cadastrados depois do seed: nenhum deles esta escrito no codigo."""

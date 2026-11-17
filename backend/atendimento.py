@@ -55,6 +55,15 @@ QUER_MUDAR_ENDERECO = re.compile(
     r"\b(?:mudar|muda|trocar|troca|alterar|altera|corrigir|corrige|outro|novo)\b.*\bendereco\b|"
     r"\bendereco\b.*\b(?:errado|outro|novo|diferente)\b"
 )
+# "cancela o pedido", "tira tudo", "quero começar de novo": esvazia o rascunho, que ainda nao foi gravado
+ESVAZIAR_PEDIDO = re.compile(
+    r"\b(?:cancel|limp|esvazi|apag|zer|esquec)\w*\b.*\b(?:pedido|tudo|carrinho|comanda)\b|"
+    r"\b(?:tir|retir|remov)\w*\s+tudo\b|\bcomecar (?:tudo )?de novo\b|\bdesisti do pedido\b"
+)
+# sozinha, a palavra so cancela o pedido quando nao ha uma troca esperando resposta
+SO_CANCELAR = {"cancela", "cancelar", "cancele", "pode cancelar", "quero cancelar"}
+NAO_ESVAZIAR = re.compile(r"\bnao (?:(?:quero|precisa|vou|pode|e para|e pra) )?"
+                          r"(?:cancel|limp|esvazi|apag|zer|esquec|tir|retir|remov)")
 CPF_ESCRITO = re.compile(r"\b\d{3}[.\s-]?\d{3}[.\s-]?\d{3}[.\s-]?\d{2}\b")
 # o que vem depois do endereco na mesma frase: "rua x, 10, e so isso"
 FIM_DO_ENDERECO = re.compile(r"[,.;]?\s*\b(?:[eé] s[oó] isso|s[oó] isso|por favor|pode fechar|pago|pagamento|"
@@ -571,6 +580,8 @@ class Atendimento:
             self._pedindo_endereco = True
             return "Claro! Qual é o novo endereço?"
         sem_cortesia = re.sub(r"\bnao( nao)+\b", "nao", " ".join(CORTESIA.sub("", normalizado).split()))
+        if self._quer_esvaziar(sem_cortesia):
+            return self._esvaziar_pedido()
         # "lata, no pix, é só isso" responde o tamanho e fecha: o tamanho não pode se perder no caminho
         responde_tamanho = bool((self._duvida_item or {}).get("campo") == "tamanho" and separar_tamanhos(texto, self._vocabulario)[1])
         if (FIM_DO_PEDIDO.search(sem_cortesia) and not AINDA_NAO_ACABOU.search(texto) and not responde_tamanho
@@ -758,6 +769,20 @@ class Atendimento:
 
         self.historico.append({"role": "assistant", "content": fala})
         return fala
+
+    def _quer_esvaziar(self, normalizado):
+        if NAO_ESVAZIAR.search(normalizado):
+            return False
+        return bool(ESVAZIAR_PEDIDO.search(normalizado)
+                    or (normalizado in SO_CANCELAR and not self._troca_pendente))
+
+    def _esvaziar_pedido(self):
+        tinha_itens = bool(self.carrinho)
+        self._limpar_pedido()
+        self.historico = []
+        if not tinha_itens:
+            return "Seu pedido já está vazio. O que vai querer?"
+        return "Tudo bem, esvaziei o seu pedido. Nada foi registrado. O que vai querer?"
 
     def _receber_novo_endereco(self, texto):
         desistiu = sim_ou_nao(texto) is False and len(_normalizar(texto).split()) <= 3
@@ -1301,6 +1326,8 @@ class Atendimento:
         normalizado = _normalizar(texto).strip()
         palavras = set(normalizado.split())
         if "?" in texto or len(palavras) > 2 or sim_ou_nao(texto) is False:
+            return False
+        if self._quer_esvaziar(normalizado):
             return False
         # no pix, endereco novo e "tira a coca" sao mudancas no pedido, nao falas soltas
         if palavras & (set(repositorio.SINAIS_DE_PAGAMENTO) | {"cartao", "maquininha", "endereco", "entrega", "rua",
