@@ -1909,6 +1909,31 @@ class TestJeitosDeTrocar:
         assert _itens(ana_identificada) == [("Pizza de Mussarela", 1, "grande")]
         assert llama.chamadas == []
 
+    @pytest.mark.parametrize("fala", [
+        "em vez da calabresa quero uma mussarela", "em vez da calabresa, uma mussarela",
+        "no lugar da calabresa coloca uma mussarela", "ao invés da calabresa pode ser uma mussarela",
+        "quero uma mussarela no lugar da calabresa", "me vê uma mussarela em vez da calabresa",
+        "muda a calabresa pra mussarela", "muda a calabresa para uma mussarela",
+    ])
+    def test_outras_formas_de_troca_tiram_o_item_antigo(self, ana_identificada, llama, fala):
+        # antes a mussarela entrava e a calabresa ficava: pedido com uma pizza a mais
+        ana_identificada.responder("uma calabresa grande")
+        ana_identificada.responder(fala)
+        assert _itens(ana_identificada) == [("Pizza de Mussarela", 1, "grande")]
+        assert llama.chamadas == []
+
+    def test_mude_continua_corrigindo_a_quantidade(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        ana_identificada.responder("mude para duas calabresas")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 2, "grande")]
+
+    def test_item_que_nao_esta_no_pedido_nao_e_trocado(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        ana_identificada.responder("em vez da portuguesa quero uma mussarela")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+        assert ana_identificada.responder("deixa pra lá") == (
+            "Tudo bem, mantive seu pedido como estava. Quer algo mais?")
+
     def test_nao_sem_virgula_continua_negando_a_troca(self, ana_identificada):
         ana_identificada.responder("uma calabresa grande")
         ana_identificada.responder("não troca a calabresa por uma mussarela")

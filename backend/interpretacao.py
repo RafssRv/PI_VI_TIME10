@@ -70,8 +70,11 @@ ESQUEMA_DO_PEDIDO = {
 
 PEDIDO_DE_TROCA = re.compile(
     r"\b(?:troca|trocar|troque|troquem|substitua|substituir|substitui)\b"
-    r"|\b(?:em vez de|no lugar de)\b"
+    r"|\b(?:em vez|ao inves|no lugar) d[eao]s?\b"
 )
+# "muda a calabresa pra mussarela". O verbo sozinho também corrige quantidade ("mude para duas"),
+# então só é troca quando os dois lados do "pra" citam um produto: quem confere é o atendimento.
+MUDA_PARA = re.compile(r"\b(?:mud|alter)(?:a|e|ar)\s+(.+?)\s+(?:pra|para|por|pela|pelo)\s+(.+)")
 QUANTIDADES_DA_TROCA = {
     "zero": 0, "um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3,
     "quatro": 4, "cinco": 5, "seis": 6, "sete": 7, "oito": 8, "nove": 9, "dez": 10,

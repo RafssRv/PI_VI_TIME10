@@ -27,7 +27,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 import repositorio
 from interpretacao import (
-    ESQUEMA_DO_PEDIDO, PEDIDO_DE_TROCA, _item_da_troca, _nome_na_troca, _normalizar,
+    ESQUEMA_DO_PEDIDO, MUDA_PARA, PEDIDO_DE_TROCA, _item_da_troca, _nome_na_troca, _normalizar,
     confirmacao_explicita, extrair_digitos, extrair_endereco, extrair_nome,
     interpretar_resposta, parece_confirmacao, sim_ou_nao,
 )
@@ -659,6 +659,9 @@ class Atendimento:
             return self._consultar(db, texto)
         if FECHAR.search(normalizado):
             self._fechamento_solicitado = "nao" not in normalizado.split()
+        muda_para = MUDA_PARA.search(normalizado)
+        pede_troca = bool(PEDIDO_DE_TROCA.search(normalizado) or (
+            muda_para and all(mencoes(lado, repositorio.listar_cardapio(db))[1] for lado in muda_para.groups())))
         if self._troca_pendente:
             if sem_cortesia in DESISTE_DA_TROCA:
                 self._troca_pendente = False
@@ -667,12 +670,15 @@ class Atendimento:
                 if self._controle:
                     self._controle.definir_pendencia(self._pendencia)
                 fala = self._continuar_pedido()
+                if fala.startswith("Alteração anotada"):
+                    # nada foi alterado: a troca foi abandonada
+                    fala = "Tudo bem, mantive seu pedido como estava. Quer algo mais?"
                 self.historico.extend([{"role": "user", "content": texto},
                                        {"role": "assistant", "content": fala}])
                 return fala
-            if not PEDIDO_DE_TROCA.search(normalizado):
+            if not pede_troca:
                 return self._esclarecer(self._pendencia)
-        if PEDIDO_DE_TROCA.search(normalizado):
+        if pede_troca:
             if not self._troca_pendente:
                 self._pendencia_antes_da_troca = self._pendencia
             self._troca_pendente = True
@@ -1226,17 +1232,29 @@ class Atendimento:
         texto = re.sub(r"\s+por favor$", "", _normalizar(texto))
         if nao_solto:
             texto = re.sub(r"^nao\s+", "", texto)
-        partes = re.fullmatch(
-            r"(?:(?:sim|nao)\s+mas\s+|sim\s+|na verdade\s+|entao\s+|ah\s+|olha\s+)*"
-            r"(?:(?:pode|quero|queria|gostaria de)\s+)?"
-            r"(?:troque|trocar|troca|substitua|substituir|substitui)\s+(.+?)\s+(?:por|pela|pelo|pelas|pelos)\s+(.+)",
-            texto,
-        )
+        inicio = (r"(?:(?:sim|nao)\s+mas\s+|sim\s+|na verdade\s+|entao\s+|ah\s+|olha\s+)*"
+                  r"(?:(?:pode|quero|queria|gostaria de)\s+)?")
+        em_vez = r"(?:em vez|ao inves|no lugar) d[eao]s?"
+        pedir = r"(?:eu\s+)?(?:quero|queria|vou querer|coloca|coloque|bota|bote|poe|ponha|manda|mande|me ve|pode ser)"
+        # as tres formas dizem a mesma coisa: (padrao, quem sai, quem entra)
+        formas = [
+            # "troca a calabresa por uma mussarela", "muda a calabresa pra mussarela"
+            (r"(?:troque|trocar|troca|substitua|substituir|substitui|mude|mudar|muda|altere|alterar|altera)\s+(.+?)"
+             r"\s+(?:por|pela|pelo|pelas|pelos|pra|para)\s+(.+)", 1, 2),
+            # "em vez da calabresa quero uma mussarela"
+            (em_vez + r"\s+(.+?)\s+" + pedir + r"\s+(.+)", 1, 2),
+            # "em vez da calabresa, uma mussarela": sem verbo, a quantidade marca onde comeca o que entra
+            (em_vez + r"\s+(.+?)\s+((?:uma?|duas|dois|tres|\d+)\s+.+)", 1, 2),
+            # "quero uma mussarela no lugar da calabresa"
+            (r"(?:" + pedir + r"\s+)?(.+?)\s+" + em_vez + r"\s+(.+)", 2, 1),
+        ]
+        partes = next(((achado[sai], achado[entra]) for padrao, sai, entra in formas
+                       if (achado := re.fullmatch(inicio + padrao, texto))), None)
         if not partes or not self._controle or not self._controle.itens:
             return ["Pode dizer qual produto deseja trocar e por qual produto, com as quantidades?"]
         # "troque a calabresa grande por uma mussarela media": o tamanho nao faz parte do nome
-        lado_origem, tamanhos_origem = separar_tamanhos(partes[1], self._vocabulario)
-        lado_destino, tamanhos_destino = separar_tamanhos(partes[2], self._vocabulario)
+        lado_origem, tamanhos_origem = separar_tamanhos(partes[0], self._vocabulario)
+        lado_destino, tamanhos_destino = separar_tamanhos(partes[1], self._vocabulario)
         retirar, origem = _item_da_troca(lado_origem)
         acrescentar, destino = _item_da_troca(lado_destino)
         origem, destino = _nome_na_troca(origem), _nome_na_troca(destino)
