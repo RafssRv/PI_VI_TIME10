@@ -1,7 +1,6 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import asyncio
 import logging
-from tempfile import TemporaryFile
 from time import monotonic
 
 from atendimento import Atendimento
@@ -35,72 +34,69 @@ async def websocket_audio(websocket: WebSocket):
     motivo = "conexao_perdida"
 
     try:
-        # Cada conexao possui sua gravacao, removida ao terminar a chamada.
-        with TemporaryFile() as arquivo:
-            while True:
-                restante = prazo - monotonic()
-                if restante <= 0:
-                    raise ErroProtocolo("A chamada atingiu o tempo máximo permitido.")
-                try:
-                    mensagem = await asyncio.wait_for(websocket.receive(), timeout=restante)
-                except asyncio.TimeoutError:
-                    raise ErroProtocolo("A chamada atingiu o tempo máximo permitido.") from None
-                if mensagem["type"] == "websocket.disconnect":
-                    raise WebSocketDisconnect(mensagem.get("code", 1000))
-                if monotonic() >= prazo:
-                    raise ErroProtocolo("A chamada atingiu o tempo máximo permitido.")
+        while True:
+            restante = prazo - monotonic()
+            if restante <= 0:
+                raise ErroProtocolo("A chamada atingiu o tempo máximo permitido.")
+            try:
+                mensagem = await asyncio.wait_for(websocket.receive(), timeout=restante)
+            except asyncio.TimeoutError:
+                raise ErroProtocolo("A chamada atingiu o tempo máximo permitido.") from None
+            if mensagem["type"] == "websocket.disconnect":
+                raise WebSocketDisconnect(mensagem.get("code", 1000))
+            if monotonic() >= prazo:
+                raise ErroProtocolo("A chamada atingiu o tempo máximo permitido.")
 
-                pedaco = mensagem.get("bytes")
-                if pedaco is not None:
-                    if not iniciada:
-                        raise ErroProtocolo("Envie iniciar_chamada antes do áudio.")
-                    if len(pedaco) > LIMITE_BLOCO_AUDIO_BYTES:
-                        raise ErroProtocolo("O bloco de áudio ultrapassou o limite permitido.", 1009)
-                    if len(audio_da_chamada) + len(pedaco) > LIMITE_AUDIO_CHAMADA_BYTES:
-                        raise ErroProtocolo("A chamada atingiu o limite de áudio permitido.", 1009)
-                    arquivo.write(pedaco)
-                    audio_da_chamada.extend(pedaco)
-                    logger.debug("chamada=%s etapa=audio bytes=%s", atendimento.id_chamada, len(pedaco))
-                    await websocket.send_text("chunk guardado no backend!")
-                    continue
-
-                texto = mensagem.get("text")
-                if texto is None:
-                    continue
-
-                controle = validar_controle(texto)
-                tipo = controle["tipo"]
-                if tipo == "iniciar_chamada":
-                    if iniciada:
-                        raise ErroProtocolo("A chamada já foi iniciada.")
-                    iniciada = True
-                    monitor.atualizar_etapa(atendimento.id_chamada, "saudando", 0)
-                    await saudar(websocket, atendimento)
-                    continue
-                if tipo == "encerrar_chamada":
-                    motivo = "finalizada"
-                    await websocket.close()
-                    break
+            pedaco = mensagem.get("bytes")
+            if pedaco is not None:
                 if not iniciada:
-                    raise ErroProtocolo("Envie iniciar_chamada antes dos demais controles.")
+                    raise ErroProtocolo("Envie iniciar_chamada antes do áudio.")
+                if len(pedaco) > LIMITE_BLOCO_AUDIO_BYTES:
+                    raise ErroProtocolo("O bloco de áudio ultrapassou o limite permitido.", 1009)
+                if len(audio_da_chamada) + len(pedaco) > LIMITE_AUDIO_CHAMADA_BYTES:
+                    raise ErroProtocolo("A chamada atingiu o limite de áudio permitido.", 1009)
+                audio_da_chamada.extend(pedaco)
+                logger.debug("chamada=%s etapa=audio bytes=%s", atendimento.id_chamada, len(pedaco))
+                await websocket.send_text("chunk guardado no backend!")
+                continue
 
-                turno = controle["turno"]
-                if tipo == "fim_da_fala":
-                    if turno <= ultimo_turno:
-                        raise ErroProtocolo("O turno precisa ser maior que o último turno processado.")
-                    if len(audio_da_chamada) == bytes_no_ultimo_turno:
-                        raise ErroProtocolo("O turno precisa conter áudio novo.")
-                    ultimo_turno = turno
-                    bytes_no_ultimo_turno = len(audio_da_chamada)
-                    # Não interromper uma gravação no banco quando o prazo vencer.
-                    # O loop encerra a recepção assim que o turno em andamento terminar.
-                    monitor.atualizar_etapa(atendimento.id_chamada, "transcrevendo", turno)
-                    amostra_inicio = await atender_turno(
-                        websocket, audio_da_chamada, amostra_inicio, turno, atendimento)
-                else:
-                    # Avisos de reprodução/timeout podem chegar atrasados, mas não do futuro.
-                    if turno > ultimo_turno:
-                        raise ErroProtocolo("O aviso se refere a um turno ainda não processado.")
+            texto = mensagem.get("text")
+            if texto is None:
+                continue
+
+            controle = validar_controle(texto)
+            tipo = controle["tipo"]
+            if tipo == "iniciar_chamada":
+                if iniciada:
+                    raise ErroProtocolo("A chamada já foi iniciada.")
+                iniciada = True
+                monitor.atualizar_etapa(atendimento.id_chamada, "saudando", 0)
+                await saudar(websocket, atendimento)
+                continue
+            if tipo == "encerrar_chamada":
+                motivo = "finalizada"
+                await websocket.close()
+                break
+            if not iniciada:
+                raise ErroProtocolo("Envie iniciar_chamada antes dos demais controles.")
+
+            turno = controle["turno"]
+            if tipo == "fim_da_fala":
+                if turno <= ultimo_turno:
+                    raise ErroProtocolo("O turno precisa ser maior que o último turno processado.")
+                if len(audio_da_chamada) == bytes_no_ultimo_turno:
+                    raise ErroProtocolo("O turno precisa conter áudio novo.")
+                ultimo_turno = turno
+                bytes_no_ultimo_turno = len(audio_da_chamada)
+                # Não interromper uma gravação no banco quando o prazo vencer.
+                # O loop encerra a recepção assim que o turno em andamento terminar.
+                monitor.atualizar_etapa(atendimento.id_chamada, "transcrevendo", turno)
+                amostra_inicio = await atender_turno(
+                    websocket, audio_da_chamada, amostra_inicio, turno, atendimento)
+            else:
+                # Avisos de reprodução/timeout podem chegar atrasados, mas não do futuro.
+                if turno > ultimo_turno:
+                    raise ErroProtocolo("O aviso se refere a um turno ainda não processado.")
 
     except ErroProtocolo as erro:
         motivo = "erro_protocolo"
