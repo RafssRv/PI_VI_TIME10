@@ -6,6 +6,7 @@ não aproximados. Amplie com uma regressão de fala real ao aceitar outra constr
 
 import re
 from copy import deepcopy
+from functools import lru_cache
 from difflib import get_close_matches
 
 from repositorio import _normalizar
@@ -50,11 +51,9 @@ FIM_DO_PEDIDO = re.compile(r"\b(?:mais nada|nada mais|so isso|quero pagar|pode c
 REMOVER = re.compile(r"\b(?:tire|tira|tirar|retire|retira|retirar|remova|remover|exclua|nao quero)\b")
 # Tamanho dito na fala: de pizza ("grande") ou de refrigerante ("lata", "de 600", "2 litros").
 # "Em média" não é tamanho, e o endereço ("Rua Grande") nem é olhado.
-TAMANHO_FALADO = re.compile(
-    r"(?<!em )\b(?:(?:(?:de|do|no|na)\s+)?tamanho\s+)?"
-    r"(pequen[ao]s?|brotos?|m[eé]di[ao]s?|grandes?|gigantes?|fam[ií]lia)\b"
-    r"|\b(?:(?:de|da|na|em)\s+)?(latas?|latinhas?|(?:600|seiscentos)(?:\s*ml|\s+mililitros)?|(?:2|dois)\s+litros?)\b",
-    re.IGNORECASE)
+# Vocabulário base, igual ao seed. Tamanho novo cadastrado no banco entra pela classe Tamanhos.
+PALAVRAS_DE_TAMANHO = r"pequen[ao]s?|brotos?|m[eé]di[ao]s?|grandes?|gigantes?|fam[ií]lia"
+VOLUMES_DE_TAMANHO = r"latas?|latinhas?|(?:600|seiscentos)(?:\s*ml|\s+mililitros)?|(?:2|dois)\s+litros?"
 # Cada tamanho só vale para os produtos do grupo dele: pizza não vem em lata.
 GRUPO_DO_TAMANHO = {"pequena": "pizza", "média": "pizza", "grande": "pizza",
                     "Lata": "refrigerante", "600 ml": "refrigerante", "2 Litros": "refrigerante"}
@@ -146,13 +145,84 @@ def tamanho_canonico(palavra):
     return TAMANHO_INDISPONIVEL
 
 
-def serve_para(tamanho, produto):
-    """Tamanho "família" serve pra avisar qualquer produto com tamanho; o resto só o do grupo."""
-    grupo = grupo_do_produto(produto)
-    return bool(grupo) and (tamanho == TAMANHO_INDISPONIVEL or GRUPO_DO_TAMANHO.get(tamanho) == grupo)
+def _forma_falada(nome):
+    """
+    Regex de como se fala um tamanho do banco: sem depender de acento, com plural e, em palavra
+    única, com o gênero ("gigante", "gigantes"; "extra grande"; "350 ml"; "1 litro", "um litro").
+    shortcut: número acima de dez só é reconhecido em dígitos, amplie quando o Whisper escrever por extenso.
+    """
+    letras = {"a": "[aáàâã]", "e": "[eéê]", "i": "[ií]", "o": "[oóôõ]", "u": "[uúü]", "c": "[cç]"}
+    por_extenso = {str(valor): palavra for palavra, valor in NUMEROS.items() if palavra not in ("uma", "duas")}
+    palavras = _normalizar(nome).split()
+    partes = []
+    for indice, palavra in enumerate(palavras):
+        if palavra.isdigit():
+            partes.append("(?:{}|{})".format(palavra, por_extenso[palavra]) if palavra in por_extenso else palavra)
+            continue
+        ultima = indice == len(palavras) - 1
+        if len(palavras) == 1 and palavra[-1] in "ao":
+            partes.append("".join(letras.get(c, re.escape(c)) for c in palavra[:-1]) + "[ao]s?")
+        else:
+            corpo = palavra.removesuffix("s") if ultima else palavra
+            partes.append("".join(letras.get(c, re.escape(c)) for c in corpo) + ("s?" if ultima else ""))
+    forma = partes[0]
+    for anterior, parte in zip(palavras, partes[1:]):
+        # "350ml" e "350 ml" são a mesma coisa; entre palavras o espaço é obrigatório
+        forma += (r"\s*" if anterior.isdigit() else r"\s+") + parte
+    return forma
 
 
-def separar_tamanhos(texto):
+class Tamanhos:
+    """
+    Como os tamanhos são falados e a que grupo pertencem. Sem argumento vale o vocabulário base;
+    com os pares (grupo, nome) da tabela tamanho, o que foi cadastrado a mais também é reconhecido.
+    """
+
+    def __init__(self, do_banco=()):
+        self.grupos = {nome: {grupo} for nome, grupo in GRUPO_DO_TAMANHO.items()}
+        self._novos = []
+        palavras, volumes = [], []
+        for grupo, nome in do_banco:
+            if _normalizar(tamanho_canonico(nome)) != _normalizar(nome) and not any(n == nome for _, n in self._novos):
+                forma = _forma_falada(nome)
+                self._novos.append((re.compile(forma, re.IGNORECASE), nome))
+                (volumes if _normalizar(nome)[:1].isdigit() else palavras).append(forma)
+            self.grupos.setdefault(self.canonico(nome), set()).add(grupo)
+        # os novos vêm antes: "extra grande" não pode parar em "grande"
+        self.falado = re.compile(
+            r"(?<!em )\b(?:(?:(?:de|do|no|na)\s+)?tamanho\s+)?(" + "|".join(palavras + [PALAVRAS_DE_TAMANHO]) + r")\b"
+            r"|\b(?:(?:de|da|na|em)\s+)?(" + "|".join(volumes + [VOLUMES_DE_TAMANHO]) + r")\b",
+            re.IGNORECASE)
+
+    def canonico(self, palavra):
+        for forma, nome in self._novos:
+            if forma.fullmatch(palavra.strip()):
+                return nome
+        return tamanho_canonico(palavra)
+
+    def do_grupo(self, tamanho, grupo):
+        return grupo in self.grupos.get(tamanho, ())
+
+    def serve_para(self, tamanho, produto):
+        """Tamanho "família" serve pra avisar qualquer produto com tamanho; o resto só o do grupo."""
+        grupo = grupo_do_produto(produto)
+        return bool(grupo) and (tamanho == TAMANHO_INDISPONIVEL or self.do_grupo(tamanho, grupo))
+
+
+@lru_cache(maxsize=8)
+def _tamanhos_de(chave):
+    return Tamanhos(chave)
+
+
+def tamanhos_do_banco(linhas):
+    """Vocabulário para as linhas da tabela tamanho; o mesmo cadastro reaproveita o mesmo objeto."""
+    return _tamanhos_de(tuple(sorted((t.grupo, t.nome) for t in linhas)))
+
+
+TAMANHOS_BASE = Tamanhos()
+
+
+def separar_tamanhos(texto, vocabulario=TAMANHOS_BASE):
     """
     Tira o tamanho da fala para os nomes do cardápio continuarem inteiros ("pizza grande de
     calabresa" vira "pizza de calabresa"). Devolve o texto limpo e [(posição, tamanho)], onde
@@ -162,10 +232,10 @@ def separar_tamanhos(texto):
     endereco = ENDERECO_NA_FALA.search(texto)
     corte = endereco.start() if endereco else len(texto)
     partes, achados, ultimo = [], [], 0
-    for achado in TAMANHO_FALADO.finditer(texto, 0, corte):
+    for achado in vocabulario.falado.finditer(texto, 0, corte):
         partes.append(texto[ultimo:achado.start()])
         posicao = len(_normalizar(_numero_do_nome("".join(partes))).split())
-        achados.append((posicao, tamanho_canonico(achado.group(1) or achado.group(2))))
+        achados.append((posicao, vocabulario.canonico(achado.group(1) or achado.group(2))))
         ultimo = achado.end()
     if not achados:
         return texto, []
@@ -174,7 +244,7 @@ def separar_tamanhos(texto):
     return limpo, achados
 
 
-def _donos_dos_tamanhos(tamanhos, achados, palavras):
+def _donos_dos_tamanhos(tamanhos, achados, palavras, vocabulario):
     """
     Cada tamanho vale para a pizza onde foi dito: colado no nome ("calabresa grande"), no meio
     dele ("pizza grande de calabresa"), logo antes ("uma grande de calabresa") ou depois de um
@@ -197,11 +267,11 @@ def _donos_dos_tamanhos(tamanhos, achados, palavras):
         if dono is not None:
             candidatos = achados[dono][2]
             no_nome = f" {_normalizar(tamanho).replace('litros', 'litro')} " in f" {_normalizar(candidatos[0].nome).replace('litros', 'litro')} "
-            if (len(candidatos) == 1 and not serve_para(tamanho, candidatos[0]) and not no_nome
-                    and GRUPO_DO_TAMANHO.get(tamanho) == "refrigerante"):
+            if (len(candidatos) == 1 and not vocabulario.serve_para(tamanho, candidatos[0]) and not no_nome
+                    and vocabulario.do_grupo(tamanho, "refrigerante")):
                 # "agua de 2 litros", "suco 600": esse volume nao existe no cardapio pra esse produto
                 errados[dono] = tamanho
-            if len(candidatos) != 1 or not serve_para(tamanho, candidatos[0]):
+            if len(candidatos) != 1 or not vocabulario.serve_para(tamanho, candidatos[0]):
                 dono = None
         if dono is None:
             soltos.append((posicao, tamanho))
@@ -224,7 +294,7 @@ def _juntar_iguais(itens):
     itens[:] = juntos
 
 
-def _responder_tamanho(novo, pendente, soltos, palavras, texto, produtos):
+def _responder_tamanho(novo, pendente, soltos, palavras, texto, produtos, vocabulario):
     """
     Resposta a "qual o tamanho?". Devolve (dúvida que continua, evidências). Com dois tamanhos
     para a mesma linha ("uma grande e uma média"), só separa quando as quantidades fecham.
@@ -235,7 +305,7 @@ def _responder_tamanho(novo, pendente, soltos, palavras, texto, produtos):
     produto = next((p for p in produtos if p.nome == pendente.get("produto")), None)
     distintos = list(dict.fromkeys(t for _, t in soltos))
     # "grande" para a coca não é tamanho de refrigerante: avisa e pergunta de novo
-    if TAMANHO_INDISPONIVEL in distintos or (produto and not all(serve_para(t, produto) for t in distintos)):
+    if TAMANHO_INDISPONIVEL in distintos or (produto and not all(vocabulario.serve_para(t, produto) for t in distintos)):
         return {"campo": "tamanho", "produto": pendente["produto"], "indisponivel": True}, []
     if len(distintos) == 1:
         for alvo in alvos:
@@ -310,10 +380,10 @@ def cardapio_completo(texto):
                 re.search(r"\b(?:todos|todas)\b.*\b(?:produtos|opcoes|precos)\b", normal))
 
 
-def interpretar(texto, produtos, atual, pendente=None, referencia=None):
+def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabulario=TAMANHOS_BASE):
     """Retorna (rascunho, pendência de campo, evidências) sem efeitos externos."""
     texto = _numero_do_nome(texto)
-    texto, tamanhos = separar_tamanhos(texto)
+    texto, tamanhos = separar_tamanhos(texto, vocabulario)
     normal = _normalizar(texto)
     # "Não temos X" é aviso, não pergunta aberta: não pode prender as falas seguintes.
     if pendente and (pendente.get("nao_encontrado") or pendente.get("campo") == "fora_do_pedido"):
@@ -364,13 +434,13 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None):
             continue  # Nome usado como ingrediente/observação do produto anterior.
         filtrados.append(achado)
     achados = filtrados
-    donos, soltos, errados = _donos_dos_tamanhos(tamanhos, achados, palavras)
+    donos, soltos, errados = _donos_dos_tamanhos(tamanhos, achados, palavras, vocabulario)
     # guardada antes da resposta: "a calabresa é grande" responde e não pode virar mais uma calabresa
     pergunta_de_tamanho = pendente if pendente and pendente.get("campo") == "tamanho" else None
     respondeu_tamanho = False
     if pendente and pendente.get("campo") == "tamanho" and soltos:
         # "grande" responde a "qual o tamanho?"; o resto da fala ("e uma coca") segue normal
-        duvida_tamanho, evidencias = _responder_tamanho(novo, pendente, soltos, palavras, texto, produtos)
+        duvida_tamanho, evidencias = _responder_tamanho(novo, pendente, soltos, palavras, texto, produtos, vocabulario)
         respondeu_tamanho = bool(duvida_tamanho or evidencias)
         if respondeu_tamanho:
             pendente = duvida_tamanho

@@ -1849,3 +1849,46 @@ class TestTamanhoJuntoDoFechamento:
     def test_tamanho_de_pizza_e_fim_na_mesma_fala(self, ana_identificada):
         ana_identificada.responder("uma calabresa no pix")
         assert "Seu pedido ficou assim: 1 Pizza de Calabresa grande" in ana_identificada.responder("grande, é só isso")
+
+
+@pytest.fixture
+def tamanhos_novos(db):
+    """tamanhos cadastrados depois do seed: nenhum deles esta escrito no codigo."""
+    from models import Tamanho
+
+    novos = [Tamanho(grupo="pizza", nome="gigante", fatias=12, desconto=Decimal("0")),
+             Tamanho(grupo="refrigerante", nome="350 ml", desconto=Decimal("9.90"))]
+    db.add_all(novos)
+    db.commit()
+    yield
+    for tamanho in novos:
+        db.delete(tamanho)
+    db.commit()
+
+
+class TestTamanhoCadastradoNoBanco:
+    @pytest.mark.parametrize("fala, esperado, preco", [
+        ("uma calabresa gigante", ("Pizza de Calabresa", 1, "gigante"), "64.90"),
+        ("duas pizzas gigantes de calabresa", ("Pizza de Calabresa", 2, "gigante"), "64.90"),
+        ("uma coca de 350 ml", ("Coca-Cola", 1, "350 ml"), "5.00"),
+        ("uma coca 350ml", ("Coca-Cola", 1, "350 ml"), "5.00"),
+    ])
+    def test_tamanho_novo_e_entendido_na_fala(self, tamanhos_novos, ana_identificada, llama, fala, esperado, preco):
+        ana_identificada.responder(fala)
+        assert _itens(ana_identificada) == [esperado]
+        assert ana_identificada.carrinho[0]["preco"] == Decimal(preco)
+        assert llama.chamadas == []
+
+    def test_tamanho_novo_e_oferecido_e_aceito_como_resposta(self, tamanhos_novos, ana_identificada):
+        pergunta = ana_identificada.responder("uma calabresa")
+        assert "gigante" in pergunta
+        ana_identificada.responder("gigante")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "gigante")]
+
+    def test_tamanho_novo_so_vale_para_o_grupo_dele(self, tamanhos_novos, ana_identificada):
+        ana_identificada.responder("uma coca gigante")
+        assert all(i["tamanho"] != "gigante" for i in ana_identificada.carrinho)
+
+    def test_tamanho_novo_entra_na_dica_do_whisper(self, tamanhos_novos, ana_identificada):
+        dica = ana_identificada.dica_de_transcricao()
+        assert "gigante" in dica and "350 ml" in dica

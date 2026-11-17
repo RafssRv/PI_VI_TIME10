@@ -18,10 +18,10 @@ from uuid import uuid4
 
 from agente.controle_pedido import ControlePedido, ErroPedido, ProdutoCardapio
 from agente.intencao_pedido import (CONSULTA_HISTORICO, CONSULTA_PEDIDO_ATUAL, CONSULTA_RECOMENDACAO, FALAS_DE_FECHAR,
-                                   AINDA_NAO_ACABOU, FECHAR, FIM_DO_PEDIDO, GRUPO_DO_TAMANHO, RECLAMA_DO_PEDIDO,
-                                   TAMANHO_INDISPONIVEL,
+                                   AINDA_NAO_ACABOU, FECHAR, FIM_DO_PEDIDO, RECLAMA_DO_PEDIDO,
+                                   TAMANHO_INDISPONIVEL, TAMANHOS_BASE,
                                    cardapio_completo, comando_negado, eh_consulta, interpretar, mencoes,
-                                   separar_tamanhos)
+                                   separar_tamanhos, tamanhos_do_banco)
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -47,13 +47,10 @@ CUMPRIMENTO = re.compile(r"^(?:oi|ola|alo|opa|e ai|bom dia|boa tarde|boa noite|t
 CORTESIA = re.compile(r"\b(?:obrigad[oa]|valeu|por favor|viu)\b")
 SINONIMOS_DE_CATEGORIA = {"refrigerante": "bebida", "refri": "bebida", "suco": "bebida", "agua": "bebida"}
 ENDERECO_NA_FALA = re.compile(r"\b(?:rua|avenida|av|travessa|alameda|estrada|rodovia)\b.*", re.IGNORECASE)
-# "quais tamanhos tem?", "tem pizza grande?": responde com a tabela de tamanhos do banco
-PERGUNTA_DE_TAMANHO = re.compile(r"\btamanhos?\b|\btem\b.*\b(?:grande|media|medio|pequena|pequeno|gigante|"
-                                 r"familia|broto|lata|latinha)\b")
 FRASE_PEDE_TAMANHO = "pequena, média ou grande?"
-# usadas ate o carrinho ler os tamanhos do banco pela primeira vez
+# so valem ate a primeira leitura da tabela tamanho: dali em diante as opcoes sao as do banco
 OPCOES_DE_TAMANHO = {"pizza": FRASE_PEDE_TAMANHO, "refrigerante": "lata, 600 ml ou 2 litros?"}
-EXEMPLO_DE_TAMANHOS = {"pizza": "uma grande e uma média", "refrigerante": "uma lata e uma de 2 litros"}
+EXEMPLO_DE_TAMANHOS = {"pizza": "uma grande e uma média", "refrigerante": "uma de 2 litros e uma de 600 ml"}
 QUER_MUDAR_ENDERECO = re.compile(
     r"\b(?:mudar|muda|trocar|troca|alterar|altera|corrigir|corrige|outro|novo)\b.*\bendereco\b|"
     r"\bendereco\b.*\b(?:errado|outro|novo|diferente)\b"
@@ -112,6 +109,11 @@ def _feminino(nome):
 def _da(nome):
     # "qual o tamanho da Coca-Cola" / "do Guaraná"
     return ("da " if _feminino(nome) else "do ") + nome
+
+
+def _uma(tamanho):
+    # "uma grande", mas "uma de 2 litros"
+    return ("uma de " if tamanho[:1].isdigit() else "uma ") + tamanho
 
 
 def _com_tamanho(nome, tamanho):
@@ -176,6 +178,8 @@ class Atendimento:
         # tamanho, e as opcoes faladas de cada grupo ("lata, 600 ml ou 2 litros?")
         self._grupos = {}
         self._opcoes_tamanho = dict(OPCOES_DE_TAMANHO)
+        self._exemplos_tamanho = dict(EXEMPLO_DE_TAMANHOS)
+        self._vocabulario = TAMANHOS_BASE
         self._limpar_pedido()
 
     def _limpar_pedido(self):
@@ -279,6 +283,7 @@ class Atendimento:
             db = self._sessao()
             try:
                 produtos = repositorio.listar_cardapio(db)
+                tamanhos = repositorio.listar_tamanhos(db)
             except Exception:
                 logger.warning("chamada=%s etapa=dica_transcricao categoria=banco", self.id_chamada)
                 return None
@@ -287,9 +292,14 @@ class Atendimento:
             # o whisper so le uns 220 tokens de dica: "Pizza de" em todo sabor gastava metade disso
             sabores = [re.sub(r"^Pizza (?:de |do |da )?", "", p.nome) for p in produtos if repositorio.eh_pizza(p)]
             outros = [p.nome for p in produtos if not repositorio.eh_pizza(p)]
-            self._dica = ("Pizzas: {}. Pequena, média ou grande. {}. Lata, 600 ml ou 2 litros. "
+
+            def opcoes(grupo):
+                nomes = [t.nome.lower() for t in tamanhos if t.grupo == grupo]
+                return _juntar(nomes, "ou").capitalize() + ". " if nomes else ""
+
+            self._dica = ("Pizzas: {}. {}{}. {}"
                           "Pix, dinheiro, crédito e débito. O cliente diz o pedido:").format(
-                ", ".join(sabores), ", ".join(outros))
+                ", ".join(sabores), opcoes("pizza"), ", ".join(outros), opcoes("refrigerante"))
         return self._dica
 
     # --- banco ---
@@ -514,7 +524,8 @@ class Atendimento:
     def _montar_pedido(self, texto):
         db = self._sessao()
         try:
-            if eh_consulta(texto) and PERGUNTA_DE_TAMANHO.search(_normalizar(texto)):
+            self._carregar_tamanhos(repositorio.listar_tamanhos(db))
+            if eh_consulta(texto) and self._pergunta_de_tamanho(texto):
                 fala = self._falar_tamanhos(db)
                 if self._duvida_item and self._duvida_item.get("campo") == "tamanho":
                     fala += " " + self._pendencia
@@ -526,6 +537,25 @@ class Atendimento:
             return FRASE_ERRO_BANCO
         finally:
             db.close()
+
+    def _carregar_tamanhos(self, tamanhos):
+        """os tamanhos valem como estao no banco agora: o que se entende na fala e o que o atendente oferece."""
+        self._vocabulario = tamanhos_do_banco(tamanhos)
+        for grupo in {t.grupo for t in tamanhos}:
+            # listar_tamanhos ja vem do menor pro maior: "lata, 600 ml ou 2 litros?"
+            nomes = [t.nome.lower() for t in tamanhos if t.grupo == grupo]
+            self._opcoes_tamanho[grupo] = _juntar(nomes, "ou") + "?"
+            if len(nomes) > 1:
+                self._exemplos_tamanho[grupo] = "{} e {}".format(_uma(nomes[-1]), _uma(nomes[-2]))
+
+    def _pergunta_de_tamanho(self, texto):
+        # "quais tamanhos tem?", "tem pizza grande?": responde com a tabela de tamanhos do banco
+        if re.search(r"\btamanhos?\b", _normalizar(texto)):
+            return True
+        tem = re.search(r"\btem\b", texto, re.IGNORECASE)
+        # volume ("tem coca de 2 litros?") continua sendo consulta do produto
+        return bool(tem and any(not tamanho[:1].isdigit()
+                                for _, tamanho in separar_tamanhos(texto[tem.end():], self._vocabulario)[1]))
 
     def _montar_pedido_com(self, db, texto):
         normalizado = _normalizar(texto).strip()
@@ -540,7 +570,7 @@ class Atendimento:
             return "Claro! Qual é o novo endereço?"
         sem_cortesia = re.sub(r"\bnao( nao)+\b", "nao", " ".join(CORTESIA.sub("", normalizado).split()))
         # "lata, no pix, é só isso" responde o tamanho e fecha: o tamanho não pode se perder no caminho
-        responde_tamanho = bool((self._duvida_item or {}).get("campo") == "tamanho" and separar_tamanhos(texto)[1])
+        responde_tamanho = bool((self._duvida_item or {}).get("campo") == "tamanho" and separar_tamanhos(texto, self._vocabulario)[1])
         if (FIM_DO_PEDIDO.search(sem_cortesia) and not AINDA_NAO_ACABOU.search(texto) and not responde_tamanho
                 and not mencoes(texto, repositorio.listar_cardapio(db))[1]):
             self._largar_duvida_de_produto()
@@ -641,7 +671,7 @@ class Atendimento:
         # Uma fala ainda não interpretada impede confirmar o carrinho anterior,
         # inclusive se o Ollama falhar ou devolver uma resposta inválida.
         proposto, duvida, evidencias = interpretar(
-            texto, cardapio, self.carrinho, self._duvida_item, self._referencia)
+            texto, cardapio, self.carrinho, self._duvida_item, self._referencia, self._vocabulario)
         self._pendencia = self._pergunta_do_campo(duvida)
         self._token_resumo = None
         if self._controle:
@@ -820,7 +850,7 @@ class Atendimento:
             produto = duvida["produto"]
             if duvida.get("misto"):
                 return "Quantas de cada tamanho? Por exemplo: {}.".format(
-                    EXEMPLO_DE_TAMANHOS.get(self._grupos.get(produto, "pizza"), EXEMPLO_DE_TAMANHOS["pizza"]))
+                    self._exemplos_tamanho.get(self._grupos.get(produto, "pizza"), EXEMPLO_DE_TAMANHOS["pizza"]))
             if duvida.get("indisponivel"):
                 return "Não temos esse tamanho. {} pode ser {}".format(_com_artigo(produto), self._opcoes(produto))
             if duvida.get("curta"):
@@ -890,7 +920,7 @@ class Atendimento:
         produtos = repositorio.listar_cardapio(db)
         normalizado = _normalizar(texto)
         # "quanto custa a pizza grande de calabresa": o tamanho sai antes de procurar o nome
-        sem_tamanho, tamanhos_ditos = separar_tamanhos(texto)
+        sem_tamanho, tamanhos_ditos = separar_tamanhos(texto, self._vocabulario)
         _, citados = mencoes(sem_tamanho, produtos)
         if RECLAMA_DO_PEDIDO.search(normalizado):
             fala = self._falar_pedido_atual(" O que você quer mudar?")
@@ -904,9 +934,14 @@ class Atendimento:
             if not produtos:
                 fala = "Não há produtos disponíveis no cardápio neste momento."
             elif re.search(r"\b(?:todos|todas|completo|inteiro|precos)\b", normalizado):
-                fala = "Cardápio completo, com as pizzas no tamanho grande e os refrigerantes de 2 litros. " + " ".join(
+                todos = repositorio.listar_tamanhos(db)
+                # o preco do cardapio eh o do tamanho sem desconto de cada grupo
+                maiores = {t.grupo: t.nome.lower() for t in todos if not t.desconto}
+                precos_de = [frase.format(maiores[grupo]) for grupo, frase in (
+                    ("pizza", "as pizzas no tamanho {}"), ("refrigerante", "os refrigerantes de {}")) if grupo in maiores]
+                fala = "Cardápio completo{}. ".format(", com " + " e ".join(precos_de) if precos_de else "") + " ".join(
                     "{}: {}.".format(p.nome, preco_falado(p.preco)) for p in produtos)
-                tamanhos = sorted((t for t in repositorio.listar_tamanhos(db) if t.desconto),
+                tamanhos = sorted((t for t in todos if t.desconto),
                                   key=lambda t: (t.grupo != "pizza", t.desconto))
                 if tamanhos:
                     fala += " " + " ".join("{} {}: {} a menos.".format(
@@ -1056,8 +1091,8 @@ class Atendimento:
         if not partes or not self._controle or not self._controle.itens:
             return ["Pode dizer qual produto deseja trocar e por qual produto, com as quantidades?"]
         # "troque a calabresa grande por uma mussarela media": o tamanho nao faz parte do nome
-        lado_origem, tamanhos_origem = separar_tamanhos(partes[1])
-        lado_destino, tamanhos_destino = separar_tamanhos(partes[2])
+        lado_origem, tamanhos_origem = separar_tamanhos(partes[1], self._vocabulario)
+        lado_destino, tamanhos_destino = separar_tamanhos(partes[2], self._vocabulario)
         retirar, origem = _item_da_troca(lado_origem)
         acrescentar, destino = _item_da_troca(lado_destino)
         origem, destino = _nome_na_troca(origem), _nome_na_troca(destino)
@@ -1090,7 +1125,7 @@ class Atendimento:
         novo_tamanho = ""
         grupo = repositorio.grupo_tamanho(produtos[0])
         if grupo:
-            dito = tamanho_destino if GRUPO_DO_TAMANHO.get(tamanho_destino) == grupo else ""
+            dito = tamanho_destino if self._vocabulario.do_grupo(tamanho_destino, grupo) else ""
             herdado = item.tamanho if self._grupos.get(item.nome) == grupo else ""
             iguais = {i.tamanho for i in self._controle.itens if i.produto_id == produtos[0].id and i.tamanho}
             novo_tamanho = dito or herdado or (iguais.pop() if len(iguais) == 1 else "")
@@ -1181,10 +1216,7 @@ class Atendimento:
             self.carrinho = novo
             self._controle = controle
             self._grupos = {p.nome: repositorio.grupo_tamanho(p) for p in cardapio if repositorio.grupo_tamanho(p)}
-            for grupo in {t.grupo for t in todos_tamanhos}:
-                # listar_tamanhos ja vem do menor pro maior: "lata, 600 ml ou 2 litros?"
-                nomes = [t.nome.lower() for t in todos_tamanhos if t.grupo == grupo]
-                self._opcoes_tamanho[grupo] = _juntar(nomes, "ou") + "?"
+            self._carregar_tamanhos(todos_tamanhos)
             # Agradecimentos sem itens não apagam a última venda da comanda.
             if novo:
                 self._pedido_salvo = None
@@ -1395,6 +1427,7 @@ class Atendimento:
         db = self._sessao()
         try:
             normalizado = _normalizar(texto)
+            self._carregar_tamanhos(repositorio.listar_tamanhos(db))
             if (cardapio_completo(texto) or CONSULTA_HISTORICO.search(normalizado) or
                     CONSULTA_RECOMENDACAO.search(normalizado) or
                     re.search(r"\b(?:preco|precos|custa|custam|quanto)\b", normalizado)):
@@ -1433,14 +1466,15 @@ def _tamanhos_em_texto(tamanhos):
     if not tamanhos:
         return ""
     linhas = []
-    for grupo, rotulo, maior in (("pizza", "pizza", "o da grande"), ("refrigerante", "refrigerante", "o de 2 litros")):
+    for grupo in sorted({t.grupo for t in tamanhos}):
+        do_grupo = [t for t in tamanhos if t.grupo == grupo]
         partes = ["{} ({}{})".format(
             t.nome, "{} fatias, ".format(t.fatias) if t.fatias else "",
             "{} a menos".format(_formatar_preco(t.desconto)) if t.desconto else "preço do cardápio")
-            for t in tamanhos if t.grupo == grupo]
-        if partes:
-            linhas.append("Tamanhos de {}: {}. O preço de {} no cardápio é {}.".format(
-                rotulo, _juntar(partes), rotulo, maior))
+            for t in do_grupo]
+        maior = next((t.nome for t in do_grupo if not t.desconto), do_grupo[-1].nome)
+        linhas.append("Tamanhos de {}: {}. O preço de {} no cardápio é o do tamanho {}.".format(
+            grupo, _juntar(partes), grupo, maior))
     return "\n".join(linhas)
 
 
