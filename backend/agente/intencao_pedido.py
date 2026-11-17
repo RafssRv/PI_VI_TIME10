@@ -9,7 +9,7 @@ from copy import deepcopy
 from functools import lru_cache
 from difflib import get_close_matches
 
-from repositorio import _normalizar
+from repositorio import _normalizar, grupo_tamanho
 
 
 NUMEROS = {"zero": 0, "um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "quatro": 4,
@@ -116,18 +116,6 @@ def _numero_do_nome(texto):
     return re.sub(r"\b4\s+queijos?\b", "quatro queijos", texto, flags=re.IGNORECASE)
 
 
-def grupo_do_produto(produto):
-    """Qual tabela de tamanhos vale: "pizza", "refrigerante" ou None (tamanho único)."""
-    grupo = getattr(produto, "grupo_tamanho", None)
-    if grupo:
-        return grupo
-    return "pizza" if _normalizar(getattr(produto, "categoria", "") or "").startswith("pizza") else None
-
-
-def eh_pizza(produto):
-    return grupo_do_produto(produto) == "pizza"
-
-
 def tamanho_canonico(palavra):
     palavra = _normalizar(palavra)
     if palavra.startswith(("pequen", "broto")):
@@ -205,7 +193,7 @@ class Tamanhos:
 
     def serve_para(self, tamanho, produto):
         """Tamanho "família" serve pra avisar qualquer produto com tamanho; o resto só o do grupo."""
-        grupo = grupo_do_produto(produto)
+        grupo = grupo_tamanho(produto)
         return bool(grupo) and (tamanho == TAMANHO_INDISPONIVEL or self.do_grupo(tamanho, grupo))
 
 
@@ -530,13 +518,13 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
             continue
         # Só pizza e refrigerante têm tamanho: "coca grande" pede o tamanho de refrigerante depois.
         tamanho = None
-        ditos = set(donos.get(indice, [])) if grupo_do_produto(produto) else set()
+        ditos = set(donos.get(indice, [])) if grupo_tamanho(produto) else set()
         if TAMANHO_INDISPONIVEL in ditos or len(ditos) > 1:
             duvida = {"campo": "tamanho", "produto": produto.nome,
                       ("indisponivel" if TAMANHO_INDISPONIVEL in ditos else "misto"): True}
         elif ditos:
             tamanho = ditos.pop()
-        elif grupo_do_produto(produto) and acao == "adicionar" and re.search(r"\bmais\b", prefixo):
+        elif grupo_tamanho(produto) and acao == "adicionar" and re.search(r"\bmais\b", prefixo):
             # "mais uma margherita" é igual à que já está no pedido, se só houver um tamanho dela
             ja_pedidos = {i.get("tamanho") for i in existentes if i.get("tamanho")}
             if len(ja_pedidos) == 1:

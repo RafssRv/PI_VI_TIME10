@@ -63,7 +63,7 @@ def montar_painel(pedidos, itens, primeiras, cardapio, dias, desde, agora, anter
     faturamento = sum((Decimal(str(p.total)) for p in pedidos), Decimal("0"))
     ticket = (faturamento / quantidade).quantize(CENTAVO) if quantidade else Decimal("0")
     clientes = {p.cliente_id for p in pedidos}
-    novos = sum(1 for c in clientes if desde is None or (primeiras.get(c) and primeiras[c] >= desde))
+    novos = sum(1 for c in clientes if desde is None or (primeiras.get(c) and _local(primeiras[c]) >= desde))
 
     # --- por dia, com os dias sem venda zerados pro grafico nao pular datas ---
     por_dia = defaultdict(lambda: [0, Decimal("0")])

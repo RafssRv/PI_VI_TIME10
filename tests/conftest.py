@@ -5,12 +5,14 @@ os testes NAO rodam no banco de desenvolvimento: eles criam um banco separado ch
 pizzaria_teste, dentro do mesmo container do postgres, e recriam o esquema do zero a cada
 execucao. assim rodar a suite nunca apaga o que voce tem no banco do dia a dia.
 
-o que voce precisa antes: o container de pe (npm run banco).
+o que voce precisa antes: o container de pe (npm run banco). sem ele (maquina sem docker), a
+suite roda sozinha num sqlite descartavel, criado a partir de backend/models.py.
 """
 
 import os
 import pathlib
 import sys
+import tempfile
 
 import pytest
 
@@ -29,9 +31,6 @@ os.environ.setdefault("CPF_HMAC_SECRET", "segredo-fixo-dos-testes-nao-use-em-pro
 _URL_DEV = os.environ.get(
     "DATABASE_URL", "postgresql+psycopg://pizzaria:pizzaria123@127.0.0.1:5432/pizzaria"
 )
-# aponta a aplicacao para o banco de teste ANTES de qualquer import do backend,
-# porque o config.py le a variavel na hora em que e importado
-os.environ["DATABASE_URL"] = _URL_DEV.rsplit("/", 1)[0] + "/" + BANCO_DE_TESTE
 
 
 def _dsn(nome_do_banco):
@@ -40,7 +39,44 @@ def _dsn(nome_do_banco):
     return base + "/" + nome_do_banco
 
 
+def _postgres_responde():
+    try:
+        import psycopg
+
+        psycopg.connect(_dsn("pizzaria"), connect_timeout=3).close()
+        return True
+    except Exception:
+        return False
+
+
+# shortcut: o sqlite nao confere tamanho de VARCHAR nem guarda fuso, e o esquema vem do models.py
+# em vez do banco.sql. quem tem docker continua validando no postgres antes do merge.
+SEM_POSTGRES = not _postgres_responde()
+
+# aponta a aplicacao para o banco de teste ANTES de qualquer import do backend,
+# porque o config.py le a variavel na hora em que e importado
+if SEM_POSTGRES:
+    os.environ["DATABASE_URL"] = "sqlite:///" + (
+        pathlib.Path(tempfile.gettempdir()) / (BANCO_DE_TESTE + ".sqlite")).as_posix()
+else:
+    os.environ["DATABASE_URL"] = _URL_DEV.rsplit("/", 1)[0] + "/" + BANCO_DE_TESTE
+
+
+def pytest_report_header(config):
+    if SEM_POSTGRES:
+        return "banco de teste: sqlite descartavel (o postgres nao respondeu)"
+    return "banco de teste: postgres, banco " + BANCO_DE_TESTE
+
+
 def _preparar_banco_de_teste():
+    if SEM_POSTGRES:
+        import models  # noqa: F401  registra as tabelas no Base
+        from database import Base, engine
+
+        Base.metadata.drop_all(engine)
+        Base.metadata.create_all(engine)
+        return
+
     import psycopg
 
     try:

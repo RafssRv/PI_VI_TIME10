@@ -57,14 +57,14 @@ O prompt utilizado pelo atendimento está em [backend/agente/prompt_sistema.txt]
 
 ## Testes
 
-Com o ambiente virtual ativo e o PostgreSQL em execução:
+Com o ambiente virtual ativo:
 
 ```powershell
 npm run teste
 npm run teste:frontend
 ```
 
-Os testes Python recriam o esquema de `pizzaria_teste`, separado do banco da aplicação. Não use esse banco para dados que deseja preservar. Os testes automatizados não substituem a validação com microfone e modelos reais.
+Com o PostgreSQL em execução, os testes Python recriam o esquema de `pizzaria_teste`, separado do banco da aplicação. Não use esse banco para dados que deseja preservar. Sem PostgreSQL (máquina sem Docker), a suíte usa sozinha um SQLite descartável na pasta temporária do sistema; valide no PostgreSQL antes de um merge. Os testes automatizados não substituem a validação com microfone e modelos reais.
 
 ## Equipe
 
