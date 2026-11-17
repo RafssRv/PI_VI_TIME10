@@ -1007,6 +1007,8 @@ class Atendimento:
             unicos, aviso = self._produtos_da_consulta(normalizado, palavras, citados)
             fala = aviso or " ".join("{}: {}.".format(p.nome, p.descricao or "ingredientes não informados")
                                      for p in unicos)
+        elif disponivel := self._falar_se_tem(db, normalizado, palavras, citados):
+            fala = disponivel
         elif (self._categoria_citada(normalizado) and not any(len(c) == 1 for _, _, c in citados)
               and re.search(r"\b(?:quais|qual|que|tem|opcoes|sabores|vendem)\b", normalizado)):
             categoria = self._categoria_citada(normalizado)
@@ -1058,6 +1060,33 @@ class Atendimento:
                         len(candidatos), rotulo, nomes)
             produtos.update((p.id, p) for p in candidatos)
         return list(produtos.values()), None
+
+    def _falar_se_tem(self, db, normalizado, palavras, citados):
+        """
+        "tem pizza de calabresa?", "voces vendem coca?": responde pelo cardapio. so quando o produto vem
+        logo depois do verbo, pq "a calabresa tem cebola?" pergunta do ingrediente. None quando nao eh o caso.
+        """
+        verbo = next((i for i, p in enumerate(palavras) if p in {"tem", "teria", "vende", "vendem"}), None)
+        if verbo is None or not citados or citados[0][0] < verbo:
+            return None
+        if any(p not in {"a", "o", "as", "os", "um", "uma", "de", "da", "do", "ai", "la", "alguma", "algum", "tambem"}
+               for p in palavras[verbo + 1:citados[0][0]]):
+            return None
+        produtos, aviso = self._produtos_da_consulta(normalizado, palavras, citados)
+        if aviso:
+            # "tem pizza?" segue pra lista da categoria; "tem pizza de sushi?" ja tem resposta
+            return aviso if aviso.startswith("Não temos") else None
+        if len(produtos) > 1:
+            return "Temos {}. Quer saber o preço de alguma opção?".format(_juntar([p.nome for p in produtos]))
+        produto = produtos[0]
+        tamanhos = repositorio.listar_tamanhos(db)
+        if any(t.grupo == repositorio.grupo_tamanho(produto) for t in tamanhos):
+            preco = self._precos_por_tamanho(produto, tamanhos)
+        else:
+            preco = "{} custa {}.".format(_com_artigo(produto.nome), preco_falado(produto.preco))
+        # o sim na fala seguinte pede o produto, igual a uma sugestao aceita
+        self._sugestoes = [produto.nome]
+        return "Temos, sim. {} Quer pedir?".format(preco)
 
     def _falar_pedido_atual(self, complemento):
         if not self.carrinho:

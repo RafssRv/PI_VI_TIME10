@@ -1897,6 +1897,48 @@ class TestConsultaSemProdutoCerto:
         assert all(trecho in resposta for trecho in trechos)
 
 
+class TestPerguntaSeTem:
+    @pytest.mark.parametrize("fala, inicio", [
+        ("tem pizza de calabresa?", "Temos, sim. A Pizza de Calabresa custa 64 reais e 90 centavos a grande"),
+        ("tem calabresa?", "Temos, sim. A Pizza de Calabresa custa"),
+        ("vocês têm coca?", "Temos, sim. A Coca-Cola custa 14 reais e 90 centavos a 2 litros"),
+        ("vocês vendem pudim?", "Temos, sim. O Pudim de Leite custa 15 reais e 90 centavos."),
+        ("tem pizza de frango?", "Temos, sim. A Pizza de Frango com Catupiry custa"),
+    ])
+    def test_produto_do_cardapio_responde_com_o_preco(self, ana_identificada, llama, fala, inicio):
+        resposta = ana_identificada.responder(fala)
+        assert resposta.startswith(inicio) and resposta.endswith("Quer pedir?")
+        assert ana_identificada.carrinho == []
+        assert llama.chamadas == []
+
+    def test_o_sim_seguinte_pede_o_produto(self, ana_identificada):
+        ana_identificada.responder("tem pizza de calabresa?")
+        assert ana_identificada.responder("quero") == (
+            "Anotei 1 Pizza de Calabresa. Qual o tamanho: pequena, média ou grande?")
+
+    def test_o_nao_seguinte_nao_pede_nada(self, ana_identificada):
+        ana_identificada.responder("tem pizza de calabresa?")
+        ana_identificada.responder("não")
+        assert ana_identificada.carrinho == []
+
+    def test_produto_que_nao_existe_nao_lista_os_parecidos(self, ana_identificada, llama):
+        assert ana_identificada.responder("tem pizza de sushi?") == (
+            "Não temos pizza de sushi no cardápio. Quer saber de outra opção?")
+        assert llama.chamadas == []
+
+    def test_mais_de_um_produto_lista_as_opcoes(self, ana_identificada):
+        assert ana_identificada.responder("tem água?") == (
+            "Temos Água Mineral 500ml e Água com Gás 500ml. Quer saber o preço de alguma opção?")
+
+    def test_categoria_continua_listando_os_sabores(self, ana_identificada):
+        resposta = ana_identificada.responder("tem pizza doce?")
+        assert "Pizza de Brigadeiro" in resposta and "Pizza de Calabresa" not in resposta
+
+    def test_ingrediente_nao_e_pergunta_de_disponibilidade(self, ana_identificada):
+        assert ana_identificada.responder("a calabresa tem cebola?") == (
+            "Pizza de Calabresa: calabresa fatiada, cebola e azeitona preta.")
+
+
 class TestPerguntaDoTotal:
     @pytest.mark.parametrize("fala", [
         "quanto ficou?", "quanto deu", "qual o total?", "quanto tá dando?", "quanto vai ficar?", "qual o valor?",
