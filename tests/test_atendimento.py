@@ -1862,6 +1862,41 @@ class TestTamanhoJuntoDoFechamento:
         assert "Seu pedido ficou assim: 1 Pizza de Calabresa grande" in ana_identificada.responder("grande, é só isso")
 
 
+class TestConsultaSemProdutoCerto:
+    @pytest.mark.parametrize("fala, falta", [
+        ("quanto custa a pizza de sushi?", "pizza de sushi"),
+        ("quais ingredientes da pizza de sushi?", "pizza de sushi"),
+        ("quanto custa a água de coco?", "agua de coco"),
+    ])
+    def test_produto_que_nao_existe_nao_le_os_parecidos(self, ana_identificada, llama, fala, falta):
+        resposta = ana_identificada.responder(fala)
+        assert resposta == "Não temos {} no cardápio. Quer saber de outra opção?".format(falta)
+        assert llama.chamadas == []
+
+    @pytest.mark.parametrize("fala", ["quanto custa a pizza?", "quanto custam as pizzas?",
+                                      "qual o preço da pizza grande?"])
+    def test_pergunta_generica_nao_le_o_cardapio_inteiro(self, ana_identificada, llama, fala):
+        resposta = ana_identificada.responder(fala)
+        assert resposta.startswith("Temos ") and resposta.endswith("opções de pizza. De qual você quer saber?")
+        assert "reais" not in resposta
+        assert llama.chamadas == []
+
+    def test_categoria_pequena_lista_os_nomes(self, ana_identificada):
+        resposta = ana_identificada.responder("quanto custa a pizza doce?")
+        assert resposta.startswith("Temos 5 opções de pizza doce: ")
+        assert "Pizza de Brigadeiro" in resposta and "Pizza de Calabresa" not in resposta
+
+    @pytest.mark.parametrize("fala, trechos", [
+        ("quanto custa a água?", ["A Água Mineral 500ml custa 5 reais.", "A Água com Gás 500ml custa"]),
+        ("quanto custa a borda?", ["A Borda de Catupiry custa 12 reais.", "A Borda de Cheddar custa 12 reais."]),
+        ("quanto custa a calabresa e a mussarela?", ["A Pizza de Calabresa custa", "A Pizza de Mussarela custa"]),
+        ("quanto custa a pizza de frango?", ["A Pizza de Frango com Catupiry custa"]),
+    ])
+    def test_poucas_opcoes_continuam_com_o_preco(self, ana_identificada, fala, trechos):
+        resposta = ana_identificada.responder(fala)
+        assert all(trecho in resposta for trecho in trechos)
+
+
 class TestPerguntaDoTotal:
     @pytest.mark.parametrize("fala", [
         "quanto ficou?", "quanto deu", "qual o total?", "quanto tá dando?", "quanto vai ficar?", "qual o valor?",

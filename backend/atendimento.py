@@ -55,6 +55,12 @@ QUER_MUDAR_ENDERECO = re.compile(
     r"\b(?:mudar|muda|trocar|troca|alterar|altera|corrigir|corrige|outro|novo)\b.*\bendereco\b|"
     r"\bendereco\b.*\b(?:errado|outro|novo|diferente)\b"
 )
+# palavras da propria pergunta, que podem vir depois do nome do produto sem fazer parte dele
+PALAVRAS_DA_CONSULTA = {
+    "de", "do", "da", "dos", "das", "a", "o", "as", "os", "e", "ou", "um", "uma", "cada", "que", "qual", "quais",
+    "quanto", "custa", "custam", "preco", "precos", "valor", "tem", "leva", "contem", "vem", "ingredientes",
+    "agora", "entao", "la", "pra", "para", "mim", "voces", "vcs", "sai", "fica", "esta", "ta", "sao", "eh",
+}
 # "quanto ficou?", "qual o total?": o valor sai do carrinho, o modelo nao faz conta. so vale sem produto
 # na frase, pq "quanto fica a calabresa?" pergunta o preco dela
 PERGUNTA_DO_TOTAL = re.compile(
@@ -957,7 +963,7 @@ class Atendimento:
         normalizado = _normalizar(texto)
         # "quanto custa a pizza grande de calabresa": o tamanho sai antes de procurar o nome
         sem_tamanho, tamanhos_ditos = separar_tamanhos(texto, self._vocabulario)
-        _, citados = mencoes(sem_tamanho, produtos)
+        palavras, citados = mencoes(sem_tamanho, produtos)
         if RECLAMA_DO_PEDIDO.search(normalizado):
             fala = self._falar_pedido_atual(" O que você quer mudar?")
         elif CONSULTA_PEDIDO_ATUAL.search(normalizado) or (PERGUNTA_DO_TOTAL.search(normalizado) and not citados):
@@ -989,18 +995,18 @@ class Atendimento:
                 nomes = [" ".join(palavra + "s" for palavra in c.split()) for c in categorias]
                 fala = "Temos {}. O que você quer saber?".format(_juntar(nomes))
         elif re.search(r"\b(?:preco|precos|custa|custam|quanto)\b", normalizado) and citados:
-            unicos = {p.id: p for _, _, candidatos in citados for p in candidatos}
+            unicos, aviso = self._produtos_da_consulta(normalizado, palavras, citados)
             tamanhos = repositorio.listar_tamanhos(db)
             so = tamanhos_ditos[0][1] if len({t for _, t in tamanhos_ditos}) == 1 else None
-            fala = " ".join(
+            fala = aviso or " ".join(
                 self._precos_por_tamanho(p, tamanhos, so)
                 if any(t.grupo == repositorio.grupo_tamanho(p) for t in tamanhos) else
                 "{} custa {}.".format(_com_artigo(p.nome), preco_falado(p.preco))
-                for p in unicos.values())
+                for p in unicos)
         elif re.search(r"\b(?:ingredientes|contem|leva|tem cebola)\b", normalizado) and citados:
-            unicos = {p.id: p for _, _, candidatos in citados for p in candidatos}
-            fala = " ".join("{}: {}.".format(p.nome, p.descricao or "ingredientes não informados")
-                            for p in unicos.values())
+            unicos, aviso = self._produtos_da_consulta(normalizado, palavras, citados)
+            fala = aviso or " ".join("{}: {}.".format(p.nome, p.descricao or "ingredientes não informados")
+                                     for p in unicos)
         elif (self._categoria_citada(normalizado) and not any(len(c) == 1 for _, _, c in citados)
               and re.search(r"\b(?:quais|qual|que|tem|opcoes|sabores|vendem)\b", normalizado)):
             categoria = self._categoria_citada(normalizado)
@@ -1024,6 +1030,34 @@ class Atendimento:
                 fala = "Qual informação do cardápio você gostaria de consultar?"
         self.historico.extend([{"role": "user", "content": texto}, {"role": "assistant", "content": fala}])
         return fala
+
+    def _produtos_da_consulta(self, normalizado, palavras, citados):
+        """
+        de quais produtos a pessoa quer saber. devolve (produtos, aviso): o aviso vem quando a fala nao
+        aponta um produto ("a pizza de sushi", "a pizza"), pra nao ler o cardapio inteiro em voz alta.
+        """
+        categoria = self._categoria_citada(normalizado)
+        da_categoria = set(categoria.split()) if categoria else set()
+        produtos = {}
+        for indice, (inicio, fim, candidatos) in enumerate(citados):
+            if len(candidatos) > 1:
+                seguinte = citados[indice + 1][0] if indice + 1 < len(citados) else len(palavras)
+                depois = [p for p in palavras[fim:seguinte] if p not in {"por", "favor", "hoje", "mesmo", "ai"}]
+                trecho = " ".join(palavras[inicio:fim])
+                # "pizza de sushi": o que sobrou depois do nome nao eh do cardapio nem palavra da pergunta
+                if any(p.rstrip("s") not in da_categoria and p not in PALAVRAS_DA_CONSULTA and not p.isdigit()
+                       for p in depois):
+                    return [], "Não temos {} no cardápio. Quer saber de outra opção?".format(
+                        " ".join([trecho] + depois))
+                if categoria:
+                    candidatos = [p for p in candidatos if categoria in _normalizar(p.categoria)] or candidatos
+                if len(candidatos) > 4:
+                    rotulo = categoria or re.sub(r"\s+d[eao]$", "", trecho)
+                    nomes = ": " + _juntar([p.nome for p in candidatos]) if len(candidatos) <= 8 else ""
+                    return [], "Temos {} opções de {}{}. De qual você quer saber?".format(
+                        len(candidatos), rotulo, nomes)
+            produtos.update((p.id, p) for p in candidatos)
+        return list(produtos.values()), None
 
     def _falar_pedido_atual(self, complemento):
         if not self.carrinho:
