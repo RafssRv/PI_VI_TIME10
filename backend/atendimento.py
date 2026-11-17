@@ -45,6 +45,14 @@ RESPOSTAS_VAGAS_A_SUGESTAO = {"sim", "pode ser", "ok", "claro", "isso", "beleza"
                               "ta bom", "perfeito", "pode", "pode sim", "sim pode", "sim por favor"}
 CUMPRIMENTO = re.compile(r"^(?:oi|ola|alo|opa|e ai|bom dia|boa tarde|boa noite|tudo bem|tudo bom)\b")
 CORTESIA = re.compile(r"\b(?:obrigad[oa]|valeu|por favor|viu)\b")
+# falas inteiras que nao pedem nada: sem isto viravam "Não temos oi no cardápio"
+_SAUDACAO = r"(?:oi|ola|alo|opa|e ai|bom dia|boa tarde|boa noite)"
+SO_CUMPRIMENTO = re.compile(r"{0}(?: {0})*(?: (?:tudo bem|tudo bom|como vai))?".format(_SAUDACAO))
+SO_QUER_PEDIR = re.compile(r"(?:{} )?(?:eu )?(?:quero|queria|gostaria de|vou|posso|preciso) "
+                           r"(?:fazer |realizar )?(?:um |o |meu )?(?:pedir|pedido)(?: agora| ai)?".format(_SAUDACAO))
+PEDE_TEMPO = re.compile(r"(?:so )?(?:um|1) (?:momento|minuto|minutinho|segundo|instante)|espera(?: ai| um pouco)?|"
+                        r"pera(?: ai)?|perai|calma(?: ai)?|deixa eu (?:ver|pensar)|vou (?:ver|pensar)|"
+                        r"(?:to|estou) (?:vendo|pensando)")
 SINONIMOS_DE_CATEGORIA = {"refrigerante": "bebida", "refri": "bebida", "suco": "bebida", "agua": "bebida"}
 ENDERECO_NA_FALA = re.compile(r"\b(?:rua|avenida|av|travessa|alameda|estrada|rodovia)\b.*", re.IGNORECASE)
 FRASE_PEDE_TAMANHO = "pequena, média ou grande?"
@@ -597,6 +605,9 @@ class Atendimento:
         sem_cortesia = re.sub(r"\bnao( nao)+\b", "nao", " ".join(CORTESIA.sub("", normalizado).split()))
         if self._quer_esvaziar(sem_cortesia):
             return self._esvaziar_pedido()
+        conversa = self._fala_sem_pedido(texto, normalizado, sem_cortesia)
+        if conversa:
+            return conversa
         # "lata, no pix, é só isso" responde o tamanho e fecha: o tamanho não pode se perder no caminho
         responde_tamanho = bool((self._duvida_item or {}).get("campo") == "tamanho" and separar_tamanhos(texto, self._vocabulario)[1])
         if (FIM_DO_PEDIDO.search(sem_cortesia) and not AINDA_NAO_ACABOU.search(texto) and not responde_tamanho
@@ -784,6 +795,27 @@ class Atendimento:
 
         self.historico.append({"role": "assistant", "content": fala})
         return fala
+
+    def _fala_sem_pedido(self, texto, normalizado, sem_cortesia):
+        """cumprimento, "quero pedir", "um momento", "obrigado": responde e deixa o pedido como esta."""
+        if PEDE_TEMPO.fullmatch(sem_cortesia):
+            return "Sem pressa. Quando decidir, é só falar."
+        if SO_CUMPRIMENTO.fullmatch(sem_cortesia) or (
+                "?" in texto and sem_cortesia in {"tudo bem", "tudo bom", "como vai"}):
+            inicio = "Olá!"
+        elif SO_QUER_PEDIR.fullmatch(sem_cortesia):
+            inicio = "Claro!"
+        elif normalizado and not sem_cortesia:
+            # so agradeceu
+            inicio = "De nada!"
+        else:
+            return None
+        # a pergunta que estava aberta continua valendo, sem contar como fala nao entendida.
+        # "nao entendi o produto" nao eh pergunta aberta: repetir depois de um "oi" soaria como bronca
+        duvida = self._duvida_item or {}
+        vaga = duvida.get("campo") in {"produto", "intencao", "fora_do_pedido"} and not duvida.get("candidatos")
+        return "{} {}".format(inicio, (None if vaga else self._pendencia) or (
+            "Quer algo mais?" if self.carrinho else "O que vai querer?"))
 
     def _quer_esvaziar(self, normalizado):
         if NAO_ESVAZIAR.search(normalizado):

@@ -1897,6 +1897,49 @@ class TestConsultaSemProdutoCerto:
         assert all(trecho in resposta for trecho in trechos)
 
 
+class TestFalaSemPedido:
+    @pytest.mark.parametrize("fala, resposta", [
+        ("oi", "Olá! O que vai querer?"),
+        ("olá, boa noite", "Olá! O que vai querer?"),
+        ("tudo bem?", "Olá! O que vai querer?"),
+        ("quero pedir", "Claro! O que vai querer?"),
+        ("quero fazer um pedido", "Claro! O que vai querer?"),
+        ("gostaria de fazer um pedido", "Claro! O que vai querer?"),
+        ("espera um pouco", "Sem pressa. Quando decidir, é só falar."),
+        ("um momento", "Sem pressa. Quando decidir, é só falar."),
+        ("deixa eu ver", "Sem pressa. Quando decidir, é só falar."),
+        ("obrigado", "De nada! O que vai querer?"),
+    ])
+    def test_nao_culpa_o_cardapio(self, ana_identificada, llama, fala, resposta):
+        assert ana_identificada.responder(fala) == resposta
+        assert ana_identificada.carrinho == []
+        assert llama.chamadas == []
+
+    @pytest.mark.parametrize("fala, resposta", [
+        ("oi", "Olá! Qual o tamanho: pequena, média ou grande?"),
+        ("obrigado", "De nada! Qual o tamanho: pequena, média ou grande?"),
+        ("espera aí", "Sem pressa. Quando decidir, é só falar."),
+    ])
+    def test_pergunta_aberta_continua_valendo(self, ana_identificada, fala, resposta):
+        ana_identificada.responder("uma calabresa")
+        assert ana_identificada.responder(fala) == resposta
+        # e a resposta do tamanho ainda eh aceita, sem "desculpe, nao entendi"
+        assert ana_identificada.responder("grande") == "Certo, 1 Pizza de Calabresa grande. Quer algo mais?"
+
+    def test_com_itens_pergunta_se_quer_mais(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        assert ana_identificada.responder("oi") == "Olá! Quer algo mais?"
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+
+    def test_produto_nao_entendido_nao_e_repetido_depois_do_cumprimento(self, ana_identificada):
+        ana_identificada.responder("uma pizza de sushi")
+        assert ana_identificada.responder("obrigado") == "De nada! O que vai querer?"
+
+    @pytest.mark.parametrize("fala", ["oi, quero uma calabresa grande", "boa noite, me vê uma calabresa grande"])
+    def test_cumprimento_junto_do_pedido_continua_pedindo(self, ana_identificada, fala):
+        assert ana_identificada.responder(fala) == "Anotei 1 Pizza de Calabresa grande. Quer algo mais?"
+
+
 class TestPerguntaSeTem:
     @pytest.mark.parametrize("fala, inicio", [
         ("tem pizza de calabresa?", "Temos, sim. A Pizza de Calabresa custa 64 reais e 90 centavos a grande"),
