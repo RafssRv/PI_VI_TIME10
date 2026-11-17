@@ -48,7 +48,12 @@ AINDA_NAO_ACABOU = re.compile(r"\bn[aã]o\s+(?:[eé]\s+)?s[oó]\b", re.IGNORECAS
 # Sem produto na frase, basta conter isto: "não, não quero mais nada", "quero pagar no pix".
 FIM_DO_PEDIDO = re.compile(r"\b(?:mais nada|nada mais|so isso|quero pagar|pode cobrar|"
                            r"fecha(?:r)? a conta|quero fechar|quero encerrar)\b")
-REMOVER = re.compile(r"\b(?:tire|tira|tirar|retire|retira|retirar|remova|remover|exclua|nao quero)\b")
+# Como as pessoas mandam pôr e tirar um item. "põe" chega aqui sem acento.
+VERBOS_DE_ADICIONAR = (r"adicione|adicionar|adiciona|acrescente|acrescentar|acrescenta|inclua|incluir|inclui|"
+                       r"coloque|colocar|coloca|bote|botar|bota|ponha|poe|anote|anotar|anota")
+VERBOS_DE_REMOVER = (r"tire|tira|tirar|retire|retira|retirar|remova|remover|remove|exclua|excluir|exclui|"
+                     r"cancele|cancelar|cancela")
+REMOVER = re.compile(r"\b(?:" + VERBOS_DE_REMOVER + r"|nao quero)\b")
 # Tamanho dito na fala: de pizza ("grande") ou de refrigerante ("lata", "de 600", "2 litros").
 # "Em média" não é tamanho, e o endereço ("Rua Grande") nem é olhado.
 # Vocabulário base, igual ao seed. Tamanho novo cadastrado no banco entra pela classe Tamanhos.
@@ -60,12 +65,13 @@ GRUPO_DO_TAMANHO = {"pequena": "pizza", "média": "pizza", "grande": "pizza",
 ENDERECO_NA_FALA = re.compile(r"\b(?:rua|avenida|av|travessa|alameda|estrada|rodovia)\b", re.IGNORECASE)
 # Gigante e família não existem no cardápio: o atendente avisa e pergunta de novo.
 TAMANHO_INDISPONIVEL = "indisponivel"
-PEDE_MAIS_UM = re.compile(r"\b(?:mais|outra|outro|outras|outros|adicione|acrescente|quero|queria)\b")
+PEDE_MAIS_UM = re.compile(r"\b(?:mais|outra|outro|outras|outros|quero|queria|" + VERBOS_DE_ADICIONAR + r")\b")
 CORRIGIR = re.compile(r"\b(?:na verdade|so|apenas|corrija|corrigir|altere|alterar|deixe|mude)\b")
 
 
 # Parecem nomes do cardápio, mas são palavras do dia a dia: "quanto" não é "quatro queijos".
-NAO_E_PRODUTO = {"quanto", "quanta"}
+# Os verbos também: a comparação aproximada levava "cancela" para "canela" e "anota" para "fanta".
+NAO_E_PRODUTO = {"quanto", "quanta", *VERBOS_DE_ADICIONAR.split("|"), *VERBOS_DE_REMOVER.split("|")}
 # Grafias que ficam longe demais do nome para a comparação aproximada.
 GRAFIAS = {"calabreza": "calabresa", "mozarela": "mussarela", "muzarela": "mussarela",
            "muzzarela": "mussarela", "mozzarela": "mussarela", "mozzarella": "mussarela"}
@@ -106,7 +112,7 @@ def acao_do_trecho(texto, anterior="adicionar"):
         return "remover"
     if CORRIGIR.search(texto):
         return "corrigir"
-    if re.search(r"\b(?:quero|queria|adicione|adicionar|acrescente|acrescentar|inclua|coloque|mais)\b", texto):
+    if re.search(r"\b(?:quero|queria|mais|" + VERBOS_DE_ADICIONAR + r")\b", texto):
         return "adicionar"
     return anterior
 
@@ -355,7 +361,8 @@ def mencoes(texto, produtos):
 
 def eh_consulta(texto):
     normal = _normalizar(texto)
-    comando = re.match(r"(?:pode|poderia) (?:adicionar|acrescentar|retirar|trocar|substituir)\b", normal)
+    comando = re.match(r"(?:pode|poderia) (?:adicionar|acrescentar|colocar|incluir|botar|anotar|"
+                       r"retirar|tirar|remover|excluir|trocar|substituir)\b", normal)
     return bool(CONSULTA.search(normal) or CONSULTA_HISTORICO.search(normal) or
                 CONSULTA_RECOMENDACAO.search(normal) or CONSULTA_PEDIDO_ATUAL.search(normal) or
                 RECLAMA_DO_PEDIDO.search(normal) or normal.startswith("se ") or
@@ -476,10 +483,10 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
             qtd = pendente.get("quantidade")
         permitido = re.sub(NUMERO, "", prefixo)
         permitido = re.sub(r"\b(?:eu|quero|queria|gostaria|de|a|o|as|os|mais|uma|um|"
-                           r"adicione|adicionar|acrescente|acrescentar|inclua|coloque|manda|mande|"
+                           + VERBOS_DE_ADICIONAR + r"|" + VERBOS_DE_REMOVER + r"|manda|mande|pedir|ai|"
                            r"pode|poderia|por|favor|sim|nao|na|verdade|so|apenas|dessa|desse|daquela|daquele|igual|corrija|corrigir|"
-                           r"altere|alterar|deixe|mude|tire|tira|tirar|retire|retira|retirar|"
-                           r"remova|remover|exclua|me|ve|da|traz|traga|vou|querer|ser|vai|vamos|ah|oi|ola|"
+                           r"altere|alterar|deixe|mude|"
+                           r"me|ve|da|traz|traga|vou|querer|ser|vai|vamos|ah|oi|ola|"
                            r"boa|bom|noite|tarde|dia|entao|hoje|tambem|agora|pra|para|mim|sao|fica|ficam)\b", "", permitido).strip()
         if permitido or re.match(r"e\s+(?!so isso|uma?\b|duas?\b|dois\b|tres\b|\d+\b)", sufixo):
             duvida = {"campo": "intencao"}
@@ -557,7 +564,8 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
             # "Tire cebola da pizza" não é autorização para tirar a pizza.
             resto = REMOVER.sub("", prefixo).strip()
             resto = re.sub(NUMERO, "", resto)
-            if re.sub(r"\b(?:a|o|as|os|uma|um|sim|nao)\b", "", resto).strip():
+            if re.sub(r"\b(?:a|o|as|os|uma|um|sim|nao|pode|poderia|por|favor|eu|quero|queria|me|entao|agora)\b",
+                      "", resto).strip():
                 duvida = {"campo": "observacao", "produto": produto.nome}
                 continue
             if not existentes:

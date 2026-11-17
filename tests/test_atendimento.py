@@ -1862,6 +1862,44 @@ class TestTamanhoJuntoDoFechamento:
         assert "Seu pedido ficou assim: 1 Pizza de Calabresa grande" in ana_identificada.responder("grande, é só isso")
 
 
+class TestVerbosDePedir:
+    @pytest.mark.parametrize("fala", [
+        "coloca uma calabresa grande", "bota uma calabresa grande", "põe uma calabresa grande",
+        "adiciona uma calabresa grande", "acrescenta uma calabresa grande", "inclui uma calabresa grande",
+        "anota aí uma calabresa grande", "pode colocar uma calabresa grande", "pode colocar uma calabresa grande?",
+        "quero pedir uma calabresa grande", "gostaria de pedir uma calabresa grande",
+    ])
+    def test_jeitos_de_pedir_um_item(self, ana_identificada, llama, fala):
+        assert ana_identificada.responder(fala) == "Anotei 1 Pizza de Calabresa grande. Quer algo mais?"
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+        assert llama.chamadas == []
+
+    def test_coloca_mais_uma_soma_na_que_ja_existe(self, ana_identificada):
+        ana_identificada.responder("uma portuguesa grande")
+        ana_identificada.responder("coloca mais uma portuguesa grande")
+        assert _itens(ana_identificada) == [("Pizza Portuguesa", 2, "grande")]
+
+    @pytest.mark.parametrize("fala", [
+        "remove a coca", "exclui a coca", "cancela a coca", "pode tirar a coca", "pode tirar a coca?",
+    ])
+    def test_jeitos_de_tirar_um_item(self, ana_identificada, llama, fala):
+        ana_identificada.responder("uma calabresa grande e uma coca lata")
+        assert ana_identificada.responder(fala) == "Tirei 1 Coca-Cola Lata. Quer algo mais?"
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+        assert llama.chamadas == []
+
+    def test_verbo_nao_e_confundido_com_produto_parecido(self, ana_identificada):
+        # "anota" ficava a uma letra de "fanta" e "cancela" de "canela"
+        ana_identificada.responder("anota uma calabresa grande")
+        ana_identificada.responder("cancela a calabresa")
+        assert ana_identificada.carrinho == []
+
+    def test_tirar_ingrediente_nao_tira_a_pizza(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        ana_identificada.responder("pode tirar a cebola da calabresa")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+
+
 class TestEsvaziaOPedido:
     @pytest.mark.parametrize("fala", [
         "cancela o pedido", "pode cancelar o pedido, por favor", "tira tudo", "limpa o pedido",
