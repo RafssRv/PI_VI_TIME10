@@ -55,6 +55,15 @@ QUER_MUDAR_ENDERECO = re.compile(
     r"\b(?:mudar|muda|trocar|troca|alterar|altera|corrigir|corrige|outro|novo)\b.*\bendereco\b|"
     r"\bendereco\b.*\b(?:errado|outro|novo|diferente)\b"
 )
+# "quanto ficou?", "qual o total?": o valor sai do carrinho, o modelo nao faz conta. so vale sem produto
+# na frase, pq "quanto fica a calabresa?" pergunta o preco dela
+PERGUNTA_DO_TOTAL = re.compile(
+    r"\bquanto (?:que )?(?:ficou|deu|saiu|vai ficar|vai dar|ta dando|esta dando)\b|"
+    r"\bquanto (?:que )?(?:fica|da|e|custa|sai)(?: (?:tudo|isso|o pedido|a conta|o total|no total|ao todo))?"
+    r"(?: mesmo| entao| ai)?$|"
+    r"\b(?:total|valor)(?: do pedido| da conta| total)?(?: mesmo| entao| ai)?$|"
+    r"\bquanto (?:eu )?(?:vou pagar|pago|devo)\b"
+)
 # "cancela o pedido", "tira tudo", "quero começar de novo": esvazia o rascunho, que ainda nao foi gravado
 ESVAZIAR_PEDIDO = re.compile(
     r"\b(?:cancel|limp|esvazi|apag|zer|esquec)\w*\b.*\b(?:pedido|tudo|carrinho|comanda)\b|"
@@ -951,7 +960,7 @@ class Atendimento:
         _, citados = mencoes(sem_tamanho, produtos)
         if RECLAMA_DO_PEDIDO.search(normalizado):
             fala = self._falar_pedido_atual(" O que você quer mudar?")
-        elif CONSULTA_PEDIDO_ATUAL.search(normalizado):
+        elif CONSULTA_PEDIDO_ATUAL.search(normalizado) or (PERGUNTA_DO_TOTAL.search(normalizado) and not citados):
             fala = self._falar_pedido_atual(" Quer algo mais?")
         elif CONSULTA_HISTORICO.search(normalizado):
             fala = self._falar_historico(db, normalizado)

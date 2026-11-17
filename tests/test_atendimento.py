@@ -1862,6 +1862,40 @@ class TestTamanhoJuntoDoFechamento:
         assert "Seu pedido ficou assim: 1 Pizza de Calabresa grande" in ana_identificada.responder("grande, é só isso")
 
 
+class TestPerguntaDoTotal:
+    @pytest.mark.parametrize("fala", [
+        "quanto ficou?", "quanto deu", "qual o total?", "quanto tá dando?", "quanto vai ficar?", "qual o valor?",
+        "quanto é?", "quanto fica tudo?", "qual o valor do pedido?", "quanto eu vou pagar?", "quanto dá?",
+        "qual é o total da conta?", "quanto ficou mesmo?",
+    ])
+    def test_total_sai_do_carrinho_sem_o_modelo(self, ana_identificada, llama, fala):
+        ana_identificada.responder("uma calabresa grande e uma coca lata")
+        resposta = ana_identificada.responder(fala)
+        assert resposta == ("Até agora anotei 1 Pizza de Calabresa grande e 1 Coca-Cola Lata, "
+                            "subtotal de 70 reais e 90 centavos. Quer algo mais?")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande"), ("Coca-Cola", 1, "Lata")]
+        assert llama.chamadas == []
+
+    def test_sem_itens_nao_inventa_total(self, ana_identificada, llama):
+        assert ana_identificada.responder("quanto ficou?") == "Ainda não anotei nada neste pedido. O que vai querer?"
+        assert llama.chamadas == []
+
+    @pytest.mark.parametrize("fala, trecho", [
+        ("quanto é a mussarela média?", "A Pizza de Mussarela média custa 44 reais e 90 centavos."),
+        ("quanto fica a calabresa pequena?", "A Pizza de Calabresa pequena custa 39 reais e 90 centavos."),
+        ("quanto custa a coca?", "A Coca-Cola custa"),
+    ])
+    def test_preco_de_um_produto_continua_sendo_o_do_produto(self, ana_identificada, fala, trecho):
+        ana_identificada.responder("uma calabresa grande")
+        assert ana_identificada.responder(fala).startswith(trecho)
+
+    def test_total_perguntado_na_confirmacao_nao_grava(self, ana_identificada, db):
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        ana_identificada.responder("uma calabresa grande no pix, é só isso")
+        assert "subtotal de 64 reais e 90 centavos" in ana_identificada.responder("quanto ficou mesmo?")
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes
+
+
 class TestVerbosDePedir:
     @pytest.mark.parametrize("fala", [
         "coloca uma calabresa grande", "bota uma calabresa grande", "põe uma calabresa grande",
