@@ -1897,6 +1897,51 @@ class TestConsultaSemProdutoCerto:
         assert all(trecho in resposta for trecho in trechos)
 
 
+class TestJeitosDeTrocar:
+    @pytest.mark.parametrize("fala", [
+        "troca a calabresa por uma mussarela", "troca a calabresa por mussarela",
+        "troca a calabresa pela mussarela", "não, troca a calabresa por uma mussarela",
+        "na verdade troca a calabresa por uma mussarela", "substitui a calabresa pela mussarela",
+    ])
+    def test_troca_uma_por_uma_mantendo_o_tamanho(self, ana_identificada, llama, fala):
+        ana_identificada.responder("uma calabresa grande")
+        ana_identificada.responder(fala)
+        assert _itens(ana_identificada) == [("Pizza de Mussarela", 1, "grande")]
+        assert llama.chamadas == []
+
+    def test_nao_sem_virgula_continua_negando_a_troca(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        ana_identificada.responder("não troca a calabresa por uma mussarela")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+
+    def test_saindo_mais_de_uma_a_quantidade_que_entra_e_perguntada(self, ana_identificada):
+        ana_identificada.responder("duas calabresas grandes")
+        resposta = ana_identificada.responder("troca duas calabresas por mussarela")
+        assert "Quantas unidades de Pizza de Mussarela" in resposta
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 2, "grande")]
+
+    def test_troca_na_confirmacao_le_o_resumo_novo(self, ana_identificada, db):
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        ana_identificada.responder("uma calabresa grande no pix, é só isso")
+        resposta = ana_identificada.responder("não, troca a calabresa por uma mussarela")
+        assert resposta.startswith("Seu pedido ficou assim: 1 Pizza de Mussarela grande.")
+        assert ana_identificada.etapa == "confirmando_pedido"
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes
+        assert "confirmado" in ana_identificada.responder("sim")
+
+    @pytest.mark.parametrize("fala", ["cancela a troca", "cancela", "deixa pra lá", "esquece", "deixa como está",
+                                      "não precisa", "não quero mais trocar"])
+    def test_cliente_sai_de_uma_troca_nao_entendida(self, ana_identificada, fala):
+        ana_identificada.responder("uma calabresa grande")
+        ana_identificada.responder("troca a calabresa por uma pizza de sushi")
+        assert ana_identificada._troca_pendente
+        ana_identificada.responder(fala)
+        assert not ana_identificada._troca_pendente
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+        # e o pedido volta a andar
+        assert ana_identificada.responder("é só isso").startswith("Como você vai pagar?")
+
+
 class TestFalaSemPedido:
     @pytest.mark.parametrize("fala, resposta", [
         ("oi", "Olá! O que vai querer?"),

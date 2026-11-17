@@ -83,6 +83,13 @@ ESVAZIAR_PEDIDO = re.compile(
     r"\b(?:cancel|limp|esvazi|apag|zer|esquec)\w*\b.*\b(?:pedido|tudo|carrinho|comanda)\b|"
     r"\b(?:tir|retir|remov)\w*\s+tudo\b|\bcomecar (?:tudo )?de novo\b|\bdesisti do pedido\b"
 )
+# com uma troca nao entendida esperando resposta, estas falas desistem dela e o pedido fica como estava
+DESISTE_DA_TROCA = {
+    "cancele a troca", "cancelar a troca", "cancela a troca", "desisti da troca", "esquece a troca",
+    "cancela", "cancelar", "cancele", "pode cancelar", "desisti", "esquece", "deixa", "deixa pra la",
+    "deixa para la", "deixa assim", "deixa como esta", "deixa como estava", "pode deixar",
+    "nao quero trocar", "nao quero mais trocar", "nao precisa", "nao precisa trocar", "nao precisa mais",
+}
 # sozinha, a palavra so cancela o pedido quando nao ha uma troca esperando resposta
 SO_CANCELAR = {"cancela", "cancelar", "cancele", "pode cancelar", "quero cancelar"}
 NAO_ESVAZIAR = re.compile(r"\bnao (?:(?:quero|precisa|vou|pode|e para|e pra) )?"
@@ -653,7 +660,7 @@ class Atendimento:
         if FECHAR.search(normalizado):
             self._fechamento_solicitado = "nao" not in normalizado.split()
         if self._troca_pendente:
-            if normalizado in {"cancele a troca", "cancelar a troca", "desisti da troca"}:
+            if sem_cortesia in DESISTE_DA_TROCA:
                 self._troca_pendente = False
                 self._pendencia = self._pendencia_antes_da_troca
                 self._pendencia_antes_da_troca = None
@@ -1213,11 +1220,17 @@ class Atendimento:
         # alterações. Fora desse formato, esclareça antes de ampliar a gramática.
         if re.search(r"[-+−]\s*\d", texto):
             return ["Informe quantidades inteiras positivas, sem sinais."]
+        # "não, troca a calabresa": com a virgula o nao responde a pergunta anterior e a troca vale.
+        # sem ela ("não troque a coca") continua sendo uma negacao, e nada muda
+        nao_solto = re.match(r"\s*n[aã]o\s*[,.;!]", texto, re.IGNORECASE)
         texto = re.sub(r"\s+por favor$", "", _normalizar(texto))
+        if nao_solto:
+            texto = re.sub(r"^nao\s+", "", texto)
         partes = re.fullmatch(
-            r"(?:(?:sim|nao)\s+mas\s+|sim\s+)?"
-            r"(?:(?:pode|quero|gostaria de)\s+)?"
-            r"(?:troque|trocar|troca|substitua|substituir)\s+(.+?)\s+por\s+(.+)", texto,
+            r"(?:(?:sim|nao)\s+mas\s+|sim\s+|na verdade\s+|entao\s+|ah\s+|olha\s+)*"
+            r"(?:(?:pode|quero|queria|gostaria de)\s+)?"
+            r"(?:troque|trocar|troca|substitua|substituir|substitui)\s+(.+?)\s+(?:por|pela|pelo|pelas|pelos)\s+(.+)",
+            texto,
         )
         if not partes or not self._controle or not self._controle.itens:
             return ["Pode dizer qual produto deseja trocar e por qual produto, com as quantidades?"]
@@ -1249,7 +1262,10 @@ class Atendimento:
         if len(produtos) > 1:
             return [self._pergunta_de_ambiguidade(destino, produtos)]
         if acrescentar is None:
-            return ["Quantas unidades de {} deseja acrescentar na troca?".format(produtos[0].nome)]
+            # "troca a calabresa por mussarela" eh uma por uma; saindo mais de uma, pergunta
+            if retirar != 1:
+                return ["Quantas unidades de {} deseja acrescentar na troca?".format(produtos[0].nome)]
+            acrescentar = 1
         # trocar de sabor mantem o tamanho da pizza que saiu; "mais uma margherita" eh igual a que ja
         # esta no pedido. sem nenhum dos dois, a pizza entra sem tamanho e o atendente pergunta
         # (coca de 2 litros por guarana continua 2 litros; coca por pizza pergunta o tamanho da pizza)
