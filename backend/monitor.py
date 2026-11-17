@@ -7,6 +7,8 @@ from typing import Dict, Any, List
 class MonitorEventos:
     def __init__(self):
         self._conexoes = set()
+        # o loop so guarda referencia fraca das tarefas: sem isto um aviso pode sumir no meio do envio
+        self._envios = set()
         self.chamadas_ativas: Dict[str, Dict[str, Any]] = {}
         self.historico_recente: List[Dict[str, Any]] = []
         self._limite_historico = 30
@@ -26,13 +28,19 @@ class MonitorEventos:
 
     async def _transmitir(self, mensagem: Dict[str, Any]):
         mortas = set()
-        for ws in self._conexoes:
+        # copia: um painel pode conectar ou sair enquanto o envio espera a rede
+        for ws in list(self._conexoes):
             try:
                 await ws.send_json(mensagem)
             except Exception:
                 mortas.add(ws)
         for ws in mortas:
             self._conexoes.discard(ws)
+
+    def _avisar(self, mensagem: Dict[str, Any]):
+        tarefa = asyncio.create_task(self._transmitir(mensagem))
+        self._envios.add(tarefa)
+        tarefa.add_done_callback(self._envios.discard)
 
     def iniciar_chamada(self, chamada_id: str):
         agora = datetime.now().isoformat()
@@ -49,10 +57,10 @@ class MonitorEventos:
             "ultimo_evento": agora
         }
         self.chamadas_ativas[chamada_id] = chamada
-        asyncio.create_task(self._transmitir({
+        self._avisar({
             "tipo": "chamada_iniciada",
             "chamada": chamada
-        }))
+        })
 
     def atualizar_etapa(self, chamada_id: str, etapa: str, turno: int = 0):
         if chamada_id not in self.chamadas_ativas:
@@ -62,13 +70,13 @@ class MonitorEventos:
         chamada["status"] = etapa
         chamada["turno_atual"] = turno
         chamada["ultimo_evento"] = datetime.now().isoformat()
-        asyncio.create_task(self._transmitir({
+        self._avisar({
             "tipo": "etapa_atualizada",
             "chamada_id": chamada_id,
             "etapa": etapa,
             "turno": turno,
             "timestamp": chamada["ultimo_evento"]
-        }))
+        })
 
     def registrar_transcricao(self, chamada_id: str, quem: str, texto: str, turno: int):
         if chamada_id not in self.chamadas_ativas:
@@ -83,34 +91,34 @@ class MonitorEventos:
         chamada["transcricoes"].append(registro)
         if len(chamada["transcricoes"]) > 40:
             chamada["transcricoes"].pop(0)
-        asyncio.create_task(self._transmitir({
+        self._avisar({
             "tipo": "transcricao",
             "chamada_id": chamada_id,
             "registro": registro
-        }))
+        })
 
     def registrar_metricas(self, chamada_id: str, turno: int, metricas: Dict[str, Any]):
         if chamada_id not in self.chamadas_ativas:
             return
         chamada = self.chamadas_ativas[chamada_id]
         chamada["metricas_turno"] = metricas
-        asyncio.create_task(self._transmitir({
+        self._avisar({
             "tipo": "metricas_turno",
             "chamada_id": chamada_id,
             "turno": turno,
             "metricas": metricas
-        }))
+        })
 
     def atualizar_comanda(self, chamada_id: str, comanda: Dict[str, Any]):
         if chamada_id not in self.chamadas_ativas:
             return
         chamada = self.chamadas_ativas[chamada_id]
         chamada["comanda"] = comanda
-        asyncio.create_task(self._transmitir({
+        self._avisar({
             "tipo": "comanda_atualizada",
             "chamada_id": chamada_id,
             "comanda": comanda
-        }))
+        })
 
     def encerrar_chamada(self, chamada_id: str, motivo: str = "finalizada", pedido_id: Any = None):
         if chamada_id not in self.chamadas_ativas:
@@ -125,10 +133,10 @@ class MonitorEventos:
         if len(self.historico_recente) > self._limite_historico:
             self.historico_recente.pop()
 
-        asyncio.create_task(self._transmitir({
+        self._avisar({
             "tipo": "chamada_encerrada",
             "chamada": chamada
-        }))
+        })
 
 
 # Instância global do monitor
