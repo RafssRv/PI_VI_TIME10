@@ -59,3 +59,14 @@ class TestRecomendacao:
     def test_a_casa_nao_recomenda_produto_desativado(self, db):
         campeoes = repositorio.itens_mais_pedidos_da_casa(db, limite=20)
         assert all(produto.ativo for produto, _ in campeoes)
+
+
+class TestRecomendacaoPorCategoria:
+    def test_filtra_o_favorito_do_cliente(self, db, ana):
+        favoritos = repositorio.itens_mais_pedidos_do_cliente(db, ana.id, categoria="bebida")
+        assert all(produto.categoria == "bebida" for produto, _ in favoritos)
+
+    def test_filtra_os_campeoes_da_casa(self, db):
+        campeoes = repositorio.itens_mais_pedidos_da_casa(db, categoria="pizza doce")
+        assert campeoes
+        assert all(produto.categoria == "pizza doce" for produto, _ in campeoes)

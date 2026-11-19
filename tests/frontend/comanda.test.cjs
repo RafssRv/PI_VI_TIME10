@@ -29,3 +29,20 @@ test("queda da chamada não informa que uma venda já registrada deixou de ser s
   assert.equal(tela.ler("comanda-aviso").textContent,
     "O pedido já foi salvo. A chamada foi interrompida.");
 });
+
+test("a comanda mostra o tamanho da pizza ao lado do nome", () => {
+  const tela = carregarTela();
+  tela.enviar({
+    tipo: "pedido", pedido_id: null, cliente: { nome: "Ana", telefone: null },
+    itens: [
+      { produto: "Pizza de Calabresa", quantidade: 1, preco_unitario: "49.90", tamanho: "média" },
+      { produto: "Coca-Cola 2 Litros", quantidade: 1, preco_unitario: "14.90", tamanho: null },
+    ],
+    total: "64.80", forma_pagamento: null, endereco_entrega: null,
+  });
+  const nomes = tela.ler("comanda-itens").children
+    .map((linha) => linha.children.find((filho) => filho.className === "miolo"))
+    .filter(Boolean)
+    .map((miolo) => miolo.children[0].textContent);
+  assert.deepEqual(nomes, ["Pizza de Calabresa (média)", "Coca-Cola 2 Litros"]);
+});

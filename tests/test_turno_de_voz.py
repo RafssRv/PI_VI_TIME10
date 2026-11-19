@@ -34,7 +34,7 @@ def test_chamadas_simultaneas_nao_trocam_audio(tmp_path, monkeypatch, etapa_conc
     barreira = threading.Barrier(2)
     caminhos = []
 
-    def transcrever(caminho):
+    def transcrever(caminho, dica=None):
         caminhos.append(Path(caminho))
         if etapa_concorrente == "transcricao":
             barreira.wait(timeout=5)
@@ -61,6 +61,12 @@ def test_chamadas_simultaneas_nao_trocam_audio(tmp_path, monkeypatch, etapa_conc
 
     class Atendimento:
         id_chamada = "chamada-concorrente"
+
+        def dica_de_transcricao(self):
+            return None
+
+        def texto_para_tela(self, texto):
+            return texto
 
         def responder_com_eventos(self, texto):
             return {"texto": texto, "eventos": []}
@@ -129,7 +135,7 @@ def test_transcricoes_vazias_recebem_orientacao_em_voz_sem_modelo(tmp_path, monk
     atendimento = Atendimento(abrir_sessao=nao_chamar, conversar=nao_chamar)
     monkeypatch.setattr(turno_de_voz, "_agente", {
         "salvar_fala_em_wav": audio_service.salvar_fala_em_wav,
-        "transcrever": lambda caminho: "",
+        "transcrever": lambda caminho, dica=None: "",
         "sintetizar_resposta": sintetizar,
     })
     for turno in (1, 2):
@@ -163,7 +169,7 @@ def chamada(db, monkeypatch, tmp_path):
 
     agente = {
         "salvar_fala_em_wav": salvar,
-        "transcrever": lambda caminho: fala["texto"],
+        "transcrever": lambda caminho, dica=None: fala["texto"],
         "sintetizar_resposta": lambda texto, caminho=None: resposta,
     }
     monkeypatch.setattr(turno_de_voz, "carregar_agente", lambda: agente)
@@ -210,12 +216,13 @@ def test_identificacao_e_rascunho_chegam_a_comanda(chamada, cpf_da_ana, db):
     assert identificado["itens"] == []
     assert "cpf" not in json.dumps(identificado).lower()
 
-    eventos = falar("duas margheritas sem tomate no pix, entrega na Rua Nova, 45")
+    eventos = falar("duas margheritas grandes sem tomate no pix, entrega na Rua Nova, 45")
     pedido = evento_pedido(eventos)
     assert pedido["turno"] == 2
     assert pedido["pedido_id"] is None
     assert pedido["itens"] == [{"produto": "Pizza Margherita", "quantidade": 2,
-                                "preco_unitario": "66.90", "observacao": "sem tomate"}]
+                                "preco_unitario": "66.90", "observacao": "sem tomate",
+                                "tamanho": "grande"}]
     assert pedido["total"] == "133.80"
     assert pedido["forma_pagamento"] == "pix"
     assert pedido["endereco_entrega"] == "Rua Nova, 45"
@@ -229,7 +236,7 @@ def test_confirmacao_chega_apos_gravar_mesmo_se_a_voz_falhar(
 ):
     atendimento, falar, agente = chamada
     falar(cpf_da_ana)
-    falar("duas margheritas no pix")
+    falar("duas margheritas grandes no pix")
     falar("finalizar")
     if falha_voz:
         def falhar(texto, caminho=None):
@@ -258,14 +265,14 @@ def test_confirmacao_chega_apos_gravar_mesmo_se_a_voz_falhar(
     assert evento_pedido(despedida)["pedido_id"] == gravado.id
     assert evento_pedido(despedida)["total"] == "133.80"
     assert not any(e["tipo"] == "pedido_salvo" for e in despedida)
-    novo = evento_pedido(falar("duas margheritas no pix"))
+    novo = evento_pedido(falar("duas margheritas grandes no pix"))
     assert novo["pedido_id"] is None
 
 
 def test_falha_no_banco_nao_anuncia_pedido_salvo(chamada, cpf_da_ana, db, monkeypatch):
     _, falar, _ = chamada
     falar(cpf_da_ana)
-    falar("duas margheritas no pix")
+    falar("duas margheritas grandes no pix")
     falar("finalizar")
     antes = db.query(Pedido).count()
 
@@ -277,3 +284,111 @@ def test_falha_no_banco_nao_anuncia_pedido_salvo(chamada, cpf_da_ana, db, monkey
     assert evento_pedido(eventos)["pedido_id"] is None
     assert not any(e["tipo"] == "pedido_salvo" for e in eventos)
     assert db.query(Pedido).count() == antes
+
+
+class TestAtendenteFalaPrimeiro:
+    @pytest.fixture(autouse=True)
+    def sem_carregar_o_whisper(self, monkeypatch):
+        self.aquecidos = []
+        monkeypatch.setattr(turno_de_voz, "carregar_agente", lambda: self.aquecidos.append(1))
+
+    def _conexao(self):
+        class Conexao:
+            def __init__(self):
+                self.enviados = []
+
+            async def send_json(self, evento):
+                self.enviados.append(evento)
+
+            async def send_bytes(self, dados):
+                self.enviados.append(dados)
+        return Conexao()
+
+    def test_saudacao_vai_em_texto_e_voz_e_fica_guardada(self, monkeypatch, tmp_path):
+        chamadas = []
+
+        def sintetizar(texto, caminho):
+            chamadas.append(texto)
+            caminho.write_bytes(b"voz")
+            return caminho
+
+        monkeypatch.setattr("agente.services.piper_service.sintetizar_resposta", sintetizar)
+        monkeypatch.setattr(turno_de_voz, "_saudacoes", {})
+        primeira, segunda = self._conexao(), self._conexao()
+        asyncio.run(turno_de_voz.saudar(primeira, Atendimento()))
+        asyncio.run(turno_de_voz.saudar(segunda, Atendimento()))
+
+        assert primeira.enviados[0]["tipo"] == "transcricao"
+        assert "Seja bem-vindo" in primeira.enviados[0]["texto"]
+        assert [e["tipo"] for e in primeira.enviados if isinstance(e, dict)][1:] == ["audio_resposta", "fim_audio"]
+        assert b"voz" in primeira.enviados
+        assert segunda.enviados == primeira.enviados
+        assert len(chamadas) == 1
+
+    def test_falha_na_voz_mantem_o_texto_e_a_chamada(self, monkeypatch):
+        def falha(texto, caminho):
+            raise RuntimeError("piper fora")
+
+        monkeypatch.setattr("agente.services.piper_service.sintetizar_resposta", falha)
+        monkeypatch.setattr(turno_de_voz, "_saudacoes", {})
+        conexao = self._conexao()
+        asyncio.run(turno_de_voz.saudar(conexao, Atendimento()))
+        assert [e["tipo"] for e in conexao.enviados] == ["transcricao", "estado"]
+        assert conexao.enviados[1]["etapa"] == "ouvindo"
+
+    def test_whisper_carrega_durante_a_saudacao(self, monkeypatch):
+        monkeypatch.setattr(turno_de_voz, "_saudacoes", {})
+        monkeypatch.setattr("agente.services.piper_service.sintetizar_resposta",
+                            lambda texto, caminho: (caminho.write_bytes(b"voz"), caminho)[1])
+
+        async def chamada():
+            await turno_de_voz.saudar(self._conexao(), Atendimento())
+            await asyncio.gather(*turno_de_voz._aquecimentos)
+
+        asyncio.run(chamada())
+        assert self.aquecidos == [1]
+
+    def test_falha_ao_aquecer_nao_derruba_a_chamada(self, monkeypatch):
+        def falha():
+            raise ImportError("sem whisper")
+
+        monkeypatch.setattr(turno_de_voz, "carregar_agente", falha)
+        turno_de_voz._aquecer_agente()
+
+
+def test_cpf_ditado_nao_chega_ao_monitor_do_admin(tmp_path, monkeypatch):
+    registros = []
+
+    class Monitor:
+        def registrar_transcricao(self, chamada_id, quem, texto, turno):
+            registros.append((quem, texto))
+
+        def __getattr__(self, nome):
+            return lambda *argumentos, **opcoes: None
+
+    def sintetizar(texto, caminho):
+        caminho.write_bytes(audio_wav(111))
+        return caminho
+
+    class Socket:
+        async def send_json(self, mensagem):
+            pass
+
+        async def send_bytes(self, dados):
+            pass
+
+    atendimento = Atendimento(conversar=lambda *a, **k: pytest.fail("o modelo não deve ser chamado"))
+    atendimento.saudacao()
+    # cpf com digito verificador errado: recusado antes de consultar o banco
+    cpf = "529.982.247-26"
+    monkeypatch.setattr(turno_de_voz, "monitor", Monitor())
+    monkeypatch.setattr(turno_de_voz, "_agente", {
+        "salvar_fala_em_wav": audio_service.salvar_fala_em_wav,
+        "transcrever": lambda caminho, dica=None: "meu cpf é " + cpf,
+        "sintetizar_resposta": sintetizar,
+    })
+
+    asyncio.run(turno_de_voz.atender_turno(Socket(), audio_wav(111), 0, 1, atendimento))
+
+    assert ("cliente", "CPF informado") in registros
+    assert all("529" not in texto for _, texto in registros)

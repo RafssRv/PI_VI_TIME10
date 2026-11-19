@@ -14,6 +14,10 @@ URL_DO_BANCO = os.getenv(
     "postgresql+psycopg://pizzaria:pizzaria123@127.0.0.1:5432/pizzaria",
 )
 
+# modelo de linguagem local. trocar o modelo aqui exige um "ollama pull" dele antes
+URL_DO_OLLAMA = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+MODELO_DO_OLLAMA = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
+
 _SEGREDO_DE_DESENVOLVIMENTO = "segredo-local-so-pra-desenvolvimento-nao-use-de-verdade"
 
 # fora do ambiente de desenvolvimento (AMBIENTE=producao, homolog, oq for) o servidor nem sobe

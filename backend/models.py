@@ -8,6 +8,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import relationship
@@ -44,9 +45,32 @@ class Produto(Base):
     preco = Column(Numeric(10, 2), nullable=False)
     # produto fora do cardapio a gente desativa em vez de apagar, senao quebra os pedidos antigos
     ativo = Column(Boolean, nullable=False, server_default="true")
+    # qual tabela de tamanhos vale: "pizza", "refrigerante" ou None (tamanho unico)
+    grupo_tamanho = Column(String(20))
 
     def __repr__(self):
         return "<Produto id={} nome={!r} preco={}>".format(self.id, self.nome, self.preco)
+
+
+class Tamanho(Base):
+    __tablename__ = "tamanho"
+    __table_args__ = (
+        CheckConstraint("fatias > 0", name="ck_tamanho_fatias_positivas"),
+        CheckConstraint("desconto >= 0", name="ck_tamanho_desconto_nao_negativo"),
+        UniqueConstraint("grupo", "nome", name="tamanho_grupo_nome_key"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    # "pizza" ou "refrigerante": o produto diz qual grupo vale pra ele
+    grupo = Column(String(20), nullable=False, server_default="pizza")
+    nome = Column(String(10), nullable=False)
+    # so pizza tem fatias
+    fatias = Column(Integer)
+    # quanto sai do preco do cardapio, q eh o do maior tamanho
+    desconto = Column(Numeric(10, 2), nullable=False, server_default="0")
+
+    def __repr__(self):
+        return "<Tamanho id={} nome={!r} desconto={}>".format(self.id, self.nome, self.desconto)
 
 
 class Pedido(Base):
@@ -74,6 +98,7 @@ class ItemPedido(Base):
     __tablename__ = "item_pedido"
     __table_args__ = (
         CheckConstraint("quantidade > 0", name="ck_item_pedido_quantidade_positiva"),
+        CheckConstraint("preco_unitario > 0", name="ck_item_pedido_preco_positivo"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -83,9 +108,12 @@ class ItemPedido(Base):
     # copia do preco na hora da compra, pq se o cardapio mudar o pedido antigo nao pode mudar junto
     preco_unitario = Column(Numeric(10, 2), nullable=False)
     observacao = Column(Text)
+    # so pizza tem tamanho, o resto fica null
+    tamanho_id = Column(Integer, ForeignKey("tamanho.id"))
 
     pedido = relationship("Pedido", back_populates="itens")
     produto = relationship("Produto")
+    tamanho = relationship("Tamanho")
 
     def __repr__(self):
         return "<ItemPedido id={} pedido_id={} produto_id={} qtd={}>".format(

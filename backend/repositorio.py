@@ -10,7 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
 
-from models import Cliente, ItemPedido, Pedido, Produto
+from models import Cliente, ItemPedido, Pedido, Produto, Tamanho
 from seguranca import hashear_cpf
 from interpretacao import _normalizar
 
@@ -23,6 +23,11 @@ FORMAS_PAGAMENTO = ("pix", "dinheiro", "cartao_credito", "cartao_debito")
 # palavra encontrada -> forma canonica
 SINAIS_DE_PAGAMENTO = {
     "pix": "pix",
+    # como o whisper costuma escrever "pix"
+    "pics": "pix",
+    "picks": "pix",
+    "piques": "pix",
+    "pixe": "pix",
     "dinheiro": "dinheiro",
     "especie": "dinheiro",
     "vivo": "dinheiro",
@@ -140,6 +145,42 @@ def listar_cardapio(db, categoria=None, apenas_ativos=True):
     return consulta.order_by(Produto.categoria, Produto.nome).all()
 
 
+def listar_tamanhos(db, grupo=None):
+    """
+    tamanhos de um grupo ("pizza" ou "refrigerante"), do menor pro maior. o preco do cardapio
+    eh o do maior (pizza grande, refrigerante de 2 litros) e cada tamanho guarda o desconto.
+    """
+    consulta = db.query(Tamanho)
+    if grupo:
+        consulta = consulta.filter(Tamanho.grupo == grupo)
+    return consulta.order_by(Tamanho.grupo, Tamanho.desconto.desc()).all()
+
+
+def grupo_tamanho(produto):
+    """qual grupo de tamanhos vale pro produto. agua, suco, sobremesa e borda tem um preco so."""
+    grupo = getattr(produto, "grupo_tamanho", None)
+    if grupo:
+        return grupo
+    # banco antigo, de antes do grupo: pizza continua tendo tamanho pela categoria
+    return "pizza" if eh_pizza_pela_categoria(produto) else None
+
+
+def eh_pizza_pela_categoria(produto):
+    return _normalizar(getattr(produto, "categoria", "")).startswith("pizza")
+
+
+def eh_pizza(produto):
+    return grupo_tamanho(produto) == "pizza"
+
+
+def preco_no_tamanho(produto, tamanho=None):
+    """preco no tamanho pedido: o do cardapio (maior tamanho) menos o desconto do tamanho."""
+    preco = Decimal(str(produto.preco))
+    if tamanho is not None:
+        preco -= Decimal(str(tamanho.desconto))
+    return preco
+
+
 def buscar_produtos(db, nome):
     """
     RF07/RIA04: todo produto ativo que bate com o pedaco de nome que veio da transcricao.
@@ -186,21 +227,28 @@ def historico_cliente(db, cliente_id, limite=5):
         db.query(Pedido)
         .filter(Pedido.cliente_id == cliente_id)
         # selectinload puxa os itens numa query so, senao vira n+1 (uma query por pedido)
-        .options(selectinload(Pedido.itens).joinedload(ItemPedido.produto))
+        .options(
+            selectinload(Pedido.itens).joinedload(ItemPedido.produto),
+            selectinload(Pedido.itens).joinedload(ItemPedido.tamanho),
+        )
         .order_by(Pedido.criado_em.desc(), Pedido.id.desc())
         .limit(limite)
         .all()
     )
 
 
-def itens_mais_pedidos_do_cliente(db, cliente_id, limite=3):
+def itens_mais_pedidos_do_cliente(db, cliente_id, limite=3, categoria=None):
     """RF08: o que esse cliente mais pediu, do mais pedido pro menos, pra sugerir o de sempre."""
-    linhas = (
+    consulta = (
         db.query(Produto, func.sum(ItemPedido.quantidade))
         .join(ItemPedido, ItemPedido.produto_id == Produto.id)
         .join(Pedido, Pedido.id == ItemPedido.pedido_id)
         .filter(Pedido.cliente_id == cliente_id, Produto.ativo.is_(True))
-        .group_by(Produto.id)
+    )
+    if categoria:
+        consulta = consulta.filter(Produto.categoria.ilike("%" + categoria + "%"))
+    linhas = (
+        consulta.group_by(Produto.id)
         .order_by(func.sum(ItemPedido.quantidade).desc(), Produto.nome)
         .limit(limite)
         .all()
@@ -208,13 +256,17 @@ def itens_mais_pedidos_do_cliente(db, cliente_id, limite=3):
     return [(produto, int(quantidade)) for produto, quantidade in linhas]
 
 
-def itens_mais_pedidos_da_casa(db, limite=3):
+def itens_mais_pedidos_da_casa(db, limite=3, categoria=None):
     """RF08: campeoes de venda da casa, fallback da recomendacao quando o cliente eh novo."""
-    linhas = (
+    consulta = (
         db.query(Produto, func.sum(ItemPedido.quantidade))
         .join(ItemPedido, ItemPedido.produto_id == Produto.id)
         .filter(Produto.ativo.is_(True))
-        .group_by(Produto.id)
+    )
+    if categoria:
+        consulta = consulta.filter(Produto.categoria.ilike("%" + categoria + "%"))
+    linhas = (
+        consulta.group_by(Produto.id)
         .order_by(func.sum(ItemPedido.quantidade).desc(), Produto.nome)
         .limit(limite)
         .all()
@@ -246,6 +298,7 @@ def salvar_pedido(db, cliente_id, itens, endereco_entrega=None, forma_pagamento=
     # valida tudo primeiro e so depois toca no banco: erro de item nem chega a abrir transacao
     validados = []
     total = Decimal("0.00")
+    tamanhos = {(t.grupo, _normalizar(t.nome)): t for t in listar_tamanhos(db)}
 
     for item in itens:
         nome_falado = item.get("produto")
@@ -285,12 +338,27 @@ def salvar_pedido(db, cliente_id, itens, endereco_entrega=None, forma_pagamento=
         if quantidade <= 0:
             raise ValueError("quantidade de {!r} precisa ser maior que zero.".format(produto.nome))
 
+        # pizza ou refrigerante sem tamanho nao tem preco: cobrar o maior calado eh cobrar a mais
+        falado = item.get("tamanho")
+        grupo = grupo_tamanho(produto)
+        tamanho = tamanhos.get((grupo, _normalizar(falado))) if falado and grupo else None
+        if grupo:
+            if not falado:
+                raise ValueError("falta o tamanho de {!r}, pergunte ao cliente.".format(produto.nome))
+            if tamanho is None:
+                raise ValueError("tamanho {!r} nao existe para {!r}, as opcoes sao: {}.".format(
+                    falado, produto.nome, ", ".join(t.nome for (g, _), t in tamanhos.items() if g == grupo)))
+        elif falado:
+            raise ValueError("{!r} tem tamanho unico.".format(produto.nome))
+
         # str() antes do Decimal pq se alguem trocar a coluna por float, Decimal(float) vira dizima
-        preco_unitario = Decimal(str(produto.preco))
+        preco_unitario = preco_no_tamanho(produto, tamanho)
+        if preco_unitario <= 0:
+            raise ValueError("o preco de {!r} ficou zerado, confira o cardapio.".format(produto.nome))
         if "preco_confirmado" in item and preco_unitario != item["preco_confirmado"]:
             raise ValueError("O preço mudou; apresente um novo resumo antes de salvar.")
         total += preco_unitario * quantidade
-        validados.append((produto, quantidade, preco_unitario, item.get("observacao")))
+        validados.append((produto, quantidade, preco_unitario, item.get("observacao"), tamanho))
 
     pedido = Pedido(
         cliente_id=cliente_id,
@@ -298,13 +366,14 @@ def salvar_pedido(db, cliente_id, itens, endereco_entrega=None, forma_pagamento=
         forma_pagamento=forma_pagamento,
         total=total.quantize(Decimal("0.01")),
     )
-    for produto, quantidade, preco_unitario, observacao in validados:
+    for produto, quantidade, preco_unitario, observacao, tamanho in validados:
         pedido.itens.append(
             ItemPedido(
                 produto_id=produto.id,
                 quantidade=quantidade,
                 preco_unitario=preco_unitario,
                 observacao=observacao,
+                tamanho_id=tamanho.id if tamanho else None,
             )
         )
 
@@ -321,3 +390,57 @@ def salvar_pedido(db, cliente_id, itens, endereco_entrega=None, forma_pagamento=
     # carrega os itens agora, com a sessao ainda aberta, pq quem chamou vai ler isso depois
     list(pedido.itens)
     return pedido
+
+
+
+# --- painel do administrador ---
+# so le colunas que o painel mostra: cpf_hash, telefone e endereco nunca saem daqui
+
+def _pedidos_validos(consulta, desde=None, ate=None):
+    # pedido cancelado nao eh venda: fica fora do faturamento e das contagens
+    consulta = consulta.filter(Pedido.status != "cancelado")
+    if desde is not None:
+        consulta = consulta.filter(Pedido.criado_em >= desde)
+    if ate is not None:
+        consulta = consulta.filter(Pedido.criado_em < ate)
+    return consulta
+
+
+def dados_do_painel(db, desde=None, ate=None):
+    """pedidos do periodo e os itens deles, em duas consultas, para o painel agregar."""
+    pedidos = _pedidos_validos(
+        db.query(Pedido.id, Pedido.criado_em, Pedido.total, Pedido.forma_pagamento,
+                 Pedido.status, Pedido.cliente_id, Cliente.nome)
+        .join(Cliente, Cliente.id == Pedido.cliente_id),
+        desde, ate,
+    ).order_by(Pedido.criado_em, Pedido.id).all()
+
+    itens = _pedidos_validos(
+        db.query(ItemPedido.pedido_id, Produto.nome, Produto.categoria,
+                 ItemPedido.quantidade, ItemPedido.preco_unitario)
+        .join(Pedido, Pedido.id == ItemPedido.pedido_id)
+        .join(Produto, Produto.id == ItemPedido.produto_id),
+        desde, ate,
+    ).all()
+    return pedidos, itens
+
+
+def primeiras_compras(db, cliente_ids):
+    """data do primeiro pedido de cada cliente: quem comprou pela 1a vez no periodo eh cliente novo."""
+    if not cliente_ids:
+        return {}
+    linhas = (
+        _pedidos_validos(db.query(Pedido.cliente_id, func.min(Pedido.criado_em)))
+        .filter(Pedido.cliente_id.in_(list(cliente_ids)))
+        .group_by(Pedido.cliente_id)
+        .all()
+    )
+    return {cliente_id: primeira for cliente_id, primeira in linhas}
+
+
+def totais_do_periodo(db, desde=None, ate=None):
+    """(quantidade de pedidos, faturamento) de um periodo, pra comparar com o periodo atual."""
+    quantidade, faturamento = _pedidos_validos(
+        db.query(func.count(Pedido.id), func.coalesce(func.sum(Pedido.total), 0)), desde, ate
+    ).one()
+    return int(quantidade), Decimal(str(faturamento))

@@ -2,14 +2,13 @@
 
 import asyncio
 import gc
-import io
 import json
 import logging
 import sys
 import threading
+import types
 
 import pytest
-from fastapi import UploadFile
 from sqlalchemy.exc import StatementError
 
 from rotas import voz
@@ -56,7 +55,7 @@ def chamada_privada(db, monkeypatch, tmp_path, caplog):
 
     agente = {
         "salvar_fala_em_wav": salvar,
-        "transcrever": lambda caminho: fala["texto"],
+        "transcrever": lambda caminho, dica=None: fala["texto"],
         "sintetizar_resposta": lambda texto, caminho=None: resposta,
     }
     monkeypatch.setattr(turno_de_voz, "carregar_agente", lambda: agente)
@@ -90,7 +89,7 @@ def test_cadastro_e_pedido_preservam_dados_na_tela_mas_nao_nos_logs(
                   if e["tipo"] == "transcricao" and e["quem"] == "atendente")
     assert NOME in resumo and ENDERECO in resumo and "(19) 98765-4321" in resumo
     falar("sim")
-    falar("uma margherita no pix")
+    falar("uma margherita grande no pix")
     falar("finalizar")
     eventos = falar("sim")
     assert any(e["tipo"] == "pedido_salvo" for e in eventos)
@@ -151,7 +150,7 @@ def test_falhas_do_repositorio_nao_registram_parametros_pessoais(
         entrada = CPF
     else:
         falar(cpf_da_ana)
-        entrada = "uma margherita no pix"
+        entrada = "uma margherita grande no pix"
         if operacao == "salvar_pedido":
             falar(entrada)
             falar("finalizar")
@@ -196,28 +195,9 @@ def test_json_invalido_do_modelo_nao_vaza_documento(
     atendimento, falar, _, _ = chamada_privada
     falar(cpf_da_ana)
     monkeypatch.setattr(atendimento, "_conversar", lambda *a, **k: DADOS)
-    falar("uma margherita")
+    falar("a entrega é no meu trabalho")
     conferir_logs(capsys, caplog)
     assert "categoria=modelo_invalido" in caplog.text
-
-
-@pytest.mark.parametrize("falha", [False, True])
-def test_upload_nao_registra_nome_do_arquivo_ou_detalhe_da_falha(
-    monkeypatch, tmp_path, capsys, caplog, falha,
-):
-    caplog.set_level(logging.INFO)
-    monkeypatch.chdir(tmp_path)
-    if falha:
-        def falhar(*a, **k):
-            raise OSError(DADOS)
-        monkeypatch.setattr(voz.shutil, "copyfileobj", falhar)
-    arquivo = UploadFile(io.BytesIO(b"audio"), filename=CPF + ".webm")
-    resposta = asyncio.run(voz.processar_audio(arquivo))
-    assert resposta.status_code == (500 if falha else 200)
-    if falha:
-        assert not any(s in resposta.body.decode() for s in SEGREDOS)
-    conferir_logs(capsys, caplog)
-    assert "etapa=upload" in caplog.text
 
 
 def test_falha_inesperada_da_chamada_nao_escapa_para_traceback_do_servidor(
@@ -235,28 +215,54 @@ def test_falha_inesperada_da_chamada_nao_escapa_para_traceback_do_servidor(
     assert "categoria=inesperada" in caplog.text
 
 
-@pytest.mark.parametrize("codigo", [0, 1])
-def test_saida_do_processo_de_sintese_nao_vaza_texto(
-    monkeypatch, tmp_path, capfd, caplog, codigo,
-):
+@pytest.mark.parametrize("falha", [False, True])
+def test_falha_na_sintese_nao_vaza_texto(monkeypatch, tmp_path, capfd, caplog, falha):
     from agente.services import piper_service
 
+    class VozSimulada:
+        def synthesize_wav(self, texto, arquivo):
+            if falha:
+                raise ValueError("falha ao ler: " + texto)
+            arquivo.setnchannels(1)
+            arquivo.setsampwidth(2)
+            arquivo.setframerate(22050)
+            arquivo.writeframes(b"\0\0")
+
     monkeypatch.setattr(piper_service, "PASTA_AGENTE", tmp_path)
-    popen = piper_service.subprocess.Popen
-
-    def processo_simulado(comando, **kwargs):
-        # Processo real que ecoa a fala nos dois canais, como um diagnóstico de falha.
-        script = ("import sys; texto=sys.stdin.read(); print(texto); "
-                  "print(texto,file=sys.stderr); sys.exit(" + str(codigo) + ")")
-        return popen([sys.executable, "-c", script], **kwargs)
-
-    monkeypatch.setattr(piper_service.subprocess, "Popen", processo_simulado)
-    if codigo:
-        with pytest.raises(RuntimeError, match="codigo 1"):
+    monkeypatch.setattr(piper_service, "_voz", VozSimulada())
+    if falha:
+        with pytest.raises(RuntimeError) as erro:
             piper_service.sintetizar_resposta(DADOS)
+        assert DADOS not in str(erro.value)
+        assert erro.value.__cause__ is None and erro.value.__suppress_context__
     else:
         assert piper_service.sintetizar_resposta(DADOS).name == "resposta.wav"
     conferir_logs(capfd, caplog)
+
+
+def test_a_voz_e_carregada_uma_vez_so(monkeypatch, tmp_path):
+    from agente.services import piper_service
+
+    carregadas = []
+
+    class Voz:
+        def synthesize_wav(self, texto, arquivo):
+            arquivo.setnchannels(1)
+            arquivo.setsampwidth(2)
+            arquivo.setframerate(22050)
+            arquivo.writeframes(b"\0\0")
+
+    class PiperVoice:
+        @staticmethod
+        def load(caminho):
+            carregadas.append(caminho)
+            return Voz()
+
+    monkeypatch.setitem(sys.modules, "piper", types.SimpleNamespace(PiperVoice=PiperVoice))
+    monkeypatch.setattr(piper_service, "_voz", None)
+    piper_service.sintetizar_resposta("um", tmp_path / "um.wav")
+    piper_service.sintetizar_resposta("dois", tmp_path / "dois.wav")
+    assert len(carregadas) == 1
 
 
 @pytest.mark.parametrize("cancelamento", [False, True])

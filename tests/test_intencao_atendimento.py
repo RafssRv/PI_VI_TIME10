@@ -57,10 +57,17 @@ def conversa(monkeypatch):
         gravados.append(pedido)
         return pedido
 
+    tamanhos = [SimpleNamespace(id=1, grupo="pizza", nome="pequena", fatias=4, desconto=Decimal("10.00")),
+                SimpleNamespace(id=2, grupo="pizza", nome="média", fatias=6, desconto=Decimal("5.00")),
+                SimpleNamespace(id=3, grupo="pizza", nome="grande", fatias=8, desconto=Decimal("0.00"))]
     monkeypatch.setattr(repositorio, "listar_cardapio", lambda db, **kwargs: produtos)
+    monkeypatch.setattr(repositorio, "listar_tamanhos",
+                        lambda db, grupo=None: [t for t in tamanhos if grupo in (None, t.grupo)])
     monkeypatch.setattr(repositorio, "buscar_produtos", buscar_produtos)
     monkeypatch.setattr(repositorio, "buscar_cliente_por_cpf", lambda db, cpf: cliente)
     monkeypatch.setattr(repositorio, "salvar_pedido", salvar_pedido)
+    monkeypatch.setattr(repositorio, "itens_mais_pedidos_do_cliente",
+                        lambda db, cliente_id, limite=3, categoria=None: [(produtos[1], 4)])
     modelo = ModeloRoteirizado()
     atendimento = Atendimento(abrir_sessao=lambda: SimpleNamespace(close=lambda: None),
                               conversar=modelo)
@@ -123,8 +130,8 @@ def test_recomendacao_nao_adiciona_produto(conversa):
 
 
 def test_sim_nao_compra_recomendacao_sem_pergunta_de_aceite(conversa):
-    conversa.modelo.entende([], resposta="A Pizza de Calabresa é uma opção.")
-    conversa.atendimento.responder("Quais opções de pizza vocês recomendam?")
+    # A recomendação agora termina em "Quer pedir?". Sem essa pergunta, um sim solto não compra.
+    conversa.atendimento.responder("Quanto custa a pizza de calabresa?")
     conversa.modelo.entende([item("Pizza de Calabresa")], resposta="Adicionei.")
 
     conversa.atendimento.responder("sim")
@@ -170,7 +177,7 @@ def test_erros_consecutivos_pedem_reformulacao_e_preservam_pedido(conversa):
     segunda = conversa.atendimento.responder("[incompreensível]")
 
     assert segunda != primeira
-    assert any(p in segunda.lower() for p in ("reformul", "outras palavras", "uma coisa", "por vez"))
+    assert any(p in segunda.lower() for p in ("não entendi", "outro jeito"))
     assert carrinho(conversa) == [("Água Mineral 500 ml", 1, None)]
     assert not conversa.gravados
 
@@ -249,7 +256,7 @@ def test_mais_uma_dessa_ambiguo_nao_deixa_modelo_escolher(conversa):
 
 
 def test_sim_mas_corrige_antes_de_nova_confirmacao(conversa):
-    pedir(conversa, "Quero duas de mussarela e uma água, pago no Pix", [
+    pedir(conversa, "Quero duas de mussarela grandes e uma água, pago no Pix", [
         item("Pizza de Mussarela", 2), item("Água Mineral 500 ml"),
     ])
     conversa.atendimento.responder("Pode fechar")
@@ -527,3 +534,20 @@ def test_comando_condicional_sem_interrogacao_nao_edita(conversa):
     conversa.atendimento.responder("Retire uma água caso eu peça a calabresa")
 
     assert carrinho(conversa) == [("Água Mineral 500 ml", 2, None)]
+
+
+class TestSepararTamanhos:
+    @pytest.mark.parametrize("fala, limpo, tamanhos", [
+        ("uma calabresa grande", "uma calabresa", [(2, "grande")]),
+        ("uma pizza grande de calabresa", "uma pizza de calabresa", [(2, "grande")]),
+        ("duas médias de calabresa", "duas de calabresa", [(1, "média")]),
+        ("uma calabresa de tamanho pequeno", "uma calabresa", [(2, "pequena")]),
+        ("uma broto de mussarela", "uma de mussarela", [(1, "pequena")]),
+        ("uma calabresa tamanho família", "uma calabresa", [(2, "indisponivel")]),
+        ("uma calabresa, entrega na Rua Grande, 10", "uma calabresa, entrega na Rua Grande, 10", []),
+        ("em média quanto demora?", "em média quanto demora?", []),
+        ("uma coca", "uma coca", []),
+    ])
+    def test_tira_o_tamanho_e_guarda_onde_estava(self, fala, limpo, tamanhos):
+        from agente.intencao_pedido import separar_tamanhos
+        assert separar_tamanhos(fala) == (limpo, tamanhos)

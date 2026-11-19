@@ -3,6 +3,7 @@
 import json
 import re
 import unicodedata
+from difflib import get_close_matches
 
 
 def _normalizar(texto):
@@ -27,6 +28,7 @@ PALAVRAS_DE_NAO = {"nao", "dispenso", "negativo", "nunca"}
 PALAVRAS_DE_SIM = {
     "sim", "quero", "claro", "pode", "ok", "okay", "isso", "bora", "aceito", "gostaria",
     "desejo", "vamos", "certeza", "beleza", "manda", "certo", "correto", "exato",
+    "aham", "uhum", "perfeito", "fechado", "confirmo", "confirma",
 }
 
 # o que a pessoa fala antes do dado em si: "meu nome e joao", "moro na rua x"
@@ -68,8 +70,11 @@ ESQUEMA_DO_PEDIDO = {
 
 PEDIDO_DE_TROCA = re.compile(
     r"\b(?:troca|trocar|troque|troquem|substitua|substituir|substitui)\b"
-    r"|\b(?:em vez de|no lugar de)\b"
+    r"|\b(?:em vez|ao inves|no lugar) d[eao]s?\b"
 )
+# "muda a calabresa pra mussarela". O verbo sozinho também corrige quantidade ("mude para duas"),
+# então só é troca quando os dois lados do "pra" citam um produto: quem confere é o atendimento.
+MUDA_PARA = re.compile(r"\b(?:mud|alter)(?:a|e|ar)\s+(.+?)\s+(?:pra|para|por|pela|pelo)\s+(.+)")
 QUANTIDADES_DA_TROCA = {
     "zero": 0, "um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3,
     "quatro": 4, "cinco": 5, "seis": 6, "sete": 7, "oito": 8, "nove": 9, "dez": 10,
@@ -116,12 +121,40 @@ def sim_ou_nao(texto):
     return None
 
 
+CONFIRMACOES_DE_UMA_PALAVRA = ("positivo", "confirmo", "confirma", "confirmado", "perfeito", "beleza", "fechado")
+NAO_E_CONFIRMACAO = {"confira", "conferir", "confere"}
+
+# Medido em fala e ruído: fala real ficou em até 0,21; ruído que virava texto, de 0,51 a 0,84.
+LIMITE_SEM_FALA = 0.45
+
+
+def juntar_segmentos(segmentos):
+    """Descarta o que o Whisper provavelmente inventou de um ruído, para não virar pedido."""
+    texto = "".join(s.text for s in segmentos if s.no_speech_prob < LIMITE_SEM_FALA)
+    # O modelo às vezes repete o trecho ("pudim de leite, pudim de leite"), e isso cobraria dois.
+    # Sem dígitos no trecho: número repetido em CPF ou telefone é dado, não eco.
+    return re.sub(r"\b([^\W\d_][^\d]{3,}?)(?:[\s,.;]+\1\b)+", r"\1", texto, flags=re.IGNORECASE)
+
+
 def confirmacao_explicita(texto):
     """Somente uma afirmação completa autoriza a gravação, nunca palavras isoladas."""
     return "?" not in texto and _normalizar(texto).strip() in {
         "sim", "confirmo", "pode confirmar", "sim pode confirmar", "sim confirmo",
         "correto", "esta correto", "isso mesmo", "pode ser", "ok", "okay",
+        "sim pode", "pode", "pode sim", "sim sim", "sim por favor", "quero sim", "confirma", "confirmado",
+        "isso", "e isso", "e isso ai", "certo", "ta certo", "esta certo", "tudo certo", "claro",
+        "claro que sim", "com certeza", "beleza", "fechado", "perfeito", "aham", "uhum", "ta bom",
+        "pode fechar", "positivo", "podia", "pois nao", "fechou", "bora", "pode mandar", "manda ver",
+        "sim senhor", "sim senhora", "isso ai", "otimo", "ta otimo", "show", "confirmar", "sim confirma",
     }
+
+
+def parece_confirmacao(texto):
+    """Palavra única mal transcrita ("poisito"). Só vale na pergunta final, depois de ler o resumo."""
+    palavras = _normalizar(texto).split()
+    if "?" in texto or len(palavras) != 1 or palavras[0] in NAO_E_CONFIRMACAO:
+        return False
+    return bool(get_close_matches(palavras[0], CONFIRMACOES_DE_UMA_PALAVRA, n=1, cutoff=0.75))
 
 
 def extrair_nome(texto):

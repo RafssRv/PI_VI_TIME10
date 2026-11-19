@@ -78,10 +78,10 @@ const MS_DESTAQUE_ITEM = 4000;      // quanto tempo o item novo fica em destaque
 // o botao "Conectando" ganha os tres pontinhos piscando pelo css
 const ESTADOS = {
   ocioso:      { rotulo: "Chamada não iniciada", sublinha: "clique em Ligar e fale normalmente", botao: "Ligar" },
-  conectando:  { rotulo: "Chamando…",            sublinha: "abrindo o microfone e a conexão",    botao: "Conectando" },
-  ouvindo:     { rotulo: "Pode falar",           sublinha: "seu microfone está ligado",          botao: "Desligar" },
+  conectando:  { rotulo: "Chamando…",            sublinha: "abrindo microfone",                   botao: "Conectando" },
+  ouvindo:     { rotulo: "Pode falar",           sublinha: "microfone ligado",                    botao: "Desligar" },
   processando: { rotulo: "Anotando seu pedido…", sublinha: "microfone pausado",                  botao: "Desligar" },
-  falando:     { rotulo: "Atendente falando",    sublinha: "seu microfone fica desligado até ele terminar", botao: "Desligar" },
+  falando:     { rotulo: "Atendente falando",    sublinha: "microfone pausado", botao: "Desligar" },
   encerrada:   { rotulo: "Chamada encerrada",    sublinha: "",                                   botao: "Ligar de novo" },
   erro:        { rotulo: "Não deu certo",        sublinha: "",                                   botao: "Tentar de novo" }
 };
@@ -678,7 +678,7 @@ function desenharPedido(pedido, destino) {
   const chavesAgora = [];
 
   itens.forEach((item) => {
-    const chave = `${item.produto}|${item.quantidade}|${item.observacao || ""}`;
+    const chave = `${item.produto}|${item.tamanho || ""}|${item.quantidade}|${item.observacao || ""}`;
     chavesAgora.push(chave);
     const ehNovo = naComanda && chavesDosItens.indexOf(chave) === -1;
 
@@ -695,7 +695,8 @@ function desenharPedido(pedido, destino) {
 
     const produto = document.createElement("div");
     produto.className = "produto";
-    produto.textContent = item.produto;
+    // so pizza tem tamanho, e ele aparece do lado do nome: "Pizza de Calabresa (grande)"
+    produto.textContent = item.tamanho ? `${item.produto} (${item.tamanho})` : item.produto;
     if (ehNovo) {
       const selo = document.createElement("span");
       selo.className = "selo-novo";
@@ -1121,7 +1122,10 @@ function voltarAOuvir(motivo) {
   pedacosResposta = [];
 
   retomarCaptura();
-  if (motivo === "tocou") {
+  if (turno === 0) {
+    // a saudacao toca antes da primeira fala: o protocolo nao tem turno 0
+    escreverLog("saudação concluída");
+  } else if (motivo === "tocou") {
     enviarTexto({ tipo: "resposta_tocada", turno: turno });
   } else if (motivo === "timeout") {
     enviarTexto({ tipo: "timeout", turno: turno });
@@ -1172,6 +1176,8 @@ async function ligar() {
 
   try {
     await iniciarCaptura();
+    // o atendente fala primeiro: nada que o cliente disser enquanto tudo carrega pode virar fala
+    pausarCaptura();
   } catch (erro) {
     pararTimer();
     mostrarErro(mensagemDeMicrofone(erro), true);
@@ -1192,8 +1198,9 @@ async function ligar() {
     comandaAviso.hidden = false;
   }
 
-  marcarEtapa(1);
-  definirEstado("ouvindo");
+  // quem abre o microfone eh o fim da saudacao (voltarAOuvir) ou o estado "ouvindo" do servidor,
+  // se a voz falhar. o relogio garante que ninguem fique sem microfone se nada disso chegar
+  armarRelogioSeguranca();
 }
 
 // motivo = null quando quem encerrou foi o servidor (ou um erro): aí não manda encerrar_chamada.

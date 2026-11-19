@@ -32,7 +32,11 @@ def executar(monkeypatch, tmp_path):
         await websocket.send_json({"tipo": "estado", "etapa": "ouvindo", "turno": turno})
         return inicio + 1
 
+    async def sem_saudacao(websocket, atendimento):
+        return None
+
     monkeypatch.setattr(voz, "atender_turno", atender)
+    monkeypatch.setattr(voz, "saudar", sem_saudacao)
 
     def rodar(frames, esperar=False):
         async def sessao():
@@ -197,3 +201,34 @@ def test_duracao_inclui_processamento_sem_admitir_outro_turno(executar, monkeypa
     monkeypatch.setattr(voz, "atender_turno", lento)
     conferir_rejeicao(executar([texto(INICIO), audio(), texto(FIM), audio(), texto({**FIM, "turno": 2})]))
     assert executar.turnos == [1]
+
+
+def test_monitor_registra_por_que_a_chamada_terminou(executar, monkeypatch):
+    motivos = []
+    monkeypatch.setattr(voz.monitor, "encerrar_chamada",
+                        lambda chamada_id, motivo="finalizada", pedido_id=None: motivos.append(motivo))
+
+    async def quebrar(websocket, dados, inicio, turno, atendimento):
+        raise RuntimeError("falha")
+
+    executar([texto(INICIO), texto({"tipo": "encerrar_chamada", "motivo": "cliente_desligou"})])
+    executar([texto(INICIO)])
+    executar([texto(FIM)])
+    monkeypatch.setattr(voz, "atender_turno", quebrar)
+    executar([texto(INICIO), audio(), texto(FIM)])
+    assert motivos == ["finalizada", "conexao_perdida", "erro_protocolo", "erro_servidor"]
+
+
+def test_monitor_recebe_o_pedido_gravado_na_chamada(executar, monkeypatch):
+    pedidos = []
+    monkeypatch.setattr(voz.monitor, "encerrar_chamada",
+                        lambda chamada_id, motivo="finalizada", pedido_id=None: pedidos.append(pedido_id))
+
+    async def gravar(websocket, dados, inicio, turno, atendimento):
+        atendimento.ultimo_pedido_id = 42
+        return inicio + 1
+
+    executar([texto(INICIO)])
+    monkeypatch.setattr(voz, "atender_turno", gravar)
+    executar([texto(INICIO), audio(), texto(FIM)])
+    assert pedidos == [None, 42]

@@ -20,24 +20,36 @@ npm run dev
 
 Abra [localhost:3000](http://localhost:3000) e permita o microfone. Execute `seed` na preparação inicial; os demais comandos npm estão em [package.json](package.json).
 
+Quem já tinha o banco antes dos tamanhos de pizza e de refrigerante pode atualizá-lo sem perder clientes e pedidos:
+
+```powershell
+docker cp database/migracao_tamanhos.sql pizzaria-db:/tmp/migracao_tamanhos.sql
+docker exec pizzaria-db psql -U pizzaria -d pizzaria -f /tmp/migracao_tamanhos.sql
+python backend/seed.py --completar
+```
+
 O Whisper baixa o modelo `base` no primeiro uso. A voz do Piper fica em `backend/agente/models/piper/`.
 
 ## Configuração
 
-Variáveis de ambiente lidas por [backend/config.py](backend/config.py):
+Variáveis de ambiente do backend, a maioria lida por [backend/config.py](backend/config.py):
 
 | Variável | Uso |
 | :-- | :-- |
 | `DATABASE_URL` | Padrão: `postgresql+psycopg://pizzaria:pizzaria123@127.0.0.1:5432/pizzaria`. |
 | `AMBIENTE` | Padrão `dev`, que habilita a página de diagnóstico `/teste`. |
 | `CPF_HMAC_SECRET` | Obrigatório fora de `dev`. Mantenha o mesmo segredo na carga dos dados e no servidor. |
+| `OLLAMA_URL` | Padrão: `http://127.0.0.1:11434`. |
+| `OLLAMA_MODEL` | Padrão: `llama3.2:3b`. Rode `ollama pull` do modelo antes de trocar. |
+| `WHISPER_MODEL` | Padrão: `base`. Lida por `backend/agente/services/whisper_service.py`. |
+| `WHISPER_DEVICE` | Padrão: `cuda`, com retorno automático para CPU. |
 
 ## Estrutura
 
 - `backend/`: API, atendimento, banco e regras de pedido.
 - `backend/agente/`: prompt, interpretação de pedidos, serviços de voz e modelos.
 - `frontend/`: interface da chamada, estilos e recursos visuais.
-- `database/banco.sql`: esquema aplicado pelo Docker e pelos testes.
+- `database/banco.sql`: esquema aplicado pelo Docker e pelos testes; `database/migracao_tamanhos.sql` atualiza um banco criado antes dos tamanhos de pizza.
 - `scripts/diagnostico/`: página de diagnóstico do WebSocket, disponível em `/teste` durante o desenvolvimento.
 - `tests/`: testes Python; `tests/frontend/` reúne os testes JavaScript.
 
@@ -45,14 +57,14 @@ O prompt utilizado pelo atendimento está em [backend/agente/prompt_sistema.txt]
 
 ## Testes
 
-Com o ambiente virtual ativo e o PostgreSQL em execução:
+Com o ambiente virtual ativo:
 
 ```powershell
 npm run teste
 npm run teste:frontend
 ```
 
-Os testes Python recriam o esquema de `pizzaria_teste`, separado do banco da aplicação. Não use esse banco para dados que deseja preservar. Os testes automatizados não substituem a validação com microfone e modelos reais.
+Com o PostgreSQL em execução, os testes Python recriam o esquema de `pizzaria_teste`, separado do banco da aplicação. Não use esse banco para dados que deseja preservar. Sem PostgreSQL (máquina sem Docker), a suíte usa sozinha um SQLite descartável na pasta temporária do sistema; valide no PostgreSQL antes de um merge. Os testes automatizados não substituem a validação com microfone e modelos reais.
 
 ## Equipe
 

@@ -61,7 +61,7 @@ class TestFalaQueViraPergunta:
 class TestNoPedido:
     def test_pedido_guarda_a_forma_canonica(self, db, ana):
         pedido = repositorio.salvar_pedido(
-            db, ana.id, [{"produto": "margherita", "quantidade": 1}],
+            db, ana.id, [{"produto": "margherita", "tamanho": "grande", "quantidade": 1}],
             forma_pagamento="Cartão de Crédito",
         )
         assert pedido.forma_pagamento == "cartao_credito"
@@ -72,12 +72,12 @@ class TestNoPedido:
         antes = db.query(Pedido).count()
         with pytest.raises(ValueError):
             repositorio.salvar_pedido(
-                db, ana.id, [{"produto": "margherita", "quantidade": 1}],
+                db, ana.id, [{"produto": "margherita", "tamanho": "grande", "quantidade": 1}],
                 forma_pagamento="boleto",
             )
         assert db.query(Pedido).count() == antes
 
     def test_pedido_pode_nascer_sem_forma_de_pagamento(self, db, ana):
         """o cliente ainda vai decidir; o pedido nasce aberto e alguem fecha depois."""
-        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "quantidade": 1}])
+        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "tamanho": "grande", "quantidade": 1}])
         assert pedido.forma_pagamento is None

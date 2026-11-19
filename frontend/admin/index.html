@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pizzaria Exemplo · Painel Administrativo</title>
+  <link rel="icon" type="image/svg+xml" href="../logo.svg">
+  <link rel="stylesheet" href="painel.css?v=2">
+</head>
+<body>
+  <header class="topo">
+    <div class="marca">
+      <img src="../logo.svg" alt="" width="34" height="34">
+      <div>
+        <h1>Pizzaria Exemplo</h1>
+        <p>Painel do administrador</p>
+      </div>
+    </div>
+
+    <!-- Navegação de Abas -->
+    <nav class="abas-navegacao" role="tablist" aria-label="Seções do painel">
+      <button type="button" role="tab" id="aba-btn-dashboard" class="aba-botao ativa" aria-selected="true" aria-controls="secao-dashboard">
+        📊 Dashboard
+      </button>
+      <button type="button" role="tab" id="aba-btn-monitor" class="aba-botao" aria-selected="false" aria-controls="secao-monitor">
+        🎙️ Monitoramento ao Vivo <span id="badge-ativas" class="badge-contador" hidden>0</span>
+      </button>
+    </nav>
+
+    <div class="topo-acoes">
+      <div id="controles-periodo" class="periodos" role="group" aria-label="Período">
+        <button type="button" data-dias="7">7 dias</button>
+        <button type="button" data-dias="30" aria-pressed="true">30 dias</button>
+        <button type="button" data-dias="90">90 dias</button>
+        <button type="button" data-dias="0">Tudo</button>
+      </div>
+      <span id="atualizado" class="atualizado">carregando…</span>
+      <a class="botao-link" href="/" target="_blank">Abrir simulação ↗</a>
+    </div>
+  </header>
+
+  <div id="aviso" class="aviso" role="alert" hidden></div>
+
+  <!-- SEÇÃO 1: DASHBOARD DE VENDAS -->
+  <main id="secao-dashboard" class="conteudo-aba carregando" role="tabpanel" aria-labelledby="aba-btn-dashboard" aria-busy="true">
+    <section class="indicadores" aria-label="Resumo do período">
+      <article class="cartao indicador">
+        <h2>Pedidos</h2>
+        <strong id="kpi-pedidos">—</strong>
+        <p><span id="var-pedidos" class="variacao"></span> <span id="kpi-itens" class="fraco"></span></p>
+      </article>
+      <article class="cartao indicador">
+        <h2>Faturamento</h2>
+        <strong id="kpi-faturamento">—</strong>
+        <p><span id="var-faturamento" class="variacao"></span></p>
+      </article>
+      <article class="cartao indicador">
+        <h2>Ticket médio</h2>
+        <strong id="kpi-ticket">—</strong>
+        <p class="fraco">por pedido</p>
+      </article>
+      <article class="cartao indicador">
+        <h2>Clientes atendidos</h2>
+        <strong id="kpi-clientes">—</strong>
+        <p id="kpi-novos" class="fraco"></p>
+      </article>
+    </section>
+
+    <section class="grade">
+      <article class="cartao largo">
+        <header class="cartao-topo">
+          <h2>Faturamento por dia</h2>
+          <span id="legenda-dias" class="fraco"></span>
+        </header>
+        <div id="grafico-dias" class="grafico"></div>
+      </article>
+
+      <article class="cartao">
+        <header class="cartao-topo"><h2>Formas de pagamento</h2></header>
+        <div id="grafico-pagamentos" class="rosca"></div>
+      </article>
+
+      <article class="cartao">
+        <header class="cartao-topo"><h2>Mais vendidos</h2><span class="fraco">unidades</span></header>
+        <ol id="mais-vendidos" class="barras-h"></ol>
+      </article>
+
+      <article class="cartao">
+        <header class="cartao-topo"><h2>Pedidos por horário</h2></header>
+        <div id="grafico-horas" class="grafico"></div>
+      </article>
+
+      <article class="cartao">
+        <header class="cartao-topo"><h2>Vendas por categoria</h2></header>
+        <ol id="categorias" class="barras-h"></ol>
+      </article>
+
+      <article class="cartao largo">
+        <header class="cartao-topo"><h2>Últimos pedidos</h2></header>
+        <div class="tabela-rolagem">
+          <table>
+            <thead>
+              <tr><th>Nº</th><th>Quando</th><th>Cliente</th><th class="num">Itens</th><th>Pagamento</th><th>Status</th><th class="num">Total</th></tr>
+            </thead>
+            <tbody id="ultimos"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="cartao">
+        <header class="cartao-topo"><h2>Cardápio</h2></header>
+        <div id="cardapio" class="cardapio"></div>
+      </article>
+    </section>
+  </main>
+
+  <!-- SEÇÃO 2: MONITORAMENTO AO VIVO DOS ATENDIMENTOS -->
+  <main id="secao-monitor" class="conteudo-aba" role="tabpanel" aria-labelledby="aba-btn-monitor" hidden>
+    <div class="monitor-barra-status">
+      <div class="monitor-conexao">
+        <span id="monitor-bolinha" class="bolinha desconectado"></span>
+        <span id="monitor-status-texto">Conectando ao canal em tempo real...</span>
+      </div>
+      <div class="monitor-resumo-stats">
+        <span>Chamadas ativas: <strong id="stat-qtd-ativas">0</strong></span>
+        <span>Atendimentos no histórico: <strong id="stat-qtd-historico">0</strong></span>
+      </div>
+    </div>
+
+    <div class="monitor-grid">
+      <!-- Coluna da esquerda: Chamadas ativas em andamento -->
+      <section class="monitor-coluna" aria-label="Chamadas em andamento">
+        <div class="cartao-header-linha">
+          <h2>Chamadas em Andamento</h2>
+          <span class="badge-pulso" id="pulso-ativas" hidden>Ao vivo</span>
+        </div>
+        <div id="container-chamadas-ativas" class="lista-chamadas-ativas">
+          <div class="vazio-monitor">
+            <span class="icone-vazio">🎧</span>
+            <p>Nenhuma chamada acontecendo no momento.</p>
+            <small class="fraco">Quando um cliente iniciar a ligação pelo navegador, ela aparecerá aqui em tempo real com transcrição e latências.</small>
+          </div>
+        </div>
+      </section>
+
+      <!-- Coluna da direita: Histórico recente de atendimentos -->
+      <section class="monitor-coluna" aria-label="Histórico recente de atendimentos">
+        <div class="cartao-header-linha">
+          <h2>Últimos Atendimentos Concluídos</h2>
+        </div>
+        <div id="container-historico-atendimentos" class="lista-historico">
+          <div class="vazio-monitor">
+            <p>Nenhuma chamada recente registrada.</p>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <div id="dica" class="dica" role="tooltip" hidden></div>
+
+  <script src="painel.js?v=2"></script>
+</body>
+</html>

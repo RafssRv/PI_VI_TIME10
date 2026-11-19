@@ -19,7 +19,22 @@ CREATE TABLE produto (
     descricao TEXT,
     categoria VARCHAR(30) NOT NULL,
     preco NUMERIC(10,2) NOT NULL,
-    ativo BOOLEAN NOT NULL DEFAULT true
+    ativo BOOLEAN NOT NULL DEFAULT true,
+    -- qual tabela de tamanhos vale pro produto: 'pizza', 'refrigerante' ou null (tamanho unico)
+    grupo_tamanho VARCHAR(20)
+);
+
+-- tamanhos de pizza (pequena, media, grande) e de refrigerante (lata, 600 ml, 2 litros).
+-- o preco do cardapio eh o do maior tamanho e o desconto sai dele, assim reajustar o
+-- cardapio reajusta todos os tamanhos de uma vez
+CREATE TABLE tamanho (
+    id SERIAL PRIMARY KEY,
+    grupo VARCHAR(20) NOT NULL DEFAULT 'pizza',
+    nome VARCHAR(10) NOT NULL,
+    -- so pizza tem fatias; refrigerante fica com null
+    fatias INTEGER CHECK (fatias > 0),
+    desconto NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (desconto >= 0),
+    UNIQUE (grupo, nome)
 );
 
 CREATE TABLE pedido (
@@ -39,8 +54,10 @@ CREATE TABLE item_pedido (
     produto_id INTEGER NOT NULL REFERENCES produto(id),
     quantidade INTEGER NOT NULL CHECK (quantidade > 0),
     -- guarda o preco do momento da venda, pq o cardapio pode mudar depois
-    preco_unitario NUMERIC(10,2) NOT NULL,
-    observacao TEXT
+    preco_unitario NUMERIC(10,2) NOT NULL CHECK (preco_unitario > 0),
+    observacao TEXT,
+    -- so pizza e refrigerante tem tamanho: agua, suco, sobremesa e borda ficam com null
+    tamanho_id INTEGER REFERENCES tamanho(id)
 );
 
 -- historico do cliente (rf05/rf08) busca sempre por cliente_id
