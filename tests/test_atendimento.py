@@ -1975,6 +1975,43 @@ class TestJeitosDeTrocar:
         assert ana_identificada.responder(fala).startswith(resposta)
         assert ana_identificada.carrinho == anterior
 
+    @pytest.mark.parametrize("fala", ["a calabresa é média", "quero a calabresa média", "a calabresa pode ser média"])
+    def test_artigo_definido_muda_o_tamanho_da_pizza_anotada(self, ana_identificada, llama, fala):
+        # antes entrava uma segunda calabresa e a grande continuava no pedido
+        ana_identificada.responder("uma calabresa grande sem cebola")
+        assert ana_identificada.responder(fala) == "Certo, 1 Pizza de Calabresa média (sem cebola). Quer algo mais?"
+        assert [(i["produto"], i["quantidade"], i["tamanho"], i["observacao"])
+                for i in ana_identificada.carrinho] == [("Pizza de Calabresa", 1, "média", "sem cebola")]
+        assert llama.chamadas == []
+
+    def test_no_plural_as_duas_mudam(self, ana_identificada):
+        ana_identificada.responder("duas calabresas grandes")
+        ana_identificada.responder("as calabresas são médias")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 2, "média")]
+
+    def test_refrigerante_tambem_muda_de_volume(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande e uma coca lata")
+        ana_identificada.responder("a coca pode ser de 600")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande"), ("Coca-Cola", 1, "600 ml")]
+
+    def test_repetir_o_mesmo_tamanho_nao_soma_outra(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        ana_identificada.responder("a calabresa é grande")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+
+    @pytest.mark.parametrize("fala", ["uma calabresa média", "quero uma calabresa média",
+                                      "mais uma calabresa média", "quero outra calabresa média"])
+    def test_pedir_outra_continua_somando(self, ana_identificada, fala):
+        ana_identificada.responder("uma calabresa grande")
+        ana_identificada.responder(fala)
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande"), ("Pizza de Calabresa", 1, "média")]
+
+    def test_duas_do_mesmo_sabor_em_tamanhos_diferentes_nao_adivinha(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande e uma calabresa média")
+        anterior = list(ana_identificada.carrinho)
+        ana_identificada.responder("a calabresa é pequena")
+        assert ana_identificada.carrinho == anterior
+
     def test_nao_sem_virgula_continua_negando_a_troca(self, ana_identificada):
         ana_identificada.responder("uma calabresa grande")
         ana_identificada.responder("não troca a calabresa por uma mussarela")

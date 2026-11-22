@@ -245,7 +245,7 @@ def _donos_dos_tamanhos(tamanhos, achados, palavras, vocabulario):
     verbo de ligação ("a calabresa é média"). Tamanho colado em outro produto ("coca grande") ou
     sem produto nenhum ("grande") fica solto.
     """
-    ligacao = {"e", "eh", "fica", "ficam", "seja", "sejam", "sera", "vai", "ser", "a", "o", "as", "os",
+    ligacao = {"e", "eh", "fica", "ficam", "seja", "sejam", "sera", "sao", "vai", "ser", "pode", "a", "o", "as", "os",
                "ela", "elas", "essa", "esse", "pizza", "pizzas"}
     donos, soltos, errados = {}, [], {}
     for posicao, tamanho in tamanhos:
@@ -486,7 +486,7 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
                            + VERBOS_DE_ADICIONAR + r"|" + VERBOS_DE_REMOVER + r"|manda|mande|pedir|ai|"
                            r"pode|poderia|por|favor|sim|nao|na|verdade|so|apenas|dessa|desse|daquela|daquele|igual|corrija|corrigir|"
                            r"altere|alterar|deixe|mude|"
-                           r"me|ve|da|traz|traga|vou|querer|ser|vai|vamos|ah|oi|ola|"
+                           r"me|ve|da|traz|traga|vou|querer|ser|vai|vamos|ah|oi|ola|outra|outro|outras|outros|"
                            r"boa|bom|noite|tarde|dia|entao|hoje|tambem|agora|pra|para|mim|sao|fica|ficam)\b", "", permitido).strip()
         if permitido or re.match(r"e\s+(?!so isso|uma?\b|duas?\b|dois\b|tres\b|\d+\b)", sufixo):
             duvida = {"campo": "intencao"}
@@ -512,7 +512,8 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
         volume = re.match(r"(\d+)\s*(litros?|ml)\b", cauda)
         if volume and "{} {}".format(volume[1], radical(volume[2])) in nome_radical:
             cauda = cauda[volume.end():].strip()
-        if cauda and not re.match(r"(?:e|mas|sem|com|pago|pagamento|entrega|por favor|so isso|pra mim|para mim|hoje|vou pagar|quero pagar)\b", cauda):
+        if cauda and not re.match(r"(?:e|mas|sem|com|pago|pagamento|entrega|por favor|so isso|pra mim|para mim|hoje|"
+                                  r"vou pagar|quero pagar|pode ser|vai ser|fica|ficam|seja|sejam|sera|sao)\b", cauda):
             duvida = {"campo": "produto", "quantidade": qtd or 1,
                       "nao_encontrado": trecho + " " + sufixo}
             continue
@@ -554,6 +555,22 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
             evidencias.append({"acao": "tamanho", "produto": produto.nome, "tamanho": tamanho,
                                "quantidade": sum(i["quantidade"] for i in sem_tamanho),
                                "observacao": sem_tamanho[0]["observacao"], "trecho": prefixo + " " + trecho})
+            continue
+        # "a calabresa é média", "quero a calabresa média": o artigo definido aponta a pizza já anotada em outro
+        # tamanho, então ela muda de tamanho. "uma calabresa média" continua sendo mais uma pizza
+        aponta_a_anotada = (tamanho and acao == "adicionar" and existentes and not sem_tamanho and not mais_uma
+                            and qtd is None and re.search(r"\b(?:a|o|as|os)\s*$", prefixo))
+        if aponta_a_anotada and len(existentes) > 1:
+            # duas calabresas de tamanhos diferentes: nao da pra saber qual muda, e somar uma terceira seria pior
+            duvida = {"campo": "intencao"}
+            continue
+        if aponta_a_anotada:
+            alvo = existentes[0]
+            alvo["tamanho"] = tamanho
+            _juntar_iguais(novo)
+            evidencias.append({"acao": "tamanho", "produto": produto.nome, "tamanho": tamanho,
+                               "quantidade": alvo["quantidade"], "observacao": alvo["observacao"],
+                               "trecho": prefixo + " " + trecho})
             continue
         if pergunta_deste and not tamanho and qtd is None and acao == "adicionar" and not PEDE_MAIS_UM.search(prefixo):
             # repetir o nome da pizza não pede outra pizza: ou já respondeu o tamanho, ou ainda falta
