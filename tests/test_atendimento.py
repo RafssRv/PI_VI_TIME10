@@ -2167,6 +2167,35 @@ class TestObservacaoSemProduto:
         assert ana_identificada.carrinho[0]["observacao"] == "com cebola"
 
 
+class TestFalaCurta:
+    @pytest.mark.parametrize("fala, resposta", [
+        ("tá", "Quer algo mais?"), ("é", "Quer algo mais?"), ("entendi", "Quer algo mais?"),
+        ("ah, tá", "Quer algo mais?"),
+        ("hmm", "Sem pressa. Quando decidir, é só falar."), ("Hmm...", "Sem pressa. Quando decidir, é só falar."),
+        ("eh", "Sem pressa. Quando decidir, é só falar."),
+    ])
+    def test_nao_culpa_o_cardapio(self, ana_identificada, llama, fala, resposta):
+        # antes: "Não temos ta no cardápio"
+        ana_identificada.responder("uma calabresa grande")
+        assert ana_identificada.responder(fala) == resposta
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+        assert llama.chamadas == []
+
+    def test_pergunta_aberta_continua(self, ana_identificada):
+        ana_identificada.responder("uma calabresa")
+        assert ana_identificada.responder("tá") == "Qual o tamanho: pequena, média ou grande?"
+
+    def test_ta_aceita_a_sugestao(self, ana_identificada):
+        ana_identificada.responder("o que você recomenda?")
+        assert ana_identificada.responder("tá").startswith("Anotei 1 Pizza de Calabresa.")
+
+    def test_e_nao_confirma_o_pedido(self, ana_identificada):
+        for fala in ("uma calabresa grande", "no pix", "só isso"):
+            ana_identificada.responder(fala)
+        assert ana_identificada.responder("é").startswith("Desculpe, não entendi.")
+        assert ana_identificada.ultimo_pedido_id is None
+
+
 class TestApelidoDoItem:
     @pytest.mark.parametrize("fala, resposta, itens", [
         ("a pizza sem cebola", "Ajustei para 1 Pizza de Calabresa grande (sem cebola). Quer algo mais?",

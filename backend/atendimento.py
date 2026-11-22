@@ -42,7 +42,7 @@ ACEITES_DA_SUGESTAO = {
 }
 # um "sim" solto nao compra nada (regra 12 do prompt), mas tambem nao pode ficar sem resposta
 RESPOSTAS_VAGAS_A_SUGESTAO = {"sim", "pode ser", "ok", "claro", "isso", "beleza", "certo", "aham", "uhum",
-                              "ta bom", "perfeito", "pode", "pode sim", "sim pode", "sim por favor"}
+                              "ta bom", "perfeito", "pode", "pode sim", "sim pode", "sim por favor", "ta", "ta ok"}
 CUMPRIMENTO = re.compile(r"^(?:oi|ola|alo|opa|e ai|bom dia|boa tarde|boa noite|tudo bem|tudo bom)\b")
 CORTESIA = re.compile(r"\b(?:obrigad[oa]|valeu|por favor|viu)\b")
 # falas inteiras que nao pedem nada: sem isto viravam "Não temos oi no cardápio"
@@ -53,6 +53,9 @@ SO_QUER_PEDIR = re.compile(r"(?:{} )?(?:eu )?(?:quero|queria|gostaria de|vou|pos
 PEDE_TEMPO = re.compile(r"(?:so )?(?:um|1) (?:momento|minuto|minutinho|segundo|instante)|espera(?: ai| um pouco)?|"
                         r"pera(?: ai)?|perai|calma(?: ai)?|deixa eu (?:ver|pensar)|vou (?:ver|pensar)|"
                         r"(?:to|estou) (?:vendo|pensando)")
+# "hmm", "tá", "entendi": não pedem nada. Não confirmam o pedido: só confirmacao_explicita autoriza gravar
+HESITACAO = re.compile(r"(?:h+m+|hu+m+|u+h*m+|e+h+|a+h*n+)(?: (?:h+m+|hu+m+|u+h*m+|e+h+|a+h*n+))*")
+SO_CONCORDA = {"ta", "e", "entendi", "sei", "ah", "ah ta", "ta ok", "blz", "ta entendi", "ah entendi", "ok entendi"}
 SINONIMOS_DE_CATEGORIA = {"refrigerante": "bebida", "refri": "bebida", "suco": "bebida", "agua": "bebida"}
 ENDERECO_NA_FALA = re.compile(r"\b(?:rua|avenida|av|travessa|alameda|estrada|rodovia)\b.*", re.IGNORECASE)
 FRASE_PEDE_TAMANHO = "pequena, média ou grande?"
@@ -817,7 +820,7 @@ class Atendimento:
 
     def _fala_sem_pedido(self, texto, normalizado, sem_cortesia):
         """cumprimento, "quero pedir", "um momento", "obrigado": responde e deixa o pedido como esta."""
-        if PEDE_TEMPO.fullmatch(sem_cortesia):
+        if PEDE_TEMPO.fullmatch(sem_cortesia) or HESITACAO.fullmatch(sem_cortesia):
             return "Sem pressa. Quando decidir, é só falar."
         if SO_CUMPRIMENTO.fullmatch(sem_cortesia) or (
                 "?" in texto and sem_cortesia in {"tudo bem", "tudo bom", "como vai"}):
@@ -827,6 +830,10 @@ class Atendimento:
         elif normalizado and not sem_cortesia:
             # so agradeceu
             inicio = "De nada!"
+        elif sem_cortesia in SO_CONCORDA and not (
+                (self._sugestoes or self._repetir) and sem_cortesia in RESPOSTAS_VAGAS_A_SUGESTAO):
+            # "tá" depois de "quer pedir?" aceita a sugestão; sem pergunta assim, só concorda
+            inicio = ""
         else:
             return None
         # a pergunta que estava aberta continua valendo, sem contar como fala nao entendida.
@@ -834,7 +841,7 @@ class Atendimento:
         duvida = self._duvida_item or {}
         vaga = duvida.get("campo") in {"produto", "intencao", "fora_do_pedido"} and not duvida.get("candidatos")
         return "{} {}".format(inicio, (None if vaga else self._pendencia) or (
-            "Quer algo mais?" if self.carrinho else "O que vai querer?"))
+            "Quer algo mais?" if self.carrinho else "O que vai querer?")).strip()
 
     def _quer_esvaziar(self, normalizado):
         if NAO_ESVAZIAR.search(normalizado):
