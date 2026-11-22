@@ -237,7 +237,7 @@ class TestConversaComOLlama:
     def test_sem_conta_conversa_sem_json(self, atendimento, llama):
         atendimento.responder(CPF_NOVO)
         atendimento.responder("não")
-        assert atendimento.responder("tem pizza doce?") == "resposta do llama"
+        assert atendimento.responder("a pizzaria é antiga?") == "resposta do llama"
 
 
 @pytest.fixture
@@ -2568,6 +2568,58 @@ class TestMeioAMeio:
 
     def test_meia_sozinha_continua_perguntando_a_quantidade(self, ana_identificada):
         assert ana_identificada.responder("meia coca") == "Quantas unidades inteiras de Coca-Cola você quer?"
+
+
+class TestSemCadastro:
+    @pytest.fixture
+    def sem_conta(self, atendimento):
+        atendimento.saudacao()
+        assert atendimento.responder("não quero informar").startswith("Tudo bem, sem problemas.")
+        assert atendimento.etapa == "sem_cadastro"
+        return atendimento
+
+    def test_pedido_guarda_e_pede_o_cpf(self, sem_conta, cpf_da_ana, llama):
+        # antes: ia pro modelo, que podia fingir que anotou
+        resposta = sem_conta.responder("quero uma calabresa grande")
+        assert resposta == "Para anotar o pedido, eu preciso do seu CPF. Pode falar os números?"
+        assert sem_conta.responder(cpf_da_ana) == "Oi, Ana! Anotei 1 Pizza de Calabresa grande. Quer algo mais?"
+        assert llama.chamadas == []
+
+    def test_tem_produto_nao_oferece_pedido_sem_cpf(self, sem_conta, cpf_da_ana, llama):
+        resposta = sem_conta.responder("tem calabresa?")
+        assert resposta.startswith("Temos, sim.") and resposta.endswith("Para pedir, eu preciso do seu CPF.")
+        assert sem_conta.responder("sim") == "Claro. Pode falar o seu CPF, por favor?"
+        assert sem_conta.responder(cpf_da_ana).startswith("Oi, Ana! Anotei 1 Pizza de Calabresa.")
+        assert llama.chamadas == []
+
+    def test_nao_depois_da_oferta(self, sem_conta, llama):
+        sem_conta.responder("tem calabresa?")
+        assert sem_conta.responder("não") == "Tudo bem. Posso ajudar com mais alguma dúvida sobre o cardápio?"
+        assert llama.chamadas == []
+
+    @pytest.mark.parametrize("fala, resposta", [
+        ("tem cerveja?", "Não temos cerveja no cardápio. Temos pizzas"),
+        ("aceita pix?", "Aceitamos, sim. Pode ser Pix, dinheiro, cartão de crédito ou débito."),
+        ("obrigado, tchau", "Obrigado pela ligação! Até mais."),
+    ])
+    def test_responde_sem_o_modelo(self, sem_conta, llama, fala, resposta):
+        assert sem_conta.responder(fala).startswith(resposta)
+        assert llama.chamadas == []
+
+
+class TestDespedida:
+    def test_tchau_com_pedido_aberto_oferece_fechar(self, ana_identificada, llama):
+        # antes: "Não temos tchau no cardápio"
+        ana_identificada.responder("uma calabresa grande")
+        assert ana_identificada.responder("tchau") == "Seu pedido ainda não foi confirmado. Quer fechar agora?"
+        assert ana_identificada.responder("sim") == "Como você vai pagar? Pix, dinheiro, cartão de crédito ou débito?"
+        assert llama.chamadas == []
+
+    def test_tchau_sem_pedido(self, ana_identificada):
+        assert ana_identificada.responder("tchau") == "Obrigado pela ligação! Até mais."
+
+    def test_boa_noite_continua_sendo_cumprimento(self, ana_identificada):
+        assert ana_identificada.responder("boa noite") == "Olá! O que vai querer?"
 
 
 class TestFalaCurta:
