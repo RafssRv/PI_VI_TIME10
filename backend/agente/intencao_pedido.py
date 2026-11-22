@@ -772,12 +772,16 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
                            r"altere|alterar|altera|deixe|deixa|mude|muda|"
                            r"me|ve|da|traz|traga|vou|querer|ser|vai|vamos|ah|oi|ola|outra|outro|outras|outros|"
                            r"boa|bom|noite|tarde|dia|entao|hoje|tambem|agora|pra|para|mim|sao|fica|ficam|esqueci|faltou)\b", "", permitido).strip()
-        if permitido or re.match(r"e\s+(?!so isso|uma?\b|duas?\b|dois\b|tres\b|\d+\b)", sufixo):
+        if permitido or re.match(r"e\s+(?!so isso|uma?\b|duas?\b|dois\b|tres\b|\d+\b|(?:"
+                                 + VERBOS_DE_ADICIONAR + r"|" + VERBOS_DE_REMOVER
+                                 + r"|quero|queria|manda|mande|me ve|traz|traga|troca|troque)\b)", sufixo):
             duvida = {"campo": "intencao"}
             continue
         no_pedido = [p for p in candidatos if any(i["produto"] == p.nome for i in atual)]
+        esperando = bool(pendente and pendente.get("campo") == "tamanho" and no_pedido
+                         and pendente.get("produto") == no_pedido[0].nome)
         if (len(candidatos) > 1 and len(no_pedido) == 1 and qtd is None and acao == "adicionar"
-                and re.search(r"\b(?:a|o)(?:\s+d[aeo])?\s*$", prefixo)):
+                and (esperando or re.search(r"\b(?:a|o)(?:\s+d[aeo])?\s*$", prefixo))):
             # "a de catupiry": o artigo aponta o item que já está no pedido; a pergunta aberta continua
             if pendente and pendente.get("campo") == "tamanho":
                 duvida = {**pendente, "referencia": True}

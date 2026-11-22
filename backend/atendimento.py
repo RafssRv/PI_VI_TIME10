@@ -123,6 +123,13 @@ TEM_ALGO = re.compile(r"(?:(?:voces|vcs|vc|voce|ai|e)\s+)*(?:tem|teria|vende|ven
 # "e com uma coca 2 litros?", "e se eu colocar uma coca?": quanto fica com mais um item
 E_COM_MAIS = re.compile(r"(?:e\s+)?(?:com|se (?:eu )?(?:colocar|pedir|adicionar|acrescentar|por))\s+(.+?)"
                         r"(?:\s+(?:quanto fica|fica quanto|da quanto|vai quanto))?")
+# consultas: ingredientes, seguimento ("e a calabresa?"), extremos de preço, entrega
+INGREDIENTES = re.compile(r"\b(?:ingredientes|contem|leva|tem cebola|vem|recheio|feit[ao] com)\b|"
+                          r"\bo que tem (?:na|no)\b")
+SEGUIMENTO = re.compile(r"e\s+(?:a|o|as|os|na|no|da|do|de)?\s*(?:\S+\s*){1,5}")
+MAIS_BARATA_OU_CARA = re.compile(r"\bmais (barat[ao]s?|car[ao]s?)\b")
+PERGUNTA_DA_ENTREGA = re.compile(r"\bquanto tempo\b|\b(?:valor|preco|custo) (?:da|de) entrega\b|"
+                                 r"\bentrega (?:custa|e gratis|cobra)\b|\bpra chegar\b")
 DEIXA_PRA_LA = {"esquece", "esquece isso", "esquece entao", "deixa pra la", "deixa quieto", "nao precisa",
                 "nao precisa mais", "deixa"}
 SO_CONCORDA = {"ta", "e", "entendi", "sei", "ah", "ah ta", "ta ok", "blz", "ta entendi", "ah entendi", "ok entendi"}
@@ -307,6 +314,8 @@ class Atendimento:
         self._fala_da_troca = None
         # "quero uma calabresa" dito antes do CPF: anotado logo depois da identificacao
         self._pedido_guardado = None
+        # "quanto é a margherita?" -> "e a calabresa?": o seguimento repete o tipo da pergunta
+        self._ultima_consulta = None
         # sem conta, "tem calabresa?" termina pedindo o CPF: o "sim" seguinte vai pra la com a calabresa
         self._oferta_sem_conta = None
         # refazendo um campo do cadastro: depois dele volta direto pra confirmacao
@@ -758,7 +767,7 @@ class Atendimento:
 
     def _pergunta_de_tamanho(self, texto):
         # "quais tamanhos tem?", "tem pizza grande?": responde com a tabela de tamanhos do banco
-        if re.search(r"\btamanhos?\b", _normalizar(texto)):
+        if re.search(r"\b(?:tamanhos?|pedacos?|fatias?)\b", _normalizar(texto)):
             return True
         tem = re.search(r"\btem\b", texto, re.IGNORECASE)
         # volume ("tem coca de 2 litros?") continua sendo consulta do produto
@@ -822,7 +831,7 @@ class Atendimento:
             self._token_resumo = None
             return "Tudo bem, mantive seu pedido como estava. Quer algo mais?"
         if set(normalizado.split()) & {"taxa", "frete", "gratis", "gratuita", "gratuito",
-                                       "prazo", "desconto", "demora"}:
+                                       "prazo", "desconto", "demora"} or PERGUNTA_DA_ENTREGA.search(normalizado):
             fala = "A pizzaria precisa confirmar a taxa, o prazo de entrega e se há desconto."
             self.historico.extend([{"role": "user", "content": texto},
                                    {"role": "assistant", "content": fala}])
@@ -1280,6 +1289,11 @@ class Atendimento:
         # "quanto custa a pizza grande de calabresa": o tamanho sai antes de procurar o nome
         sem_tamanho, tamanhos_ditos = separar_tamanhos(texto, self._vocabulario)
         palavras, citados = mencoes(sem_tamanho, produtos)
+        anterior, self._ultima_consulta = self._ultima_consulta, None
+        seguimento = bool(citados and SEGUIMENTO.fullmatch(normalizado.strip()))
+        pede_preco = re.search(r"\b(?:preco|precos|custa|custam|quanto)\b", normalizado) or (
+            seguimento and anterior == "preco")
+        pede_ingredientes = INGREDIENTES.search(normalizado) or (seguimento and anterior == "ingredientes")
         if RECLAMA_DO_PEDIDO.search(normalizado):
             fala = self._falar_pedido_atual(" O que você quer mudar?")
         elif CONSULTA_PEDIDO_ATUAL.search(normalizado) or (PERGUNTA_DO_TOTAL.search(normalizado) and not citados):
@@ -1308,7 +1322,8 @@ class Atendimento:
             else:
                 # ler 18 produtos em voz alta cansa: fala as categorias e deixa a pessoa escolher
                 fala = "Temos {}. O que você quer saber?".format(_juntar(_categorias_faladas(produtos)))
-        elif re.search(r"\b(?:preco|precos|custa|custam|quanto)\b", normalizado) and citados:
+        elif pede_preco and citados:
+            self._ultima_consulta = "preco"
             unicos, aviso = self._produtos_da_consulta(normalizado, palavras, citados)
             tamanhos = repositorio.listar_tamanhos(db)
             so = tamanhos_ditos[0][1] if len({t for _, t in tamanhos_ditos}) == 1 else None
@@ -1317,10 +1332,13 @@ class Atendimento:
                 if any(t.grupo == repositorio.grupo_tamanho(p) for t in tamanhos) else
                 "{} custa {}.".format(_com_artigo(p.nome), preco_falado(p.preco))
                 for p in unicos)
-        elif re.search(r"\b(?:ingredientes|contem|leva|tem cebola)\b", normalizado) and citados:
+        elif pede_ingredientes and citados:
+            self._ultima_consulta = "ingredientes"
             unicos, aviso = self._produtos_da_consulta(normalizado, palavras, citados)
             fala = aviso or " ".join("{}: {}.".format(p.nome, p.descricao or "ingredientes não informados")
                                      for p in unicos)
+        elif extremo := MAIS_BARATA_OU_CARA.search(normalizado):
+            fala = self._falar_extremo(db, produtos, normalizado, extremo)
         elif com_mais := self._quanto_fica_com(produtos, normalizado):
             fala = com_mais
         elif disponivel := self._falar_se_tem(db, normalizado, palavras, citados):
@@ -1334,7 +1352,10 @@ class Atendimento:
         elif (fora := TEM_FORA_DO_CARDAPIO.fullmatch(normalizado.strip())) and not citados and not (
                 set(fora[1].split()) & NAO_E_ITEM):
             # "tem cerveja?": nada do cardápio depois do verbo. O modelo levava até 1 minuto e podia inventar
-            fala = "Não temos {} no cardápio. Temos {}.".format(fora[1], _juntar(_categorias_faladas(produtos)))
+            if re.match(r"(?:sem|zero|diet|light|vegan|vegetarian|integral)", fora[1]):
+                fala = "Essa informação não está no cardápio. A pizzaria precisa confirmar."
+            else:
+                fala = "Não temos {} no cardápio. Temos {}.".format(fora[1], _juntar(_categorias_faladas(produtos)))
         else:
             mensagens = [{"role": "system", "content": self._prompt_do_pedido(
                 produtos, repositorio.listar_tamanhos(db))}] + self.historico + [
@@ -1352,6 +1373,22 @@ class Atendimento:
                 fala = "Qual informação do cardápio você gostaria de consultar?"
         self.historico.extend([{"role": "user", "content": texto}, {"role": "assistant", "content": fala}])
         return fala
+
+    def _falar_extremo(self, db, produtos, normalizado, extremo):
+        """"qual a mais barata?": pizza por padrão, ou a categoria dita ("a bebida mais cara")."""
+        categoria = self._categoria_citada(normalizado) or "pizza"
+        opcoes = [p for p in produtos if categoria in _normalizar(p.categoria)] or produtos
+        alvo = (min if extremo[1].startswith("barat") else max)(p.preco for p in opcoes)
+        nomes = [p.nome for p in opcoes if p.preco == alvo]
+        tamanhos = repositorio.listar_tamanhos(db)
+        escolhido = next(p for p in opcoes if p.preco == alvo)
+        preco = (self._precos_por_tamanho(escolhido, tamanhos)
+                 if any(t.grupo == repositorio.grupo_tamanho(escolhido) for t in tamanhos)
+                 else "{} custa {}.".format(_com_artigo(escolhido.nome), preco_falado(escolhido.preco)))
+        if len(nomes) > 1:
+            return "As mais {} são {}, com o mesmo preço. {}".format(
+                "baratas" if extremo[1].startswith("barat") else "caras", _juntar(nomes), preco)
+        return preco
 
     def _quanto_fica_com(self, produtos, normalizado):
         """"e com uma coca 2 litros?": quanto o pedido fica com o item a mais; o sim seguinte coloca."""

@@ -2661,6 +2661,52 @@ class TestConversaCompleta:
         assert llama.chamadas == []
 
 
+class TestConsultasSemModelo:
+    def test_mais_barata_e_mais_cara(self, ana_identificada, llama):
+        # antes: as duas iam pro modelo
+        barata = ana_identificada.responder("qual a mais barata?")
+        assert barata.startswith("As mais baratas são Pizza de Banana com Canela e Pizza de Mussarela, com o mesmo preço.")
+        assert ana_identificada.responder("e a mais cara?").startswith("A Pizza de Camarão custa 89 reais e 90 centavos")
+        assert llama.chamadas == []
+
+    def test_o_que_vem_e_seguimento(self, ana_identificada, llama):
+        assert ana_identificada.responder("o que vem na portuguesa?").startswith("Pizza Portuguesa: presunto")
+        assert ana_identificada.responder("e na calabresa?").startswith("Pizza de Calabresa: calabresa fatiada")
+        assert llama.chamadas == []
+
+    def test_seguimento_de_preco(self, ana_identificada, llama):
+        ana_identificada.responder("quanto é a margherita?")
+        assert ana_identificada.responder("e a calabresa?").startswith("A Pizza de Calabresa custa")
+        assert llama.chamadas == []
+
+    @pytest.mark.parametrize("fala, inicio", [
+        ("tem sem lactose?", "Essa informação não está no cardápio. A pizzaria precisa confirmar."),
+        ("quantos pedaços?", "As pizzas podem ser pequena, com 4 fatias"),
+        ("quanto tempo pra chegar?", "A pizzaria precisa confirmar a taxa, o prazo de entrega"),
+        ("qual o valor da entrega?", "A pizzaria precisa confirmar a taxa, o prazo de entrega"),
+    ])
+    def test_responde_sem_o_modelo(self, ana_identificada, llama, fala, inicio):
+        assert ana_identificada.responder(fala).startswith(inicio)
+        assert llama.chamadas == []
+
+
+class TestDuasOrdensNaMesmaFala:
+    def test_tira_e_coloca(self, ana_identificada, llama):
+        # antes: o guaraná entrava, a coca ficava, e ainda vinha "Não entendi"
+        ana_identificada.responder("uma calabresa grande e uma coca lata")
+        assert ana_identificada.responder("tira a coca e coloca um guaraná lata") == (
+            "Tirei 1 Coca-Cola Lata. Anotei 1 Guaraná Lata. Quer algo mais?")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande"), ("Guaraná", 1, "Lata")]
+        assert llama.chamadas == []
+
+    def test_sabor_do_item_esperando_o_tamanho(self, ana_identificada):
+        # antes: "laranja" perguntava "Fanta Laranja ou Suco de Laranja?"
+        ana_identificada.responder("uma fanta")
+        assert ana_identificada.responder("laranja") == "Qual o tamanho: lata, 600 ml ou 2 litros?"
+        ana_identificada.responder("lata")
+        assert _itens(ana_identificada) == [("Fanta Laranja", 1, "Lata")]
+
+
 class TestFalaCurta:
     @pytest.mark.parametrize("fala, resposta", [
         ("tá", "Quer algo mais?"), ("é", "Quer algo mais?"), ("entendi", "Quer algo mais?"),
