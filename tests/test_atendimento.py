@@ -200,12 +200,12 @@ class TestConversaComOLlama:
         atendimento.responder(cpf_da_ana)
         assert llama.chamadas == []
 
-        assert atendimento.responder("vocês abrem amanhã?") == "resposta do llama"
+        assert atendimento.responder("a pizzaria é antiga?") == "resposta do llama"
         assert len(llama.chamadas) == 1
 
     def test_prompt_tem_o_nome_e_o_cardapio(self, atendimento, llama, cpf_da_ana):
         atendimento.responder(cpf_da_ana)
-        atendimento.responder("vocês abrem amanhã?")
+        atendimento.responder("a pizzaria é antiga?")
         sistema = llama.chamadas[0][0]
         assert sistema["role"] == "system"
         assert "Ana Beatriz Moraes" in sistema["content"]
@@ -214,8 +214,8 @@ class TestConversaComOLlama:
 
     def test_lembra_da_conversa(self, atendimento, llama, cpf_da_ana):
         atendimento.responder(cpf_da_ana)
-        atendimento.responder("vocês abrem amanhã?")
-        atendimento.responder("e no domingo?")
+        atendimento.responder("a pizzaria é antiga?")
+        atendimento.responder("e quem fundou?")
         mensagens = llama.chamadas[1]
         assert [m["role"] for m in mensagens] == ["system", "user", "assistant", "user"]
 
@@ -2254,6 +2254,65 @@ class TestRespostasSemModelo:
     def test_esquece_nao_larga_a_pergunta_do_tamanho(self, ana_identificada):
         ana_identificada.responder("uma calabresa")
         assert "Qual o tamanho" in ana_identificada.responder("esquece")
+
+
+class TestMaisDoMesmo:
+    @pytest.mark.parametrize("fala, qtd", [
+        ("mais uma", 1), ("coloca mais uma", 1), ("manda outra", 1), ("mais uma igual", 1), ("mais uma dessa", 1),
+        ("mais duas", 2), ("outras duas", 2), ("duas a mais", 2),
+    ])
+    def test_repete_o_item_com_tamanho_e_observacao(self, ana_identificada, llama, fala, qtd):
+        # antes: "Não temos mais uma no cardápio"; "mais uma igual" ainda dizia "Não entendi um dos produtos"
+        ana_identificada.responder("uma calabresa grande sem cebola")
+        resposta = ana_identificada.responder(fala)
+        assert resposta == "Anotei {} Pizza de Calabresa grande (sem cebola). Quer algo mais?".format(qtd)
+        assert [(i["quantidade"], i["observacao"]) for i in ana_identificada.carrinho] == [(1 + qtd, "sem cebola")]
+        assert llama.chamadas == []
+
+    def test_dois_itens_pergunta_qual(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande e uma coca lata")
+        assert ana_identificada.responder("mais uma") == "Qual delas: a pizza de calabresa ou a coca-cola?"
+        ana_identificada.responder("a coca")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande"), ("Coca-Cola", 2, "Lata")]
+
+    def test_pedido_vazio(self, ana_identificada):
+        assert ana_identificada.responder("mais uma") == "Seu pedido ainda está vazio. O que vai querer?"
+
+    def test_outra_coisa_nao_repete(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        ana_identificada.responder("quero outra coisa")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+
+
+class TestPerguntaDeServico:
+    @pytest.mark.parametrize("fala, inicio", [
+        ("aceita cartão?", "Aceitamos, sim. Pode ser Pix, dinheiro, cartão de crédito ou débito."),
+        ("aceita pix?", "Aceitamos, sim."),
+        ("passa cartão?", "Aceitamos, sim."),
+        ("tem maquininha?", "Aceitamos, sim."),
+        ("aceita vale refeição?", "Não aceitamos vale-refeição. Pode ser Pix, dinheiro, cartão de crédito ou débito."),
+        ("tem entrega?", "Fazemos entrega, sim, em Rua"),
+        ("vocês entregam no centro?", "Fazemos entrega, sim. Se o endereço está na área de entrega, a pizzaria confirma."),
+        ("que horas vocês fecham?", "A pizzaria precisa confirmar o horário de funcionamento."),
+    ])
+    def test_responde_sem_o_modelo(self, ana_identificada, llama, fala, inicio):
+        # antes: tudo ia pro modelo
+        ana_identificada.responder("uma calabresa grande")
+        resposta = ana_identificada.responder(fala)
+        assert resposta.startswith(inicio)
+        assert resposta.endswith("Quer algo mais?")
+        assert ana_identificada.pagamento is None
+        assert llama.chamadas == []
+
+    def test_pergunta_aberta_continua(self, ana_identificada):
+        ana_identificada.responder("uma calabresa")
+        assert ana_identificada.responder("aceita pix?").endswith("Qual o tamanho: pequena, média ou grande?")
+
+    def test_posso_pagar_no_pix_escolhe_o_pagamento(self, ana_identificada, llama):
+        ana_identificada.responder("uma calabresa grande")
+        assert ana_identificada.responder("posso pagar no pix?") == "Certo, pagamento no Pix. Quer algo mais?"
+        assert ana_identificada.pagamento == "pix"
+        assert llama.chamadas == []
 
 
 class TestFalaCurta:

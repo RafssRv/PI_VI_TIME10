@@ -68,6 +68,22 @@ TEM_FORA_DO_CARDAPIO = re.compile(r"(?:(?:voces|vcs|vc|voce|ai|e)\s+)*(?:tem|ter
 NAO_E_ITEM = {"entrega", "delivery", "troco", "maquininha", "cartao", "pix", "promocao", "promocoes", "desconto",
               "taxa", "frete", "horario", "estacionamento", "opcao", "opcoes", "sabor", "sabores", "tamanho",
               "tamanhos", "cardapio", "menu", "como", "que", "algo", "mais", "vaga", "atendente", "alguem"}
+# perguntas sobre o serviço. "posso pagar no pix" fica de fora: é o cliente escolhendo, não perguntando
+PERGUNTA_DE_PAGAMENTO = re.compile(
+    r"\b(?:aceita|aceitam|passa|passam|trabalha com|trabalham com)\b.*"
+    r"\b(?:cartao|credito|debito|pix|dinheiro|vale|vr|va|ticket|alelo|sodexo|picpay|boleto|cheque)\b"
+    r"|\btem maquininha\b")
+PAGAMENTO_QUE_NAO_ACEITA = re.compile(
+    r"\b(?:vale(?: refeicao| alimentacao)?|vr|va|ticket|alelo|sodexo|picpay|boleto|cheque)\b")
+NOMES_DE_PAGAMENTO = {"vale refeicao": "vale-refeição", "vale alimentacao": "vale-alimentação", "vr": "VR",
+                      "va": "VA", "ticket": "Ticket", "alelo": "Alelo", "sodexo": "Sodexo", "picpay": "PicPay"}
+FORMAS_ACEITAS = "Pix, dinheiro, cartão de crédito ou débito"
+ESCOLHE_PAGAMENTO = re.compile(r"(?:(?:eu|entao)\s+)?(?:posso|da pra|pode ser|seria)\s+(?:pagar\s+)?"
+                               r"(?:(?:no|na|em|com|pelo)\s+)?(?:pix|pics|dinheiro|cartao|credito|debito|maquininha)\b")
+# "entregam no centro?": a área de entrega a pizzaria confirma, não dá pra prometer
+ENTREGA_EM_LUGAR = re.compile(r"\bentregam?\s+(?:no|na|em|pro|pra|ate|aqui|ai)\b")
+PERGUNTA_DE_ENTREGA = re.compile(r"\b(?:tem|faz|fazem|faria) (?:entrega|delivery)\b|\bentregam\b|\bvoces entregam\b")
+PERGUNTA_DE_HORARIO = re.compile(r"\bque horas\b|\bhorario\b|\b(?:abrem|fecham)\b")
 DEIXA_PRA_LA = {"esquece", "esquece isso", "esquece entao", "deixa pra la", "deixa quieto", "nao precisa",
                 "nao precisa mais", "deixa"}
 SO_CONCORDA = {"ta", "e", "entendi", "sei", "ah", "ah ta", "ta ok", "blz", "ta entendi", "ah entendi", "ok entendi"}
@@ -685,6 +701,14 @@ class Atendimento:
                                    {"role": "assistant", "content": fala}])
             self._token_resumo = None
             return fala
+        if servico := self._responder_servico(normalizado):
+            self.historico.extend([{"role": "user", "content": texto},
+                                   {"role": "assistant", "content": servico}])
+            self._token_resumo = None
+            return servico
+        if "?" in texto and ESCOLHE_PAGAMENTO.match(normalizado):
+            # "posso pagar no pix?" escolhe o pagamento: a interrogação não faz disso uma consulta
+            texto = texto.replace("?", "")
         if eh_consulta(texto):
             self._referencia = None
             self._fechamento_solicitado = False
@@ -880,6 +904,25 @@ class Atendimento:
         return "{} {}".format(inicio, (self._pendencia if self._pendencia_firme() else None) or (
             "Quer algo mais?" if self.carrinho else "O que vai querer?")).strip()
 
+    def _responder_servico(self, normalizado):
+        """"aceita cartão?", "tem entrega?", "que horas fecham?": resposta fixa, sem o modelo. None se não for isso."""
+        seguir = " " + (self._pendencia if self._pendencia_firme() else
+                        "Quer algo mais?" if self.carrinho else "O que vai querer?")
+        if PERGUNTA_DE_PAGAMENTO.search(normalizado):
+            outro = PAGAMENTO_QUE_NAO_ACEITA.search(normalizado)
+            if outro:
+                return "Não aceitamos {}. Pode ser {}.".format(
+                    NOMES_DE_PAGAMENTO.get(outro.group(), outro.group()), FORMAS_ACEITAS) + seguir
+            return "Aceitamos, sim. Pode ser {}.".format(FORMAS_ACEITAS) + seguir
+        if PERGUNTA_DE_ENTREGA.search(normalizado) and not ENDERECO_NA_FALA.search(normalizado):
+            if ENTREGA_EM_LUGAR.search(normalizado):
+                return "Fazemos entrega, sim. Se o endereço está na área de entrega, a pizzaria confirma." + seguir
+            endereco = self.endereco_entrega or self.endereco_do_cadastro
+            return "Fazemos entrega, sim{}.".format(", em " + endereco if endereco else "") + seguir
+        if PERGUNTA_DE_HORARIO.search(normalizado):
+            return "A pizzaria precisa confirmar o horário de funcionamento." + seguir
+        return None
+
     def _pendencia_firme(self):
         """Pergunta que ainda vale repetir: tamanho, quantidade... não o "não entendi o produto"."""
         duvida = self._duvida_item or {}
@@ -1007,6 +1050,8 @@ class Atendimento:
             return "Qual item fica {}? Diga, por exemplo: {} {}.".format(
                 duvida["observacao"], _com_artigo(duvida["itens"][0]).lower(), duvida["observacao"])
         if campo == "qual_item":
+            if not duvida["itens"]:
+                return "Seu pedido ainda está vazio. O que vai querer?"
             return "Qual delas: {}?".format(_juntar([_com_artigo(n).lower() for n in duvida["itens"]], "ou"))
         if campo == "qual_muda":
             para, quantidade = duvida["para"], duvida.get("quantidade")

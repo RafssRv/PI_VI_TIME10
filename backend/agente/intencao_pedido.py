@@ -66,6 +66,11 @@ OBSERVACAO_SOLTA = re.compile(r"(?:(?:pode ser|quero|queria|e|ah|ent[aã]o)\s+)?
 TIRA_INGREDIENTE = re.compile(r"(?:tira|tire|retira|retire|n[aã]o\s+(?:coloca|coloque|bota|bote|p[oõ]e|ponha))\s+"
                               r"(?:(?:a|o|as|os)\s+)?(.+?)(?:\s+(?:da|do|na|no)\s+(.+?))?(?:,?\s*por favor)?",
                               re.IGNORECASE)
+# "mais uma", "manda outra", "mais duas iguais", "duas a mais": sem produto, repete o último item
+MAIS_DO_MESMO = re.compile(
+    r"(?:(?:coloca|coloque|manda|mande|bota|bote|poe|ponha|quero|queria|me ve|traz|traga|e|pode ser)\s+)*"
+    r"(?:mais\s+(" + NUMERO + r")|(" + NUMERO + r")\s+a\s+mais|outr[ao]s?(?:\s+(" + NUMERO + r"))?)"
+    r"(?:\s+(?:igual|iguais|dessa|desse|dessas|desses|da mesma|do mesmo|por favor))*")
 # "pode colocar cebola": só desfaz um "sem cebola" já anotado
 COLOCA_INGREDIENTE = re.compile(r"(?:pode\s+)?(?:coloca|coloque|colocar|bota|bote|botar|p[oõ]e|ponha|p[oô]r)\s+"
                                 r"(?:(?:a|o|as|os)\s+)?(.+?)(?:\s+(?:da|do|na|no)\s+(.+?))?(?:,?\s*por favor)?",
@@ -456,7 +461,9 @@ def _resposta_de_qual_item(texto, produtos, atual, pendente):
     if len(nomes) != 1 or not set(fora) <= {"a", "o", "as", "os", "de", "da", "do", "essa", "esse", "pizza", "e"}:
         return texto
     nome = nomes.pop()
-    return _apelido_do_item(pendente["fala"], produtos, [i for i in atual if i["produto"] == nome])[0]
+    fala = _apelido_do_item(pendente["fala"], produtos, [i for i in atual if i["produto"] == nome])[0]
+    # "mais uma" não tem apelido pra trocar: o nome escolhido vai no fim ("mais uma Coca-Cola")
+    return fala if fala != pendente["fala"] else "{} {}".format(fala, nome)
 
 
 def _observacao_solta(texto, produtos, atual):
@@ -500,6 +507,29 @@ def _observacao_solta(texto, produtos, atual):
     if coloca and observacao in (nova or ""):
         return texto, None, None  # "coloca X" só desfaz um "sem X"; senão segue o caminho normal
     return texto, None, (atual.index(alvos[0]), nova)
+
+
+def _mais_do_mesmo(texto, produtos, atual, referencia):
+    """
+    "mais uma", "manda outra", "mais duas iguais": repete o último item citado, com o mesmo tamanho e a
+    mesma observação. Devolve (rascunho, dúvida, evidências), ou None quando a fala não é isso.
+    """
+    pedido = MAIS_DO_MESMO.fullmatch(_normalizar(texto).strip(" .,!?"))
+    if not pedido or mencoes(texto, produtos)[1]:
+        return None
+    numero = next((g for g in pedido.groups() if g), None)
+    qtd = quantidade(numero) if numero else 1
+    citados = [i for i in atual if i["produto"] == referencia]
+    alvos = citados if len(citados) == 1 else atual
+    if len(alvos) != 1:
+        # a resposta "a coca" vira "mais uma Coca-Cola"; pedido vazio só avisa
+        return deepcopy(atual), {"campo": "qual_item", "fala": texto,
+                                 "itens": list(dict.fromkeys(i["produto"] for i in atual))}, []
+    novo = deepcopy(atual)
+    alvo = novo[atual.index(alvos[0])]
+    alvo["quantidade"] += qtd
+    return novo, None, [{"acao": "adicionar", "produto": alvo["produto"], "quantidade": qtd,
+                         "tamanho": alvo.get("tamanho"), "observacao": alvo["observacao"], "trecho": texto}]
 
 
 def _juntar_observacao(anterior, nova):
@@ -554,6 +584,9 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
         if achados and set(fora) <= {"a", "o", "as", "os", "uma", "um"}:
             # "não coloca coca não": só o produto depois do verbo negado, então é tirar ele
             texto = "tira " + negado[1]
+    repetido = _mais_do_mesmo(texto, produtos, atual, referencia)
+    if repetido:
+        return repetido
     texto, duvida, edicao = _observacao_solta(texto, produtos, atual)
     if duvida:
         return deepcopy(atual), duvida, []
