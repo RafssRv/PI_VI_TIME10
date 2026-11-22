@@ -2100,6 +2100,36 @@ class TestMudaSoOTamanhoSemCitarProduto:
         assert _itens(ana_identificada) == [("Coca-Cola", 1, "Lata")]
 
 
+class TestMudaAQuantidade:
+    @pytest.mark.parametrize("fala, qtd", [
+        ("altere a coca para duas", 2), ("muda a coca pra três", 3), ("deixa duas cocas", 2),
+        ("muda a coca pra uma", 1), ("mude para duas", 2),
+    ])
+    def test_ajusta_a_quantidade_em_vez_de_somar(self, ana_identificada, llama, fala, qtd):
+        # antes: "Não temos coca para duas no cardápio"
+        ana_identificada.responder("três cocas lata" if qtd == 1 else "uma coca lata")
+        resposta = ana_identificada.responder(fala)
+        assert resposta == "Ajustei para {} Coca-Cola Lata. Quer algo mais?".format(qtd)
+        assert _itens(ana_identificada) == [("Coca-Cola", qtd, "Lata")]
+        assert llama.chamadas == []
+
+    def test_sem_produto_com_dois_itens_pergunta_qual(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande e uma coca lata")
+        resposta = ana_identificada.responder("muda pra duas")
+        assert resposta == "Qual item muda para duas? Diga, por exemplo: muda a pizza de calabresa para duas."
+        ana_identificada.responder("muda a coca para duas")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande"), ("Coca-Cola", 2, "Lata")]
+
+    def test_item_fora_do_pedido_nao_e_somado(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        resposta = ana_identificada.responder("muda a coca pra duas")
+        assert resposta == "Coca-Cola não está no seu pedido. Quer algo mais?"
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+
+    def test_pedido_vazio(self, ana_identificada):
+        assert ana_identificada.responder("muda pra duas") == "Seu pedido ainda está vazio. O que vai querer?"
+
+
 class TestFalaSemPedido:
     @pytest.mark.parametrize("fala, resposta", [
         ("oi", "Olá! O que vai querer?"),

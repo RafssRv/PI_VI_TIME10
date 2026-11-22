@@ -952,11 +952,14 @@ class Atendimento:
         if campo == "intencao":
             return "Não entendi. Pode repetir o que você quer?"
         if campo == "qual_muda":
-            tamanho = duvida["tamanho"].lower()
+            para, quantidade = duvida["para"], duvida.get("quantidade")
             if not duvida["itens"]:
-                return "Nenhum item do seu pedido tem o tamanho {}. Quer algo mais?".format(tamanho)
-            return "Qual item muda para {}? Diga, por exemplo: {} é {}.".format(
-                tamanho, _com_artigo(duvida["itens"][0]).lower(), tamanho)
+                if quantidade:
+                    return "Seu pedido ainda está vazio. O que vai querer?"
+                return "Nenhum item do seu pedido tem o tamanho {}. Quer algo mais?".format(para)
+            item = _com_artigo(duvida["itens"][0]).lower()
+            exemplo = "muda {} para {}".format(item, para) if quantidade else "{} é {}".format(item, para)
+            return "Qual item muda para {}? Diga, por exemplo: {}.".format(para, exemplo)
         candidatos = duvida.get("candidatos", [])
         if duvida.get("nao_encontrado"):
             # frase longa nao eh nome de produto: repetir ela de volta soa como erro de maquina

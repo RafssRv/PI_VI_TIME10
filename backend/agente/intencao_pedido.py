@@ -71,7 +71,10 @@ MUDA_O_TAMANHO = {"muda", "mude", "mudar", "troca", "troque", "trocar", "altera"
 LIGA_O_TAMANHO = {"ser", "na", "verdade", "entao", "ah", "o", "a", "tamanho", "pra", "para", "por", "sim",
                   "eu", "me", "faz", "faca", "favor", "ela", "ele", "isso"}
 PEDE_MAIS_UM = re.compile(r"\b(?:mais|outra|outro|outras|outros|quero|queria|" + VERBOS_DE_ADICIONAR + r")\b")
-CORRIGIR = re.compile(r"\b(?:na verdade|so|apenas|corrija|corrigir|altere|alterar|deixe|mude)\b")
+CORRIGIR = re.compile(r"\b(?:na verdade|so|apenas|corrija|corrigir|altere|alterar|altera|deixe|deixa|mude|muda)\b")
+# "muda a coca pra duas", "mude para duas": a quantidade nova vem depois do "pra"
+MUDA_A_QUANTIDADE = re.compile(r"(.*?\b(?:mude|muda|altere|altera|deixe|deixa))\s+(?:(?:a|o|as|os)\s+)?(.*?)\s*"
+                               r"\b(?:pra|para)\s+(" + NUMERO + r")")
 
 
 # Parecem nomes do cardápio, mas são palavras do dia a dia: "quanto" não é "quatro queijos".
@@ -411,6 +414,20 @@ def cardapio_completo(texto):
 def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabulario=TAMANHOS_BASE):
     """Retorna (rascunho, pendência de campo, evidências) sem efeitos externos."""
     texto = _numero_do_nome(texto)
+    muda = MUDA_A_QUANTIDADE.fullmatch(_normalizar(texto).strip(" .,!?"))
+    if muda:
+        # "altere a coca para duas" vira "altere duas coca", que o caminho de correção já entende
+        verbo, citado, numero = muda.groups()
+        if not citado:
+            if len(atual) != 1:
+                return deepcopy(atual), {"campo": "qual_muda", "para": numero, "quantidade": True,
+                                         "itens": [i["produto"] for i in atual]}, []
+            citado = atual[0]["produto"]
+        nomes = {p.nome for _, _, ps in mencoes(citado, produtos)[1] for p in ps}
+        if len(nomes) == 1 and not any(i["produto"] in nomes for i in atual):
+            # mudar a quantidade do que não foi pedido não é pedir de novo
+            return deepcopy(atual), {"campo": "fora_do_pedido", "produto": nomes.pop()}, []
+        texto = "{} {} {}".format(verbo, numero, citado)
     texto, tamanhos = separar_tamanhos(texto, vocabulario)
     normal = _normalizar(texto)
     # "Não temos X" é aviso, não pergunta aberta: não pode prender as falas seguintes.
@@ -484,7 +501,7 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
         alvos = [i for i in novo if any(p.nome == i["produto"] and vocabulario.serve_para(tamanho, p)
                                         for p in produtos)]
         if len(alvos) != 1:
-            return novo, {"campo": "qual_muda", "tamanho": tamanho,
+            return novo, {"campo": "qual_muda", "para": tamanho.lower(),
                           "itens": [i["produto"] for i in alvos]}, evidencias
         alvo = alvos[0]
         alvo["tamanho"] = tamanho
@@ -535,7 +552,7 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
         permitido = re.sub(r"\b(?:eu|quero|queria|gostaria|de|a|o|as|os|mais|uma|um|"
                            + VERBOS_DE_ADICIONAR + r"|" + VERBOS_DE_REMOVER + r"|manda|mande|pedir|ai|"
                            r"pode|poderia|por|favor|sim|nao|na|verdade|so|apenas|dessa|desse|daquela|daquele|igual|corrija|corrigir|"
-                           r"altere|alterar|deixe|mude|"
+                           r"altere|alterar|altera|deixe|deixa|mude|muda|"
                            r"me|ve|da|traz|traga|vou|querer|ser|vai|vamos|ah|oi|ola|outra|outro|outras|outros|"
                            r"boa|bom|noite|tarde|dia|entao|hoje|tambem|agora|pra|para|mim|sao|fica|ficam)\b", "", permitido).strip()
         if permitido or re.match(r"e\s+(?!so isso|uma?\b|duas?\b|dois\b|tres\b|\d+\b)", sufixo):
