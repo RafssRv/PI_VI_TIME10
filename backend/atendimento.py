@@ -660,8 +660,11 @@ class Atendimento:
         if FECHAR.search(normalizado):
             self._fechamento_solicitado = "nao" not in normalizado.split()
         muda_para = MUDA_PARA.search(normalizado)
+        cardapio = repositorio.listar_cardapio(db)
+        # "muda a calabresa pra mussarela" ou "muda a calabresa pra pequena": produto antes, produto ou tamanho depois
         pede_troca = bool(PEDIDO_DE_TROCA.search(normalizado) or (
-            muda_para and all(mencoes(lado, repositorio.listar_cardapio(db))[1] for lado in muda_para.groups())))
+            muda_para and mencoes(muda_para[1], cardapio)[1]
+            and (mencoes(muda_para[2], cardapio)[1] or separar_tamanhos(muda_para[2], self._vocabulario)[1])))
         if self._troca_pendente:
             if sem_cortesia in DESISTE_DA_TROCA:
                 self._troca_pendente = False
@@ -1255,6 +1258,9 @@ class Atendimento:
         # "troque a calabresa grande por uma mussarela media": o tamanho nao faz parte do nome
         lado_origem, tamanhos_origem = separar_tamanhos(partes[0], self._vocabulario)
         lado_destino, tamanhos_destino = separar_tamanhos(partes[1], self._vocabulario)
+        # "as calabresas", "o tamanho das calabresas": no plural, a mudanca de tamanho vale para todas
+        todas = bool(re.match(r"(?:(?:o\s+)?tamanho\s+d)?[ao]s\s", lado_origem))
+        lado_origem = re.sub(r"^(?:o\s+)?tamanho\s+d[aeo]s?\s+", "", lado_origem)
         retirar, origem = _item_da_troca(lado_origem)
         acrescentar, destino = _item_da_troca(lado_destino)
         origem, destino = _nome_na_troca(origem), _nome_na_troca(destino)
@@ -1268,12 +1274,22 @@ class Atendimento:
         if len(itens) != 1:
             return ["Qual item do pedido você deseja trocar? Informe também a quantidade."]
         item = itens[0]
+        # "troca a calabresa grande por uma média": do outro lado so veio o tamanho, o produto fica
+        so_tamanho = not destino and tamanho_destino is not None
         if retirar is None:
-            if item.quantidade != 1:
+            if item.quantidade != 1 and not (so_tamanho and todas):
                 return ["Quantas unidades de {} deseja trocar?".format(item.nome)]
-            retirar = 1
-        produtos = [p for p in repositorio.listar_cardapio(db)
-                    if destino and f" {destino} " in f" {_nome_na_troca(p.nome)} "]
+            retirar = item.quantidade
+        if so_tamanho:
+            produtos = [p for p in repositorio.listar_cardapio(db) if p.id == item.produto_id]
+            if produtos and not repositorio.grupo_tamanho(produtos[0]):
+                return ["{} tem tamanho único.".format(_com_artigo(item.nome))]
+            if produtos and not self._vocabulario.serve_para(tamanho_destino, produtos[0]):
+                return ["{} não tem esse tamanho. Pode ser {}".format(_com_artigo(item.nome), self._opcoes(item.nome))]
+            acrescentar = acrescentar or retirar
+        else:
+            produtos = [p for p in repositorio.listar_cardapio(db)
+                        if destino and f" {destino} " in f" {_nome_na_troca(p.nome)} "]
         if not produtos:
             return ["Não temos esse produto no cardápio ou a troca contém mais de uma alteração. "
                     "Pode repetir uma troca por vez, com os nomes e as quantidades?"]
@@ -1296,7 +1312,9 @@ class Atendimento:
             novo_tamanho = dito or herdado or (iguais.pop() if len(iguais) == 1 else "")
         controle = deepcopy(self._controle)
         try:
-            controle.substituir(item.id, retirar, produtos[0].id, acrescentar, tamanho=novo_tamanho or "")
+            # mudar so o tamanho nao eh outro produto: a observacao ("sem cebola") continua valendo
+            controle.substituir(item.id, retirar, produtos[0].id, acrescentar, tamanho=novo_tamanho or "",
+                                observacao=item.observacao if so_tamanho else "")
         except ErroPedido as erro:
             return [str(erro)]
         return self._atualizar_carrinho(db, [

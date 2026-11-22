@@ -1934,6 +1934,47 @@ class TestJeitosDeTrocar:
         assert ana_identificada.responder("deixa pra lá") == (
             "Tudo bem, mantive seu pedido como estava. Quer algo mais?")
 
+    @pytest.mark.parametrize("fala, tamanho", [
+        ("troca a calabresa grande por uma média", "média"), ("troca a calabresa por uma média", "média"),
+        ("muda a calabresa pra pequena", "pequena"), ("muda o tamanho da calabresa pra média", "média"),
+    ])
+    def test_troca_so_de_tamanho_mantem_o_sabor(self, ana_identificada, llama, fala, tamanho):
+        ana_identificada.responder("uma calabresa grande sem cebola")
+        ana_identificada.responder(fala)
+        assert [(i["produto"], i["quantidade"], i["tamanho"], i["observacao"])
+                for i in ana_identificada.carrinho] == [("Pizza de Calabresa", 1, tamanho, "sem cebola")]
+        assert ana_identificada.carrinho[0]["preco"] == {"média": Decimal("49.90"), "pequena": Decimal("39.90")}[tamanho]
+        assert llama.chamadas == []
+
+    def test_troca_de_volume_do_refrigerante(self, ana_identificada):
+        ana_identificada.responder("uma coca lata")
+        ana_identificada.responder("troca a coca lata por uma de 2 litros")
+        assert _itens(ana_identificada) == [("Coca-Cola", 1, "2 Litros")]
+        ana_identificada.responder("muda a coca pra 600")
+        assert _itens(ana_identificada) == [("Coca-Cola", 1, "600 ml")]
+
+    def test_uma_de_duas_muda_de_tamanho(self, ana_identificada):
+        ana_identificada.responder("duas calabresas grandes")
+        ana_identificada.responder("troca uma calabresa por uma média")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande"), ("Pizza de Calabresa", 1, "média")]
+
+    def test_no_plural_todas_mudam_e_no_singular_pergunta(self, ana_identificada):
+        ana_identificada.responder("duas calabresas grandes")
+        assert "Quantas unidades" in ana_identificada.responder("muda a calabresa pra pequena")
+        ana_identificada.responder("cancela a troca")
+        ana_identificada.responder("muda as calabresas pra pequena")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 2, "pequena")]
+
+    @pytest.mark.parametrize("pedido, fala, resposta", [
+        ("uma coca lata", "muda a coca pra grande", "A Coca-Cola não tem esse tamanho. Pode ser lata, 600 ml ou 2 litros?"),
+        ("um pudim", "muda o pudim pra grande", "O Pudim de Leite tem tamanho único."),
+    ])
+    def test_tamanho_que_nao_serve_nao_muda_nada(self, ana_identificada, pedido, fala, resposta):
+        ana_identificada.responder(pedido)
+        anterior = list(ana_identificada.carrinho)
+        assert ana_identificada.responder(fala).startswith(resposta)
+        assert ana_identificada.carrinho == anterior
+
     def test_nao_sem_virgula_continua_negando_a_troca(self, ana_identificada):
         ana_identificada.responder("uma calabresa grande")
         ana_identificada.responder("não troca a calabresa por uma mussarela")

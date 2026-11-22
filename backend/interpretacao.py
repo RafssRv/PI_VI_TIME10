@@ -84,6 +84,9 @@ QUANTIDADES_DA_TROCA = {
 def _item_da_troca(texto):
     texto = re.sub(r"^(?:a|o|as|os|mais)\s+", "", texto)
     partes = texto.split(maxsplit=1)
+    if not partes:
+        # "muda a calabresa pra pequena": tirado o tamanho, desse lado nao sobra nada
+        return None, ""
     quantidade = QUANTIDADES_DA_TROCA.get(partes[0])
     if partes[0].isdigit():
         quantidade = int(partes[0])
