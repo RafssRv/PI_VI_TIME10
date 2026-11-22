@@ -274,6 +274,34 @@ def _donos_dos_tamanhos(tamanhos, achados, palavras, vocabulario):
     return donos, soltos, errados
 
 
+def _divisoes_por_tamanho(achados, palavras, soltos):
+    """
+    "duas calabresas, uma grande e uma média": cada número depois do produto leva o tamanho dito logo em
+    seguida. Devolve ({índice do achado: [(quantidade, tamanho)]}, posições de tamanho usadas), só quando
+    a cauda inteira é isso; um número solto no fim é a quantidade do próximo item ("e uma coca").
+    """
+    tamanho_em = dict(soltos)
+    divisoes, usadas = {}, set()
+    for indice, (_, fim, _) in enumerate(achados):
+        seguinte = achados[indice + 1][0] if indice + 1 < len(achados) else len(palavras)
+        pares = []
+        for posicao in range(fim, seguinte):
+            palavra = palavras[posicao]
+            if palavra == "e":
+                continue
+            if re.fullmatch(NUMERO, palavra) and posicao + 1 in tamanho_em:
+                pares.append((quantidade(palavra), tamanho_em[posicao + 1], posicao + 1))
+                continue
+            proximo = indice + 1 < len(achados)
+            if not (proximo and all(p == "e" or re.fullmatch(NUMERO, p) for p in palavras[posicao:seguinte])):
+                pares = []
+            break
+        if len(pares) > 1:
+            divisoes[indice] = [(q, t) for q, t, _ in pares]
+            usadas.update(p for _, _, p in pares)
+    return divisoes, usadas
+
+
 def _juntar_iguais(itens):
     """Duas linhas do mesmo produto, tamanho e observação viram uma, somando as quantidades."""
     juntos = []
@@ -430,6 +458,8 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
         filtrados.append(achado)
     achados = filtrados
     donos, soltos, errados = _donos_dos_tamanhos(tamanhos, achados, palavras, vocabulario)
+    divisoes, usadas = _divisoes_por_tamanho(achados, palavras, soltos)
+    soltos = [(posicao, tamanho) for posicao, tamanho in soltos if posicao not in usadas]
     # guardada antes da resposta: "a calabresa é grande" responde e não pode virar mais uma calabresa
     pergunta_de_tamanho = pendente if pendente and pendente.get("campo") == "tamanho" else None
     respondeu_tamanho = False
@@ -457,7 +487,7 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
 
     for fragmento in re.split(r"\s+e\s+(?=" + NUMERO + r"|quero\b)", normal):
         if (quantidade(fragmento) is not None and not mencoes(fragmento, produtos)[1] and not esclarecendo_quantidade
-                and not respondeu_tamanho):
+                and not respondeu_tamanho and not (divisoes and re.fullmatch(NUMERO, fragmento.strip()))):
             if not re.search(r"\b(?:pix|dinheiro|credito|debito|rua|avenida|av|travessa|alameda|estrada|rodovia)\b",
                              fragmento):
                 duvida = {"campo": "produto", "quantidade": quantidade(fragmento)}
@@ -500,6 +530,26 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
                           "nao_encontrado": trecho + " " + cauda}
             continue
         produto = candidatos[0]
+        if indice in divisoes and acao == "adicionar":
+            partes = divisoes[indice]
+            total = sum(q for q, _ in partes)
+            if (qtd or total) == total and all(vocabulario.serve_para(t, produto) for _, t in partes):
+                novos = partes
+            else:
+                # "duas calabresas, uma grande e duas médias": a conta não fecha, então entra sem tamanho e pergunta
+                novos = [(qtd or total, None)]
+                duvida = {"campo": "tamanho", "produto": produto.nome, "misto": True}
+            for q, t in novos:
+                alvo = next((i for i in novo if i["produto"] == produto.nome and i["observacao"] is None
+                             and i.get("tamanho") == t), None)
+                if alvo:
+                    alvo["quantidade"] += q
+                else:
+                    novo.append({"produto": produto.nome, "quantidade": q, "observacao": None,
+                                 "preco": produto.preco, "tamanho": t})
+                evidencias.append({"acao": "adicionar", "produto": produto.nome, "quantidade": q, "tamanho": t,
+                                   "observacao": None, "trecho": prefixo + " " + trecho + " " + sufixo})
+            continue
         # Um nome parcial não autoriza ignorar a variante ou o volume ditos depois.
         cauda = sufixo
         nome_radical = " ".join(radical(p) for p in _normalizar(produto.nome).split())

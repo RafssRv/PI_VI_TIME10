@@ -2045,6 +2045,31 @@ class TestJeitosDeTrocar:
         assert ana_identificada.responder("é só isso").startswith("Como você vai pagar?")
 
 
+class TestQuantidadeDivididaEmTamanhos:
+    @pytest.mark.parametrize("fala, itens", [
+        ("duas calabresas, uma grande e uma média",
+         [("Pizza de Calabresa", 1, "grande"), ("Pizza de Calabresa", 1, "média")]),
+        ("quero duas calabresas uma grande e uma média",
+         [("Pizza de Calabresa", 1, "grande"), ("Pizza de Calabresa", 1, "média")]),
+        ("três mussarelas, duas grandes e uma pequena",
+         [("Pizza de Mussarela", 2, "grande"), ("Pizza de Mussarela", 1, "pequena")]),
+        ("duas cocas, uma lata e uma de 2 litros", [("Coca-Cola", 1, "Lata"), ("Coca-Cola", 1, "2 Litros")]),
+        ("duas calabresas, uma grande e uma média, e uma coca lata",
+         [("Pizza de Calabresa", 1, "grande"), ("Pizza de Calabresa", 1, "média"), ("Coca-Cola", 1, "Lata")]),
+    ])
+    def test_cada_numero_leva_o_tamanho_dito_depois(self, ana_identificada, llama, fala, itens):
+        # antes: "Não temos calabresas uma e uma no cardápio"
+        ana_identificada.responder(fala)
+        assert _itens(ana_identificada) == itens
+        assert llama.chamadas == []
+
+    def test_conta_que_nao_fecha_pergunta_e_aceita_a_resposta(self, ana_identificada):
+        resposta = ana_identificada.responder("duas calabresas, uma grande e duas médias")
+        assert resposta == "Anotei 2 Pizza de Calabresa. Quantas de cada tamanho? Por exemplo: uma grande e uma média."
+        ana_identificada.responder("uma grande e uma média")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande"), ("Pizza de Calabresa", 1, "média")]
+
+
 class TestFalaSemPedido:
     @pytest.mark.parametrize("fala, resposta", [
         ("oi", "Olá! O que vai querer?"),
