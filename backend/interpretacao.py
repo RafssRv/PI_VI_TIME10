@@ -152,6 +152,22 @@ def confirmacao_explicita(texto):
     }
 
 
+# "sim, pode mandar", "isso mesmo, pode confirmar": só palavras de confirmação, com pelo menos uma forte.
+# "tá" e "é" sozinhos continuam sem gravar nada: são fracas
+CONFIRMACAO_FORTE = {"sim", "pode", "confirmar", "confirma", "confirmo", "confirmado", "isso", "certo", "correto",
+                     "ok", "okay", "claro", "beleza", "perfeito", "positivo", "exato", "exatamente", "fechado",
+                     "fechou", "certeza"}
+CONFIRMACAO_FRACA = {"mesmo", "ai", "mandar", "manda", "ver", "fechar", "fecha", "ta", "esta", "tudo", "com", "por",
+                     "favor", "obrigado", "obrigada", "valeu", "bom", "otimo", "pois", "e", "pode", "sim", "senhor",
+                     "senhora", "o", "pedido", "isso", "agora", "ja", "entao", "show", "bora", "aham", "uhum"}
+
+
+def confirmacao_composta(texto):
+    palavras = set(_normalizar(texto).split())
+    return ("?" not in texto and bool(palavras & CONFIRMACAO_FORTE)
+            and palavras <= CONFIRMACAO_FORTE | CONFIRMACAO_FRACA)
+
+
 def parece_confirmacao(texto):
     """Palavra única mal transcrita ("poisito"). Só vale na pergunta final, depois de ler o resumo."""
     palavras = _normalizar(texto).split()

@@ -60,7 +60,8 @@ TIPOS_DE_ITEM = {"pizza": "pizza", "bebida": "bebida", "refri": "bebida", "refri
                  "sobremesa": "sobremesa"}
 APELIDO_DO_ITEM = re.compile(r"\b(a|o|as|os|da|do|das|dos|na|no|nas|nos)\s+(pizzas?|bebidas?|refris?|refrigerantes?|"
                              r"sobremesas?)\b(?!\s+(?:de|da|do)\b)", re.IGNORECASE)
-OBSERVACAO_SOLTA = re.compile(r"(?:(?:pode ser|quero|queria|e|ah|ent[aã]o)\s+)?((?:sem|com)\s+.+?)(?:,?\s*por favor)?",
+OBSERVACAO_SOLTA = re.compile(r"(?:(?:sim|mas|n[aã]o|na verdade|pode ser|quero|queria|e|ah|ent[aã]o)[\s,]+)*"
+                              r"((?:sem|com)\s+.+?)(?:,?\s*por favor)?",
                               re.IGNORECASE)
 # "tira a cebola", "não coloca cebola na calabresa": o ingrediente, e o produto se for dito
 TIRA_INGREDIENTE = re.compile(r"(?:tira|tire|retira|retire|n[aã]o\s+(?:coloca|coloque|bota|bote|p[oõ]e|ponha))\s+"
@@ -724,7 +725,7 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
                            r"pode|poderia|por|favor|sim|nao|na|verdade|so|apenas|dessa|desse|daquela|daquele|igual|corrija|corrigir|"
                            r"altere|alterar|altera|deixe|deixa|mude|muda|"
                            r"me|ve|da|traz|traga|vou|querer|ser|vai|vamos|ah|oi|ola|outra|outro|outras|outros|"
-                           r"boa|bom|noite|tarde|dia|entao|hoje|tambem|agora|pra|para|mim|sao|fica|ficam)\b", "", permitido).strip()
+                           r"boa|bom|noite|tarde|dia|entao|hoje|tambem|agora|pra|para|mim|sao|fica|ficam|esqueci|faltou)\b", "", permitido).strip()
         if permitido or re.match(r"e\s+(?!so isso|uma?\b|duas?\b|dois\b|tres\b|\d+\b)", sufixo):
             duvida = {"campo": "intencao"}
             continue
@@ -770,7 +771,8 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
         if volume and "{} {}".format(volume[1], radical(volume[2])) in nome_radical:
             cauda = cauda[volume.end():].strip()
         if cauda and not re.match(r"(?:e|mas|sem|com|pago|pagamento|entrega|por favor|so isso|pra mim|para mim|hoje|"
-                                  r"vou pagar|quero pagar|pode ser|vai ser|fica|ficam|seja|sejam|sera|sao)\b", cauda):
+                                  r"vou pagar|quero pagar|pode ser|vai ser|fica|ficam|seja|sejam|sera|sao|tambem)\b",
+                                  cauda):
             duvida = {"campo": "produto", "quantidade": qtd or 1,
                       "nao_encontrado": trecho + " " + sufixo}
             continue

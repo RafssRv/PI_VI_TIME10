@@ -28,7 +28,7 @@ from sqlalchemy.exc import SQLAlchemyError
 import repositorio
 from interpretacao import (
     ESQUEMA_DO_PEDIDO, MUDA_PARA, PEDIDO_DE_TROCA, _item_da_troca, _nome_na_troca, _normalizar,
-    confirmacao_explicita, extrair_digitos, extrair_endereco, extrair_nome,
+    confirmacao_composta, confirmacao_explicita, extrair_digitos, extrair_endereco, extrair_nome,
     interpretar_resposta, parece_confirmacao, sim_ou_nao,
 )
 
@@ -84,6 +84,11 @@ ESCOLHE_PAGAMENTO = re.compile(r"(?:(?:eu|entao)\s+)?(?:posso|da pra|pode ser|se
 ENTREGA_EM_LUGAR = re.compile(r"\bentregam?\s+(?:no|na|em|pro|pra|ate|aqui|ai)\b")
 PERGUNTA_DE_ENTREGA = re.compile(r"\b(?:tem|faz|fazem|faria) (?:entrega|delivery)\b|\bentregam\b|\bvoces entregam\b")
 PERGUNTA_DE_HORARIO = re.compile(r"\bque horas\b|\bhorario\b|\b(?:abrem|fecham)\b")
+# "não, quero mudar", "espera, quero alterar uma coisa": sai da confirmação sem dizer ainda o quê
+QUER_MUDAR = re.compile(r"(?:nao\s+)?(?:(?:espera|pera|calma)\s+)?(?:(?:eu\s+)?(?:quero|queria|preciso|vou|vamos)\s+)?"
+                        r"(?:mudar|alterar|trocar|corrigir|mexer)(?:\s+(?:uma coisa|uma coisinha|algo|o pedido|"
+                        r"umas coisas|um item|uma parte))?|nao(?:\s+quero)?|nao\s+(?:espera|pera|calma)|espera|pera|"
+                        r"nao\s+(?:confirma|confirme|pode confirmar|precisa confirmar|e isso|esta certo|ta certo)")
 DEIXA_PRA_LA = {"esquece", "esquece isso", "esquece entao", "deixa pra la", "deixa quieto", "nao precisa",
                 "nao precisa mais", "deixa"}
 SO_CONCORDA = {"ta", "e", "entendi", "sei", "ah", "ah ta", "ta ok", "blz", "ta entendi", "ah entendi", "ok entendi"}
@@ -1574,7 +1579,9 @@ class Atendimento:
                 return "Antes de fechar, qual o tamanho {}: {}".format(_da(produto), self._opcoes(produto))
             return self._esclarecer(self._pendencia)
         if not self.carrinho:
-            return "Você ainda não pediu nada. O que vai querer?"
+            # vale também pra quem tirou o último item na confirmação
+            self._fechamento_solicitado = False
+            return "Seu pedido está vazio. O que vai querer?"
         # quem ja pediu pra fechar nao precisa pedir de novo depois de dizer como paga
         self._fechamento_solicitado = True
         if not self.pagamento:
@@ -1613,20 +1620,30 @@ class Atendimento:
             return False
         db = self._sessao()
         try:
-            return not mencoes(texto, repositorio.listar_cardapio(db))[1]
+            cardapio = repositorio.listar_cardapio(db)
         finally:
             db.close()
+        if mencoes(texto, cardapio)[1]:
+            return False
+        # "mais uma", "sem cebola": sem produto, mas mudam o pedido (ou perguntam qual item)
+        _, duvida, evidencias = interpretar(texto, cardapio, self.carrinho, None, self._referencia, self._vocabulario)
+        return not evidencias and (duvida or {}).get("campo") not in {"qual_item", "qual_observacao", "qual_muda"}
 
     def _receber_confirmacao_do_pedido(self, texto):
-        if not (confirmacao_explicita(texto) or parece_confirmacao(texto)):
-            if _normalizar(texto).strip() in {"hmm", "talvez", ""}:
+        if not (confirmacao_explicita(texto) or parece_confirmacao(texto) or confirmacao_composta(texto)):
+            normalizado = _normalizar(texto).strip()
+            sem_cortesia = " ".join(CORTESIA.sub("", normalizado).split())
+            if normalizado in {"hmm", "talvez", ""}:
                 return self._esclarecer("Posso confirmar o pedido?")
+            if PERGUNTA_DO_TOTAL.search(normalizado) or CONSULTA_PEDIDO_ATUAL.search(normalizado):
+                # "quanto ficou?": o resumo já tem o total, e a confirmação continua valendo
+                return self._resumo_do_pedido()
             if self._fala_solta_na_confirmacao(texto):
                 return "Desculpe, não entendi. Posso confirmar o pedido? Pode dizer sim ou não."
             self.etapa = "identificado"
             self._token_resumo = None
             # "nao, tira a coca": a mesma fala ja serve pra corrigir o pedido
-            if _normalizar(texto).strip() not in {"nao", "nao quero"}:
+            if not QUER_MUDAR.fullmatch(sem_cortesia):
                 return self._montar_pedido(texto)
             return "Tudo bem. O que você quer mudar?"
 

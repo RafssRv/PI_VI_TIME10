@@ -601,7 +601,7 @@ class TestFechaOPedido:
 
     def test_fechar_sem_nada_pergunta(self, ana_identificada, llama):
         llama.entende([], fechar=True)
-        assert "não pediu nada" in ana_identificada.responder("é só isso")
+        assert ana_identificada.responder("é só isso") == "Seu pedido está vazio. O que vai querer?"
 
     def test_nao_volta_pra_montar(self, ana_identificada, llama, db):
         antes = _pedidos_da(db, ana_identificada.cliente_id)
@@ -2315,6 +2315,62 @@ class TestPerguntaDeServico:
         assert llama.chamadas == []
 
 
+class TestNaConfirmacaoDoPedido:
+    @pytest.fixture
+    def no_resumo(self, ana_identificada):
+        for fala in ("uma calabresa grande", "no pix"):
+            ana_identificada.responder(fala)
+        assert ana_identificada.responder("só isso").startswith("Seu pedido ficou assim:")
+        return ana_identificada
+
+    @pytest.mark.parametrize("fala", ["sim, pode mandar", "pode sim, obrigado", "isso mesmo, pode confirmar",
+                                      "tudo certo", "sim, pode confirmar por favor"])
+    def test_confirmacao_com_mais_palavras_grava(self, no_resumo, fala):
+        # antes: "Não temos sim pode mandar no cardápio" e saía da confirmação
+        assert no_resumo.responder(fala).startswith("Pedido número")
+        assert no_resumo.ultimo_pedido_id is not None
+
+    @pytest.mark.parametrize("fala", ["é", "tá"])
+    def test_palavra_fraca_nao_grava(self, no_resumo, fala):
+        assert no_resumo.responder(fala).startswith("Desculpe, não entendi.")
+        assert no_resumo.ultimo_pedido_id is None
+
+    @pytest.mark.parametrize("fala", ["não, quero mudar", "não confirma", "espera, quero alterar uma coisa"])
+    def test_quer_mudar_pergunta_o_que(self, no_resumo, fala):
+        assert no_resumo.responder(fala) == "Tudo bem. O que você quer mudar?"
+        assert no_resumo.ultimo_pedido_id is None
+
+    @pytest.mark.parametrize("fala, trecho", [
+        ("mais uma", "2 Pizza de Calabresa grande. Total de 129 reais e 80 centavos"),
+        ("sem cebola", "1 Pizza de Calabresa grande (solicitação: sem cebola)."),
+        ("sim, mas sem cebola", "1 Pizza de Calabresa grande (solicitação: sem cebola)."),
+    ])
+    def test_edicao_curta_rele_o_resumo(self, no_resumo, llama, fala, trecho):
+        # antes: "Desculpe, não entendi. Posso confirmar o pedido?"
+        resposta = no_resumo.responder(fala)
+        assert resposta.startswith("Seu pedido ficou assim: " + trecho)
+        assert no_resumo.etapa == "confirmando_pedido"
+        assert llama.chamadas == []
+
+    def test_quanto_ficou_rele_o_resumo_sem_sair(self, no_resumo):
+        resposta = no_resumo.responder("quanto ficou?")
+        assert resposta.startswith("Seu pedido ficou assim:") and resposta.endswith("Posso confirmar?")
+        assert no_resumo.etapa == "confirmando_pedido"
+
+    def test_tirar_o_ultimo_item_avisa_que_esvaziou(self, no_resumo):
+        assert no_resumo.responder("tira a calabresa") == "Seu pedido está vazio. O que vai querer?"
+        assert no_resumo.ultimo_pedido_id is None
+
+
+class TestEsqueciDePedir:
+    @pytest.mark.parametrize("fala", ["esqueci, quero uma coca lata também", "faltou uma coca lata"])
+    def test_anota_o_item(self, ana_identificada, llama, fala):
+        # antes: "Não entendi" e "Não temos coca tambem no cardápio"
+        ana_identificada.responder("uma calabresa grande")
+        assert ana_identificada.responder(fala) == "Anotei 1 Coca-Cola Lata. Quer algo mais?"
+        assert llama.chamadas == []
+
+
 class TestFalaCurta:
     @pytest.mark.parametrize("fala, resposta", [
         ("tá", "Quer algo mais?"), ("é", "Quer algo mais?"), ("entendi", "Quer algo mais?"),
@@ -2530,7 +2586,9 @@ class TestPerguntaDoTotal:
     def test_total_perguntado_na_confirmacao_nao_grava(self, ana_identificada, db):
         antes = _pedidos_da(db, ana_identificada.cliente_id)
         ana_identificada.responder("uma calabresa grande no pix, é só isso")
-        assert "subtotal de 64 reais e 90 centavos" in ana_identificada.responder("quanto ficou mesmo?")
+        # o resumo traz o total e a pergunta "Posso confirmar?" continua valendo
+        assert "Total de 64 reais e 90 centavos" in ana_identificada.responder("quanto ficou mesmo?")
+        assert ana_identificada.etapa == "confirmando_pedido"
         assert _pedidos_da(db, ana_identificada.cliente_id) == antes
 
 
