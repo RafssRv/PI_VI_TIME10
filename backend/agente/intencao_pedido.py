@@ -54,6 +54,12 @@ VERBOS_DE_ADICIONAR = (r"adicione|adicionar|adiciona|acrescente|acrescentar|acre
 VERBOS_DE_REMOVER = (r"tire|tira|tirar|retire|retira|retirar|remova|remover|remove|exclua|excluir|exclui|"
                      r"cancele|cancelar|cancela|esquece|esqueca|esquecer")
 # "pode ser sem cebola", "com bastante orégano, por favor": observação dita sem o produto
+# "a pizza", "o refri": o tipo do item no lugar do nome, e a parte da categoria que identifica o tipo.
+# "a pizza de calabresa" já é nome do cardápio, então o "de" logo depois impede a troca.
+TIPOS_DE_ITEM = {"pizza": "pizza", "bebida": "bebida", "refri": "bebida", "refrigerante": "bebida",
+                 "sobremesa": "sobremesa"}
+APELIDO_DO_ITEM = re.compile(r"\b(a|o|as|os|da|do|das|dos|na|no|nas|nos)\s+(pizzas?|bebidas?|refris?|refrigerantes?|"
+                             r"sobremesas?)\b(?!\s+(?:de|da|do)\b)", re.IGNORECASE)
 OBSERVACAO_SOLTA = re.compile(r"(?:(?:pode ser|quero|queria|e|ah|ent[aã]o)\s+)?((?:sem|com)\s+.+?)(?:,?\s*por favor)?",
                               re.IGNORECASE)
 # "tira a cebola", "não coloca cebola na calabresa": o ingrediente, e o produto se for dito
@@ -419,6 +425,18 @@ def cardapio_completo(texto):
                 re.search(r"\b(?:todos|todas)\b.*\b(?:produtos|opcoes|precos)\b", normal))
 
 
+def _apelido_do_item(texto, produtos, atual):
+    """"a pizza", "o refri": com um só item daquele tipo no pedido, o apelido vira o nome dele."""
+    categoria = {p.nome: _normalizar(p.categoria or "") for p in produtos}
+
+    def trocar(achado):
+        tipo = TIPOS_DE_ITEM[_normalizar(achado[2]).removesuffix("s")]
+        nomes = {i["produto"] for i in atual if tipo in categoria.get(i["produto"], "")}
+        return "{} {}".format(achado[1], nomes.pop()) if len(nomes) == 1 else achado[0]
+
+    return APELIDO_DO_ITEM.sub(trocar, texto)
+
+
 def _observacao_solta(texto, produtos, atual):
     """
     "sem cebola", "tira a cebola", "não coloca cebola na calabresa": a observação sem o produto (ou com
@@ -434,7 +452,8 @@ def _observacao_solta(texto, produtos, atual):
         observacao, dono = "sem " + tira[1], tira[2]
     else:
         return texto, None
-    if mencoes(observacao, produtos)[1] or (dono and not mencoes(dono, produtos)[1]):
+    if (mencoes(observacao, produtos)[1] or (dono and not mencoes(dono, produtos)[1])
+            or set(_normalizar(observacao).split()) & set(TIPOS_DE_ITEM)):
         return texto, None  # "sem a coca", "tira a coca" e "da casa" não são observação de item
     if dono:
         nomes = {p.nome for _, _, ps in mencoes(dono, produtos)[1] for p in ps}
@@ -457,7 +476,8 @@ def _observacao_solta(texto, produtos, atual):
 def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabulario=TAMANHOS_BASE):
     """Retorna (rascunho, pendência de campo, evidências) sem efeitos externos."""
     texto = _numero_do_nome(texto)
-    muda = MUDA_A_QUANTIDADE.fullmatch(_normalizar(texto).strip(" .,!?"))
+    texto = _apelido_do_item(texto, produtos, atual)
+    muda =MUDA_A_QUANTIDADE.fullmatch(_normalizar(texto).strip(" .,!?"))
     if muda:
         # "altere a coca para duas" vira "altere duas coca", que o caminho de correção já entende
         verbo, citado, numero = muda.groups()

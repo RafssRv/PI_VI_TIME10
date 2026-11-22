@@ -2167,6 +2167,32 @@ class TestObservacaoSemProduto:
         assert ana_identificada.carrinho[0]["observacao"] == "com cebola"
 
 
+class TestApelidoDoItem:
+    @pytest.mark.parametrize("fala, resposta, itens", [
+        ("a pizza sem cebola", "Ajustei para 1 Pizza de Calabresa grande (sem cebola). Quer algo mais?",
+         [("Pizza de Calabresa", 1, "grande"), ("Coca-Cola", 1, "Lata")]),
+        ("a pizza é média", "Certo, 1 Pizza de Calabresa média. Quer algo mais?",
+         [("Pizza de Calabresa", 1, "média"), ("Coca-Cola", 1, "Lata")]),
+        ("tira a pizza", "Tirei 1 Pizza de Calabresa grande. Quer algo mais?", [("Coca-Cola", 1, "Lata")]),
+        ("tira a bebida", "Tirei 1 Coca-Cola Lata. Quer algo mais?", [("Pizza de Calabresa", 1, "grande")]),
+        ("o refri pode ser de 2 litros", "Certo, 1 Coca-Cola 2 Litros. Quer algo mais?",
+         [("Pizza de Calabresa", 1, "grande"), ("Coca-Cola", 1, "2 Litros")]),
+        ("muda a pizza pra duas", "Ajustei para 2 Pizza de Calabresa grande. Quer algo mais?",
+         [("Pizza de Calabresa", 2, "grande"), ("Coca-Cola", 1, "Lata")]),
+    ])
+    def test_o_tipo_aponta_o_unico_item_dele(self, ana_identificada, llama, fala, resposta, itens):
+        # antes: "Claro! Qual sabor você quer?" e "tira a bebida" virava observação
+        ana_identificada.responder("uma calabresa grande e uma coca lata")
+        assert ana_identificada.responder(fala) == resposta
+        assert _itens(ana_identificada) == itens
+        assert llama.chamadas == []
+
+    def test_duas_pizzas_continua_perguntando(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande e uma mussarela grande")
+        assert ana_identificada.responder("a pizza sem cebola") == "Claro! Qual sabor você quer?"
+        assert all(i["observacao"] is None for i in ana_identificada.carrinho)
+
+
 class TestJeitosDeTirar:
     @pytest.mark.parametrize("fala", ["esquece a coca", "não quero mais a coca", "não coloca coca não",
                                       "muda a coca pra zero"])
