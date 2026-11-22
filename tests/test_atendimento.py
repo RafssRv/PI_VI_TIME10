@@ -78,6 +78,14 @@ class TestEntendeAFala:
     def test_cpf_por_extenso(self):
         assert extrair_digitos("um um um dois dois dois tres tres tres nove meia") == CPF_NOVO
 
+    @pytest.mark.parametrize("fala, digitos", [
+        ("dezenove nove nove oito um dois quatro quatro sete sete", "19998124477"),
+        ("dezenove, noventa e nove, oitocentos", "1999"),
+        ("vinte e um nove nove", "2199"),
+    ])
+    def test_telefone_com_dezenas(self, fala, digitos):
+        assert extrair_digitos(fala) == digitos
+
     def test_nao_ganha_de_quero(self):
         assert sim_ou_nao("não quero não") is False
 
@@ -158,7 +166,8 @@ class TestCadastro:
         _cadastrar_ate_confirmar(atendimento)
         atendimento.responder("não, o nome está errado")
         assert atendimento.etapa == "aguardando_nome"
-        assert atendimento.cadastro == {"cpf": CPF_NOVO}
+        # só o nome é refeito: telefone e endereço continuam, e nada foi gravado
+        assert atendimento.cadastro["telefone"] == "19998124477"
         assert repositorio.buscar_cliente_por_cpf(db, CPF_NOVO) is None
 
     def test_telefone_e_opcional(self, atendimento, db):
@@ -2369,6 +2378,74 @@ class TestEsqueciDePedir:
         ana_identificada.responder("uma calabresa grande")
         assert ana_identificada.responder(fala) == "Anotei 1 Coca-Cola Lata. Quer algo mais?"
         assert llama.chamadas == []
+
+
+class TestEtapaDoCpf:
+    def test_pedido_antes_do_cpf_e_anotado_depois(self, atendimento, cpf_da_ana, llama):
+        # antes: "Não entendi o CPF" e o pedido se perdia
+        atendimento.saudacao()
+        resposta = atendimento.responder("quero uma calabresa grande")
+        assert resposta == "Já anoto o seu pedido! Antes, me diga o seu CPF, por favor."
+        assert atendimento.responder(cpf_da_ana) == "Oi, Ana! Anotei 1 Pizza de Calabresa grande. Quer algo mais?"
+        assert _itens(atendimento) == [("Pizza de Calabresa", 1, "grande")]
+
+    def test_pedido_antes_do_cadastro_novo(self, atendimento):
+        atendimento.saudacao()
+        atendimento.responder("quero uma calabresa grande")
+        assert _cadastrar_ate_confirmar(atendimento).startswith("Vou confirmar:")
+        assert atendimento.responder("sim") == ("Pronto, João, sua conta foi criada! "
+                                                "Anotei 1 Pizza de Calabresa grande. Quer algo mais?")
+
+    def test_nao_tem_cadastro_pede_o_cpf_pra_criar(self, atendimento):
+        atendimento.saudacao()
+        resposta = atendimento.responder("não tenho cadastro")
+        assert resposta == "Sem problemas, eu crio a sua conta agora. Qual é o seu CPF?"
+        assert atendimento.etapa == "aguardando_cpf"
+
+    def test_nao_sabe_o_cpf_segue_sem_conta(self, atendimento):
+        atendimento.saudacao()
+        assert atendimento.responder("não sei meu cpf").startswith("Tudo bem. Posso tirar dúvidas")
+        assert atendimento.etapa == "sem_cadastro"
+
+
+class TestCorrigeOCadastro:
+    @pytest.fixture
+    def na_confirmacao(self, atendimento):
+        assert _cadastrar_ate_confirmar(atendimento).startswith("Vou confirmar:")
+        return atendimento
+
+    def test_telefone_errado_pergunta_so_o_telefone(self, na_confirmacao):
+        # antes: recomeçava pelo nome, e o telefone dito depois virava "Não entendi o seu nome"
+        assert na_confirmacao.responder("não, o telefone está errado") == "Qual é o telefone certo, com DDD?"
+        resposta = na_confirmacao.responder("19 99812 4488")
+        assert resposta == ("Vou confirmar: nome João da Silva, telefone (19) 99812-4488, "
+                            "endereço Rua das Palmeiras, 120, Centro. Está tudo certo?")
+
+    @pytest.mark.parametrize("fala, campo, valor", [
+        ("o nome é João Pereira", "nome", "João Pereira"),
+        ("o telefone certo é 19 98888 7777", "telefone", "19988887777"),
+        ("não, a rua é rua das flores 10", "endereco", "rua das flores 10"),
+    ])
+    def test_dado_novo_na_mesma_fala(self, na_confirmacao, fala, campo, valor):
+        # "o telefone certo é..." criava a conta com o telefone antigo: o "certo" contava como sim
+        assert na_confirmacao.responder(fala).startswith("Vou confirmar:")
+        assert na_confirmacao.cadastro[campo] == valor
+        assert na_confirmacao.etapa == "confirmando_cadastro"
+
+    def test_nao_pergunta_o_que_esta_errado(self, na_confirmacao):
+        resposta = na_confirmacao.responder("não")
+        assert resposta == "Sem problemas. O que está errado: o nome, o telefone ou o endereço?"
+        assert na_confirmacao.responder("o endereço") == "Qual é o endereço certo?"
+        assert na_confirmacao.responder("rua das flores 10, centro").startswith("Vou confirmar:")
+        assert na_confirmacao.cadastro["endereco"] == "rua das flores 10, centro"
+
+    def test_tudo_errado_recomeca(self, na_confirmacao):
+        assert na_confirmacao.responder("tá tudo errado").endswith("Qual é o seu nome completo?")
+
+    def test_nome_com_artigo(self, atendimento):
+        atendimento.responder("meu cpf é " + CPF_NOVO)
+        atendimento.responder("sim")
+        assert atendimento.responder("é o João Pedro") == "Prazer, João! Qual é o seu telefone com DDD?"
 
 
 class TestFalaCurta:

@@ -89,6 +89,19 @@ QUER_MUDAR = re.compile(r"(?:nao\s+)?(?:(?:espera|pera|calma)\s+)?(?:(?:eu\s+)?(
                         r"(?:mudar|alterar|trocar|corrigir|mexer)(?:\s+(?:uma coisa|uma coisinha|algo|o pedido|"
                         r"umas coisas|um item|uma parte))?|nao(?:\s+quero)?|nao\s+(?:espera|pera|calma)|espera|pera|"
                         r"nao\s+(?:confirma|confirme|pode confirmar|precisa confirmar|e isso|esta certo|ta certo)")
+# etapa do CPF: quem ainda não tem conta e quem não sabe o CPF
+NAO_TEM_CADASTRO = re.compile(r"\b(?:nao tenho (?:cadastro|conta)|primeira vez|nunca pedi|sou (?:novo|nova)|"
+                              r"cliente (?:novo|nova)|nao sou cadastrad[oa])\b")
+NAO_SABE_CPF = re.compile(r"\bnao (?:sei|lembro|tenho aqui|to com|estou com)\b.*\bcpf\b|\besqueci (?:o|meu) cpf\b")
+# confirmação do cadastro: qual campo a pessoa disse que está errado
+CAMPOS_DO_CADASTRO = [("telefone", re.compile(r"\b(?:telefone|celular|fone|whatsapp|zap)\b")),
+                      ("endereco", re.compile(r"\b(?:endereco|rua|avenida|bairro|apartamento|apto)\b")),
+                      ("nome", re.compile(r"\bnome\b"))]
+CAMPO_COM_VALOR = re.compile(r"\b(?:nome|telefone|celular|fone|whatsapp|zap|endereco|rua)\b"
+                             r"(?:\s+(?:certo|correto|completo))?\s+(?:e|eh|seria|fica)\s+\S")
+DADO_ERRADO = re.compile(r"\b(?:errad[oa]|corrig\w*|mud\w*|troc\w*|alter\w*|na verdade)\b")
+VALOR_DO_CAMPO = re.compile(r"^.*?\b(?:nome|telefone|celular|fone|whatsapp|zap|endere[cç]o)\b"
+                            r"(?:\s+(?:certo|correto|completo))?(?:\s+(?:[eé]|seria|fica))?\s*", re.IGNORECASE)
 DEIXA_PRA_LA = {"esquece", "esquece isso", "esquece entao", "deixa pra la", "deixa quieto", "nao precisa",
                 "nao precisa mais", "deixa"}
 SO_CONCORDA = {"ta", "e", "entendi", "sei", "ah", "ah ta", "ta ok", "blz", "ta entendi", "ah entendi", "ok entendi"}
@@ -269,6 +282,10 @@ class Atendimento:
         # "pode repetir?" devolve isto sem mexer no pedido
         self._ultima_resposta = None
         self._fala_da_troca = None
+        # "quero uma calabresa" dito antes do CPF: anotado logo depois da identificacao
+        self._pedido_guardado = None
+        # refazendo um campo do cadastro: depois dele volta direto pra confirmacao
+        self._corrigindo_cadastro = False
         self._limpar_pedido()
 
     def _limpar_pedido(self):
@@ -425,6 +442,11 @@ class Atendimento:
         self.etapa = "aguardando_cpf"
         if RECUSA_DE_CPF.search(_normalizar(texto)):
             return self._seguir_sem_conta("Tudo bem, sem problemas.")
+        # "quero uma calabresa": o "uma" vira um dígito, mas ninguém dita CPF com menos de três
+        if len(extrair_cpf(texto)) < 3 and not self._cpf_parcial:
+            sem_cpf = self._fala_sem_cpf(texto)
+            if sem_cpf:
+                return sem_cpf
 
         digitos = self._cpf_parcial + extrair_cpf(texto)
         # responder "oi" a saudacao nao eh errar o cpf
@@ -454,11 +476,33 @@ class Atendimento:
 
         if cliente:
             self._identificar(cliente.id, cliente.nome, cliente.endereco, cliente.telefone)
-            return "Oi, {}! Que bom te ver de novo. O que vai querer hoje?".format(self._primeiro_nome())
+            return self._depois_de_identificar("Oi, {}!".format(self._primeiro_nome()),
+                                               "Que bom te ver de novo. O que vai querer hoje?")
 
         self.cadastro = {"cpf": digitos}
         self.etapa = "oferecendo_cadastro"
         return "Não encontrei cadastro com esse CPF. Quer criar agora? É rapidinho."
+
+    def _fala_sem_cpf(self, texto):
+        """"não tenho cadastro", "não sei meu CPF", "quero uma calabresa": falas sem CPF que têm resposta."""
+        normalizado = _normalizar(texto)
+        if NAO_TEM_CADASTRO.search(normalizado):
+            return "Sem problemas, eu crio a sua conta agora. Qual é o seu CPF?"
+        if NAO_SABE_CPF.search(normalizado):
+            return self._seguir_sem_conta("Tudo bem.")
+        db = self._sessao()
+        try:
+            pediu = mencoes(texto, repositorio.listar_cardapio(db))[1]
+        finally:
+            db.close()
+        if pediu and not eh_consulta(texto):
+            self._pedido_guardado = texto
+            return "Já anoto o seu pedido! Antes, me diga o seu CPF, por favor."
+        return None
+
+    def _depois_de_identificar(self, inicio, seguir):
+        guardado, self._pedido_guardado = self._pedido_guardado, None
+        return "{} {}".format(inicio, self._montar_pedido(guardado) if guardado else seguir)
 
     def _cpf_nao_entendido(self, frase):
         self._erros_de_cpf += 1
@@ -471,6 +515,8 @@ class Atendimento:
         self.cadastro = {}
         self._cpf_parcial = ""
         self._erros_de_cpf = 0
+        self._pedido_guardado = None
+        self._corrigindo_cadastro = False
         self.etapa = "sem_cadastro"
         return inicio + " Posso tirar dúvidas sobre o cardápio. Para fazer um pedido, diga que quer informar o CPF."
 
@@ -523,6 +569,8 @@ class Atendimento:
         if not nome or (sim_ou_nao(texto) is not None and len(nome.split()) <= 2):
             return "Não entendi o seu nome. Pode repetir, por favor?"
         self.cadastro["nome"] = nome
+        if self._corrigindo_cadastro:
+            return self._confirmar_cadastro()
         self.etapa = "aguardando_telefone"
         return "Prazer, {}! Qual é o seu telefone com DDD?".format(nome.split()[0])
 
@@ -537,6 +585,8 @@ class Atendimento:
             self.cadastro["telefone"] = digitos
         else:
             return "Não consegui entender o telefone. Pode falar o DDD e o número, por favor?"
+        if self._corrigindo_cadastro:
+            return self._confirmar_cadastro()
         self.etapa = "aguardando_endereco"
         return "E qual é o endereço para entrega?"
 
@@ -549,25 +599,60 @@ class Atendimento:
         if not endereco:
             return "Não entendi o endereço. Pode falar a rua, o número e o bairro?"
         self.cadastro["endereco"] = endereco
-        self.etapa = "confirmando_cadastro"
+        return self._confirmar_cadastro()
 
+    def _confirmar_cadastro(self):
+        self._corrigindo_cadastro = False
+        self.etapa = "confirmando_cadastro"
         partes = ["nome {}".format(self.cadastro["nome"])]
         if self.cadastro.get("telefone"):
             partes.append("telefone {}".format(formatar_telefone(self.cadastro["telefone"])))
-        partes.append("endereço {}".format(endereco))
+        partes.append("endereço {}".format(self.cadastro["endereco"]))
         return "Vou confirmar: {}. Está tudo certo?".format(", ".join(partes))
+
+    def _corrigir_campo_do_cadastro(self, campo, texto):
+        """"o nome é Maria Santos" troca na hora; "o telefone está errado" pergunta só o telefone."""
+        resto = VALOR_DO_CAMPO.sub("", texto, count=1)
+        resto = re.sub(r"^(?:(?:n[aã]o|sim|na verdade)[\s,]+)*(?:[eé]\s+)?", "", resto, flags=re.IGNORECASE)
+        # "a rua é rua das flores 10": só o que vem depois do "é"
+        resto = re.sub(r"^(?:a\s+)?(?:rua|avenida)\s+(?:cert[ao]\s+|corret[ao]\s+)?[eé]\s+", "", resto,
+                       flags=re.IGNORECASE)
+        sem_valor = not resto.strip(" .,!?") or DADO_ERRADO.search(_normalizar(resto))
+        if not sem_valor:
+            if campo == "telefone" and len(extrair_digitos(resto)) in (10, 11):
+                self.cadastro["telefone"] = extrair_digitos(resto)
+                return self._confirmar_cadastro()
+            if campo == "nome" and extrair_nome(resto) and sim_ou_nao(resto) is None:
+                self.cadastro["nome"] = extrair_nome(resto)
+                return self._confirmar_cadastro()
+            if campo == "endereco" and extrair_endereco(resto) and re.search(r"\d", resto):
+                self.cadastro["endereco"] = extrair_endereco(resto)
+                return self._confirmar_cadastro()
+        self._corrigindo_cadastro = True
+        self.etapa = {"nome": "aguardando_nome", "telefone": "aguardando_telefone",
+                      "endereco": "aguardando_endereco"}[campo]
+        return {"nome": "Qual é o nome certo?", "telefone": "Qual é o telefone certo, com DDD?",
+                "endereco": "Qual é o endereço certo?"}[campo]
 
     def _receber_confirmacao(self, texto):
         if self._desistiu_do_cadastro(texto):
             return self._seguir_sem_conta("Tudo bem, cancelei o cadastro.")
+        normalizado = _normalizar(texto)
         resposta = sim_ou_nao(texto)
-        if resposta is None:
-            return "Os dados estão certos? Responda sim ou não."
-        if resposta is False:
+        errado = DADO_ERRADO.search(normalizado)
+        if re.search(r"\btudo\b", normalizado) and (resposta is False or errado):
             # o cpf ja foi conferido, entao refaz so o resto
             self.cadastro = {"cpf": self.cadastro["cpf"]}
             self.etapa = "aguardando_nome"
             return "Sem problemas, vamos de novo. Qual é o seu nome completo?"
+        campo = next((nome for nome, padrao in CAMPOS_DO_CADASTRO if padrao.search(normalizado)), None)
+        # "o telefone certo é 19...": o "certo" não é sim, é o dado novo chegando
+        if campo and (resposta is not True or errado or CAMPO_COM_VALOR.search(normalizado)):
+            return self._corrigir_campo_do_cadastro(campo, texto)
+        if resposta is None:
+            return "Os dados estão certos? Responda sim ou não."
+        if resposta is False:
+            return "Sem problemas. O que está errado: o nome, o telefone ou o endereço?"
 
         db = self._sessao()
         try:
@@ -594,8 +679,8 @@ class Atendimento:
 
         self.cadastro = {}
         self._identificar(cliente_id, nome, endereco, telefone)
-        return "Pronto, {}, sua conta foi criada! O que vai querer hoje?".format(
-            self._primeiro_nome())
+        return self._depois_de_identificar("Pronto, {}, sua conta foi criada!".format(self._primeiro_nome()),
+                                           "O que vai querer hoje?")
 
     def _identificar(self, cliente_id, nome, endereco, telefone=None):
         self.cliente_id = cliente_id

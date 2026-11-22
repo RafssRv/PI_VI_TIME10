@@ -24,6 +24,12 @@ NUMEROS_FALADOS = {
     "nove": "9",
 }
 
+DEZENAS_FALADAS = {
+    "dez": "10", "onze": "11", "doze": "12", "treze": "13", "quatorze": "14", "catorze": "14", "quinze": "15",
+    "dezesseis": "16", "dezessete": "17", "dezoito": "18", "dezenove": "19", "vinte": "20", "trinta": "30",
+    "quarenta": "40", "cinquenta": "50", "sessenta": "60", "setenta": "70", "oitenta": "80", "noventa": "90",
+}
+
 PALAVRAS_DE_NAO = {"nao", "dispenso", "negativo", "nunca"}
 PALAVRAS_DE_SIM = {
     "sim", "quero", "claro", "pode", "ok", "okay", "isso", "bora", "aceito", "gostaria",
@@ -34,7 +40,7 @@ PALAVRAS_DE_SIM = {
 # o que a pessoa fala antes do dado em si: "meu nome e joao", "moro na rua x"
 PREFIXO_NOME = re.compile(
     r"^\s*(?:o\s+)?(?:meu\s+nome\s+(?:completo\s+)?(?:é|e)|(?:eu\s+)?me\s+chamo|"
-    r"(?:eu\s+)?sou\s+(?:o|a)?|é)\s+",
+    r"(?:eu\s+)?sou\s+(?:o|a)?|(?:aqui\s+)?é(?:\s+(?:o|a)(?=\s))?)\s+",
     re.IGNORECASE,
 )
 PREFIXO_ENDERECO = re.compile(
@@ -106,11 +112,20 @@ def _nome_na_troca(texto):
 def extrair_digitos(texto):
     """junta todos os digitos da fala, escritos com numero ou por extenso."""
     digitos = []
-    for palavra in _normalizar(texto).split():
+    palavras = _normalizar(texto).split()
+    for indice, palavra in enumerate(palavras):
         if palavra.isdigit():
             digitos.append(palavra)
         elif palavra in NUMEROS_FALADOS:
-            digitos.append(NUMEROS_FALADOS[palavra])
+            # "vinte e um": a unidade toma o lugar do zero da dezena
+            if (indice >= 2 and palavras[indice - 1] == "e" and palavras[indice - 2] in DEZENAS_FALADAS
+                    and DEZENAS_FALADAS[palavras[indice - 2]].endswith("0") and digitos):
+                digitos[-1] = digitos[-1][0] + NUMEROS_FALADOS[palavra]
+            else:
+                digitos.append(NUMEROS_FALADOS[palavra])
+        elif palavra in DEZENAS_FALADAS:
+            # telefone ditado em dezenas: "dezenove, nove nove..."
+            digitos.append(DEZENAS_FALADAS[palavra])
     return "".join(digitos)
 
 
