@@ -662,7 +662,10 @@ class Atendimento:
         muda_para = MUDA_PARA.search(normalizado)
         cardapio = repositorio.listar_cardapio(db)
         # "muda a calabresa pra mussarela" ou "muda a calabresa pra pequena": produto antes, produto ou tamanho depois
-        pede_troca = bool(PEDIDO_DE_TROCA.search(normalizado) or (
+        sem_tamanho, tamanhos_ditos = separar_tamanhos(texto, self._vocabulario)
+        # "troca pra média" sem citar produto muda só o tamanho: quem resolve é o interpretar
+        so_tamanho = bool(tamanhos_ditos) and not mencoes(sem_tamanho, cardapio)[1]
+        pede_troca = not so_tamanho and bool(PEDIDO_DE_TROCA.search(normalizado) or (
             muda_para and mencoes(muda_para[1], cardapio)[1]
             and (mencoes(muda_para[2], cardapio)[1] or separar_tamanhos(muda_para[2], self._vocabulario)[1])))
         if self._troca_pendente:
@@ -948,6 +951,12 @@ class Atendimento:
             return "Qual o tamanho {}: {}".format(_da(produto), self._opcoes(produto))
         if campo == "intencao":
             return "Não entendi. Pode repetir o que você quer?"
+        if campo == "qual_muda":
+            tamanho = duvida["tamanho"].lower()
+            if not duvida["itens"]:
+                return "Nenhum item do seu pedido tem o tamanho {}. Quer algo mais?".format(tamanho)
+            return "Qual item muda para {}? Diga, por exemplo: {} é {}.".format(
+                tamanho, _com_artigo(duvida["itens"][0]).lower(), tamanho)
         candidatos = duvida.get("candidatos", [])
         if duvida.get("nao_encontrado"):
             # frase longa nao eh nome de produto: repetir ela de volta soa como erro de maquina

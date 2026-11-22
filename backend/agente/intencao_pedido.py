@@ -65,6 +65,11 @@ GRUPO_DO_TAMANHO = {"pequena": "pizza", "média": "pizza", "grande": "pizza",
 ENDERECO_NA_FALA = re.compile(r"\b(?:rua|avenida|av|travessa|alameda|estrada|rodovia)\b", re.IGNORECASE)
 # Gigante e família não existem no cardápio: o atendente avisa e pergunta de novo.
 TAMANHO_INDISPONIVEL = "indisponivel"
+# "muda pra média", "pode ser média": um verbo de mudança e só palavras de ligação em volta do tamanho
+MUDA_O_TAMANHO = {"muda", "mude", "mudar", "troca", "troque", "trocar", "altera", "altere", "alterar",
+                  "deixa", "deixe", "pode", "fica", "quero", "queria", "prefiro", "melhor"}
+LIGA_O_TAMANHO = {"ser", "na", "verdade", "entao", "ah", "o", "a", "tamanho", "pra", "para", "por", "sim",
+                  "eu", "me", "faz", "faca", "favor", "ela", "ele", "isso"}
 PEDE_MAIS_UM = re.compile(r"\b(?:mais|outra|outro|outras|outros|quero|queria|" + VERBOS_DE_ADICIONAR + r")\b")
 CORRIGIR = re.compile(r"\b(?:na verdade|so|apenas|corrija|corrigir|altere|alterar|deixe|mude)\b")
 
@@ -471,6 +476,21 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
             pendente = duvida_tamanho
             if pendente or not achados:
                 return novo, pendente, evidencias
+    falas = set(palavras)
+    if (not achados and len(soltos) == 1 and soltos[0][1] != TAMANHO_INDISPONIVEL
+            and falas & MUDA_O_TAMANHO and falas <= MUDA_O_TAMANHO | LIGA_O_TAMANHO):
+        # "muda pra média", sem citar o produto: vale pro único item do pedido que tem esse tamanho
+        tamanho = soltos[0][1]
+        alvos = [i for i in novo if any(p.nome == i["produto"] and vocabulario.serve_para(tamanho, p)
+                                        for p in produtos)]
+        if len(alvos) != 1:
+            return novo, {"campo": "qual_muda", "tamanho": tamanho,
+                          "itens": [i["produto"] for i in alvos]}, evidencias
+        alvo = alvos[0]
+        alvo["tamanho"] = tamanho
+        _juntar_iguais(novo)
+        return novo, None, [{"acao": "tamanho", "produto": alvo["produto"], "tamanho": tamanho,
+                             "quantidade": alvo["quantidade"], "observacao": alvo["observacao"], "trecho": texto}]
     if not achados and re.search(r"\b(?:dessa|desse|daquela|daquele|igual)\b", normal):
         if referencia and len([i for i in atual if i['produto'] == referencia]) == 1:
             produto = next((p for p in produtos if p.nome == referencia), None)

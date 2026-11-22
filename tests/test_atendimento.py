@@ -2070,6 +2070,36 @@ class TestQuantidadeDivididaEmTamanhos:
         assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande"), ("Pizza de Calabresa", 1, "média")]
 
 
+class TestMudaSoOTamanhoSemCitarProduto:
+    @pytest.mark.parametrize("fala", ["muda pra média", "troca pra média", "pode ser média", "quero média",
+                                      "muda o tamanho pra média"])
+    def test_muda_o_unico_item_com_tamanho(self, ana_identificada, llama, fala):
+        # antes: "Não temos muda pra no cardápio"
+        ana_identificada.responder("uma calabresa grande sem cebola e um pudim")
+        resposta = ana_identificada.responder(fala)
+        assert resposta == "Certo, 1 Pizza de Calabresa média (sem cebola). Quer algo mais?"
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "média"), ("Pudim de Leite", 1, None)]
+        assert llama.chamadas == []
+
+    def test_refrigerante_muda_de_volume(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande e uma coca lata")
+        ana_identificada.responder("muda pra 2 litros")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande"), ("Coca-Cola", 1, "2 Litros")]
+
+    def test_dois_itens_possiveis_pergunta_qual(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande e uma mussarela grande")
+        resposta = ana_identificada.responder("muda pra média")
+        assert resposta == "Qual item muda para média? Diga, por exemplo: a pizza de calabresa é média."
+        ana_identificada.responder("a calabresa é média")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "média"), ("Pizza de Mussarela", 1, "grande")]
+
+    def test_nenhum_item_com_esse_tamanho(self, ana_identificada):
+        ana_identificada.responder("uma coca lata")
+        resposta = ana_identificada.responder("muda pra grande")
+        assert resposta == "Nenhum item do seu pedido tem o tamanho grande. Quer algo mais?"
+        assert _itens(ana_identificada) == [("Coca-Cola", 1, "Lata")]
+
+
 class TestFalaSemPedido:
     @pytest.mark.parametrize("fala, resposta", [
         ("oi", "Olá! O que vai querer?"),
