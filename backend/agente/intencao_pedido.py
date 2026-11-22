@@ -53,6 +53,13 @@ VERBOS_DE_ADICIONAR = (r"adicione|adicionar|adiciona|acrescente|acrescentar|acre
                        r"coloque|colocar|coloca|bote|botar|bota|ponha|poe|anote|anotar|anota")
 VERBOS_DE_REMOVER = (r"tire|tira|tirar|retire|retira|retirar|remova|remover|remove|exclua|excluir|exclui|"
                      r"cancele|cancelar|cancela|esquece|esqueca|esquecer")
+# "pode ser sem cebola", "com bastante orégano, por favor": observação dita sem o produto
+OBSERVACAO_SOLTA = re.compile(r"(?:(?:pode ser|quero|queria|e|ah|ent[aã]o)\s+)?((?:sem|com)\s+.+?)(?:,?\s*por favor)?",
+                              re.IGNORECASE)
+# "tira a cebola", "não coloca cebola na calabresa": o ingrediente, e o produto se for dito
+TIRA_INGREDIENTE = re.compile(r"(?:tira|tire|retira|retire|n[aã]o\s+(?:coloca|coloque|bota|bote|p[oõ]e|ponha))\s+"
+                              r"(?:(?:a|o|as|os)\s+)?(.+?)(?:\s+(?:da|do|na|no)\s+(.+?))?(?:,?\s*por favor)?",
+                              re.IGNORECASE)
 NAO_COLOCA = re.compile(r"nao\s+(?:" + VERBOS_DE_ADICIONAR + r"|manda|mande)\s+(.+?)(?:\s+nao)?")
 REMOVER = re.compile(r"\b(?:" + VERBOS_DE_REMOVER + r"|nao quero)\b")
 # Tamanho dito na fala: de pizza ("grande") ou de refrigerante ("lata", "de 600", "2 litros").
@@ -412,6 +419,41 @@ def cardapio_completo(texto):
                 re.search(r"\b(?:todos|todas)\b.*\b(?:produtos|opcoes|precos)\b", normal))
 
 
+def _observacao_solta(texto, produtos, atual):
+    """
+    "sem cebola", "tira a cebola", "não coloca cebola na calabresa": a observação sem o produto (ou com
+    ele no fim) vira "Pizza de Calabresa sem cebola", que o caminho de correção já entende.
+    Devolve (texto, dúvida); com mais de um item no pedido e nenhum citado, pergunta qual.
+    """
+    limpo = texto.strip(" .,!?")
+    solta = OBSERVACAO_SOLTA.fullmatch(limpo)
+    tira = TIRA_INGREDIENTE.fullmatch(limpo)
+    if solta:
+        observacao, dono = solta[1], None
+    elif tira:
+        observacao, dono = "sem " + tira[1], tira[2]
+    else:
+        return texto, None
+    if mencoes(observacao, produtos)[1] or (dono and not mencoes(dono, produtos)[1]):
+        return texto, None  # "sem a coca", "tira a coca" e "da casa" não são observação de item
+    if dono:
+        nomes = {p.nome for _, _, ps in mencoes(dono, produtos)[1] for p in ps}
+        alvos = [i for i in atual if i["produto"] in nomes]
+        if len(nomes) == 1 and not alvos:
+            return texto, {"campo": "fora_do_pedido", "produto": nomes.pop()}
+    else:
+        if len(atual) != 1:
+            return texto, {"campo": "qual_observacao", "observacao": observacao,
+                           "itens": [i["produto"] for i in atual]}
+        alvos, dono = atual, atual[0]["produto"]
+    anterior = alvos[0]["observacao"] if len(alvos) == 1 else None
+    ingredientes = lambda obs: set(_normalizar(obs).split()) - {"sem", "com"}
+    if anterior and not ingredientes(anterior) & ingredientes(observacao):
+        # "com bastante orégano" depois de "sem cebola" soma; "com cebola" depois de "sem cebola" substitui
+        observacao = anterior + " e " + observacao
+    return "{} {}".format(dono, observacao), None
+
+
 def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabulario=TAMANHOS_BASE):
     """Retorna (rascunho, pendência de campo, evidências) sem efeitos externos."""
     texto = _numero_do_nome(texto)
@@ -437,6 +479,10 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
         if achados and set(fora) <= {"a", "o", "as", "os", "uma", "um"}:
             # "não coloca coca não": só o produto depois do verbo negado, então é tirar ele
             texto = "tira " + negado[1]
+    if atual:
+        texto, duvida = _observacao_solta(texto, produtos, atual)
+        if duvida:
+            return deepcopy(atual), duvida, []
     texto, tamanhos = separar_tamanhos(texto, vocabulario)
     normal = _normalizar(texto)
     # "Não temos X" é aviso, não pergunta aberta: não pode prender as falas seguintes.

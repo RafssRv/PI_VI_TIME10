@@ -2130,6 +2130,43 @@ class TestMudaAQuantidade:
         assert ana_identificada.responder("muda pra duas") == "Seu pedido ainda está vazio. O que vai querer?"
 
 
+class TestObservacaoSemProduto:
+    @pytest.mark.parametrize("fala, observacao", [
+        ("sem cebola", "sem cebola"), ("pode ser sem cebola", "sem cebola"), ("sem cebola, por favor", "sem cebola"),
+        ("com bastante orégano", "com bastante orégano"), ("não coloca cebola", "sem cebola"),
+        ("tira a cebola", "sem cebola"), ("não coloca cebola na calabresa", "sem cebola"),
+    ])
+    def test_vai_pro_unico_item(self, ana_identificada, llama, fala, observacao):
+        # antes: "Não temos sem cebola no cardápio"
+        ana_identificada.responder("uma calabresa grande")
+        resposta = ana_identificada.responder(fala)
+        assert resposta == "Ajustei para 1 Pizza de Calabresa grande ({}). Quer algo mais?".format(observacao)
+        assert ana_identificada.carrinho[0]["observacao"] == observacao
+        assert llama.chamadas == []
+
+    def test_dois_itens_pergunta_qual(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande e uma coca lata")
+        resposta = ana_identificada.responder("sem cebola")
+        assert resposta == "Qual item fica sem cebola? Diga, por exemplo: a pizza de calabresa sem cebola."
+        assert all(i["observacao"] is None for i in ana_identificada.carrinho)
+
+    def test_produto_fora_do_pedido(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        resposta = ana_identificada.responder("tira a cebola da mussarela")
+        assert resposta == "Pizza de Mussarela não está no seu pedido. Quer algo mais?"
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+
+    def test_soma_com_a_observacao_anterior(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande sem cebola")
+        ana_identificada.responder("com bastante orégano")
+        assert ana_identificada.carrinho[0]["observacao"] == "sem cebola e com bastante orégano"
+
+    def test_mesmo_ingrediente_substitui(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande sem cebola")
+        ana_identificada.responder("com cebola")
+        assert ana_identificada.carrinho[0]["observacao"] == "com cebola"
+
+
 class TestJeitosDeTirar:
     @pytest.mark.parametrize("fala", ["esquece a coca", "não quero mais a coca", "não coloca coca não",
                                       "muda a coca pra zero"])
@@ -2144,6 +2181,12 @@ class TestJeitosDeTirar:
         ana_identificada.responder("duas cocas lata")
         ana_identificada.responder("não quero mais uma coca")
         assert _itens(ana_identificada) == [("Coca-Cola", 1, "Lata")]
+
+    def test_tira_ingrediente_nao_tira_a_pizza(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande e uma coca lata")
+        resposta = ana_identificada.responder("tira a cebola da calabresa")
+        assert resposta == "Ajustei para 1 Pizza de Calabresa grande (sem cebola). Quer algo mais?"
+        assert len(ana_identificada.carrinho) == 2
 
     def test_nao_coloca_o_que_nao_foi_pedido(self, ana_identificada):
         ana_identificada.responder("uma calabresa grande")

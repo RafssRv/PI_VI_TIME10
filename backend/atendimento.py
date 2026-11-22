@@ -951,6 +951,9 @@ class Atendimento:
             return "Qual o tamanho {}: {}".format(_da(produto), self._opcoes(produto))
         if campo == "intencao":
             return "Não entendi. Pode repetir o que você quer?"
+        if campo == "qual_observacao":
+            return "Qual item fica {}? Diga, por exemplo: {} {}.".format(
+                duvida["observacao"], _com_artigo(duvida["itens"][0]).lower(), duvida["observacao"])
         if campo == "qual_muda":
             para, quantidade = duvida["para"], duvida.get("quantidade")
             if not duvida["itens"]:
