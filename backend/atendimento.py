@@ -53,6 +53,12 @@ SO_QUER_PEDIR = re.compile(r"(?:{} )?(?:eu )?(?:quero|queria|gostaria de|vou|pos
 PEDE_TEMPO = re.compile(r"(?:so )?(?:um|1) (?:momento|minuto|minutinho|segundo|instante)|espera(?: ai| um pouco)?|"
                         r"pera(?: ai)?|perai|calma(?: ai)?|deixa eu (?:ver|pensar)|vou (?:ver|pensar)|"
                         r"(?:to|estou) (?:vendo|pensando)")
+# "pode repetir?", "o quê?", "não ouvi": o cliente quer ouvir de novo a última fala
+PEDE_REPETIR = re.compile(
+    r"(?:(?:voce |vc )?(?:pode|poderia|podia|consegue) )?(?:repetir|repete|repita|falar de novo|fala de novo|"
+    r"dizer de novo|diz de novo|falar outra vez|fala outra vez)(?: (?:pra mim|de novo|novamente|o que disse|"
+    r"o que voce disse))?|o que|o que voce disse|o que voce falou|como|como e|como assim|hein|"
+    r"nao (?:ouvi|escutei|entendi)(?: nada| direito| o que voce disse)?|nao deu pra (?:ouvir|entender)|perdao")
 # "hmm", "tá", "entendi": não pedem nada. Não confirmam o pedido: só confirmacao_explicita autoriza gravar
 HESITACAO = re.compile(r"(?:h+m+|hu+m+|u+h*m+|e+h+|a+h*n+)(?: (?:h+m+|hu+m+|u+h*m+|e+h+|a+h*n+))*")
 SO_CONCORDA = {"ta", "e", "entendi", "sei", "ah", "ah ta", "ta ok", "blz", "ta entendi", "ah entendi", "ok entendi"}
@@ -224,6 +230,8 @@ class Atendimento:
         self._opcoes_tamanho = dict(OPCOES_DE_TAMANHO)
         self._exemplos_tamanho = dict(EXEMPLO_DE_TAMANHOS)
         self._vocabulario = TAMANHOS_BASE
+        # "pode repetir?" devolve isto sem mexer no pedido
+        self._ultima_resposta = None
         self._limpar_pedido()
 
     def _limpar_pedido(self):
@@ -261,7 +269,11 @@ class Atendimento:
             "sem_cadastro": self._conversar_com_llm,
         }
         self.turno_id += 1
-        rastrear = self.etapa in {"identificado", "confirmando_pedido", "sem_cadastro"}
+        pedido = " ".join(CORTESIA.sub("", _normalizar(texto or "")).split())
+        if self._ultima_resposta and PEDE_REPETIR.fullmatch(pedido):
+            # não ouviu: repetir não pode mudar o pedido nem tirar a chamada da etapa em que está
+            return self._ultima_resposta
+        rastrear =self.etapa in {"identificado", "confirmando_pedido", "sem_cadastro"}
         if rastrear:
             # Só o último turno fica em memória. O validador pode salvá-lo com dados fictícios.
             self.ultimo_rastro = {"sessao": self.sessao_id, "turno": self.turno_id,
@@ -269,6 +281,7 @@ class Atendimento:
                                   "transcricao": texto, "antes": deepcopy(self.carrinho)}
         try:
             resposta = etapas[self.etapa](texto)
+            self._ultima_resposta = resposta
             if rastrear:
                 self.ultimo_rastro["resposta"] = resposta
             return resposta
@@ -362,7 +375,8 @@ class Atendimento:
             self.etapa = "aguardando_cpf"
         hora = datetime.now().hour
         periodo = "bom dia" if 5 <= hora < 12 else "boa tarde" if 12 <= hora < 18 else "boa noite"
-        return "Olá, {}! Seja bem-vindo à pizzaria. {}".format(periodo, FRASE_PEDE_CPF)
+        self._ultima_resposta = "Olá, {}! Seja bem-vindo à pizzaria. {}".format(periodo, FRASE_PEDE_CPF)
+        return self._ultima_resposta
 
     def _inicio(self, texto):
         # tem gente q ja chega falando o cpf, ai nem precisa pedir

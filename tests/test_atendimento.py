@@ -2167,6 +2167,30 @@ class TestObservacaoSemProduto:
         assert ana_identificada.carrinho[0]["observacao"] == "com cebola"
 
 
+class TestPedeParaRepetir:
+    @pytest.mark.parametrize("fala", ["pode repetir?", "repete por favor", "o quê?", "como?", "não ouvi",
+                                      "não entendi", "fala de novo"])
+    def test_repete_a_ultima_fala(self, ana_identificada, llama, fala):
+        # antes: ia pro modelo ou virava "Não temos repete por favor no cardápio"
+        anterior = ana_identificada.responder("uma calabresa")
+        assert ana_identificada.responder(fala) == anterior
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, None)]
+        assert llama.chamadas == []
+
+    def test_resumo_continua_esperando_a_confirmacao(self, ana_identificada, llama):
+        for fala in ("uma calabresa grande", "no pix"):
+            ana_identificada.responder(fala)
+        resumo = ana_identificada.responder("só isso")
+        assert ana_identificada.responder("pode repetir?") == resumo
+        assert ana_identificada.etapa == "confirmando_pedido"
+        assert llama.chamadas == []
+
+    def test_repete_o_pedido_de_cpf(self, atendimento):
+        saudacao = atendimento.saudacao()
+        assert atendimento.responder("pode repetir?") == saudacao
+        assert atendimento.etapa == "aguardando_cpf"
+
+
 class TestFalaCurta:
     @pytest.mark.parametrize("fala, resposta", [
         ("tá", "Quer algo mais?"), ("é", "Quer algo mais?"), ("entendi", "Quer algo mais?"),
