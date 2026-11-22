@@ -61,6 +61,15 @@ PEDE_REPETIR = re.compile(
     r"nao (?:ouvi|escutei|entendi)(?: nada| direito| o que voce disse)?|nao deu pra (?:ouvir|entender)|perdao")
 # "hmm", "tá", "entendi": não pedem nada. Não confirmam o pedido: só confirmacao_explicita autoriza gravar
 HESITACAO = re.compile(r"(?:h+m+|hu+m+|u+h*m+|e+h+|a+h*n+)(?: (?:h+m+|hu+m+|u+h*m+|e+h+|a+h*n+))*")
+# "tem cerveja?", "vocês vendem vinho?": o que vem depois do verbo, até três palavras
+TEM_FORA_DO_CARDAPIO = re.compile(r"(?:(?:voces|vcs|vc|voce|ai|e)\s+)*(?:tem|teria|vende|vendem|servem|trabalham com)\s+"
+                                  r"(?:(?:a|o|um|uma|algum|alguma)\s+)?(\w+(?:\s+\w+){0,2}?)(?:\s+(?:ai|ainda|hoje|tambem))?")
+# serviço e pagamento não são item do cardápio: "tem entrega?" não é "não temos entrega no cardápio"
+NAO_E_ITEM = {"entrega", "delivery", "troco", "maquininha", "cartao", "pix", "promocao", "promocoes", "desconto",
+              "taxa", "frete", "horario", "estacionamento", "opcao", "opcoes", "sabor", "sabores", "tamanho",
+              "tamanhos", "cardapio", "menu", "como", "que", "algo", "mais", "vaga", "atendente", "alguem"}
+DEIXA_PRA_LA = {"esquece", "esquece isso", "esquece entao", "deixa pra la", "deixa quieto", "nao precisa",
+                "nao precisa mais", "deixa"}
 SO_CONCORDA = {"ta", "e", "entendi", "sei", "ah", "ah ta", "ta ok", "blz", "ta entendi", "ah entendi", "ok entendi"}
 SINONIMOS_DE_CATEGORIA = {"refrigerante": "bebida", "refri": "bebida", "suco": "bebida", "agua": "bebida"}
 ENDERECO_NA_FALA = re.compile(r"\b(?:rua|avenida|av|travessa|alameda|estrada|rodovia)\b.*", re.IGNORECASE)
@@ -164,6 +173,12 @@ def _uma(tamanho):
     return ("uma de " if tamanho[:1].isdigit() else "uma ") + tamanho
 
 
+def _categorias_faladas(produtos):
+    """"pizzas salgadas, pizzas doces, bebidas...": as categorias do cardápio, pizza primeiro."""
+    categorias = sorted({p.categoria for p in produtos}, key=lambda c: (not c.startswith("pizza"), c))
+    return [" ".join(palavra + "s" for palavra in c.split()) for c in categorias]
+
+
 def _com_tamanho(nome, tamanho):
     # "Pizza de Calabresa grande": o tamanho vai depois do nome, como o cliente fala
     return "{} {}".format(nome, tamanho) if tamanho else nome
@@ -232,6 +247,7 @@ class Atendimento:
         self._vocabulario = TAMANHOS_BASE
         # "pode repetir?" devolve isto sem mexer no pedido
         self._ultima_resposta = None
+        self._fala_da_troca = None
         self._limpar_pedido()
 
     def _limpar_pedido(self):
@@ -709,6 +725,7 @@ class Atendimento:
             self._token_resumo = None
             if self._controle:
                 self._controle.definir_pendencia(self._pendencia)
+            self._fala_da_troca = None
             problemas = self._trocar_itens(db, texto)
             self._troca_pendente = bool(problemas)
             if problemas:
@@ -723,6 +740,9 @@ class Atendimento:
                 # trocou a coca por uma pizza: falta saber o tamanho dela
                 self._perguntar_tamanho_que_falta()
             fala = self._esclarecer(self._pendencia) if self._pendencia else self._continuar_pedido()
+            if self._fala_da_troca and not problemas:
+                # diz o que trocou em vez do genérico "Alteração anotada"
+                fala = "{} {}".format(self._fala_da_troca, fala.removeprefix("Alteração anotada. "))
             self.historico.extend([{"role": "user", "content": texto},
                                    {"role": "assistant", "content": fala}])
             return fala
@@ -848,14 +868,23 @@ class Atendimento:
                 (self._sugestoes or self._repetir) and sem_cortesia in RESPOSTAS_VAGAS_A_SUGESTAO):
             # "tá" depois de "quer pedir?" aceita a sugestão; sem pergunta assim, só concorda
             inicio = ""
+        elif sem_cortesia in DEIXA_PRA_LA and not self._pendencia_firme():
+            # "esquece": larga a dúvida vaga ("não entendi o produto"); pergunta de tamanho continua
+            self._largar_duvida_de_produto()
+            self._sugestoes = []
+            inicio = "Tudo bem."
         else:
             return None
         # a pergunta que estava aberta continua valendo, sem contar como fala nao entendida.
         # "nao entendi o produto" nao eh pergunta aberta: repetir depois de um "oi" soaria como bronca
+        return "{} {}".format(inicio, (self._pendencia if self._pendencia_firme() else None) or (
+            "Quer algo mais?" if self.carrinho else "O que vai querer?")).strip()
+
+    def _pendencia_firme(self):
+        """Pergunta que ainda vale repetir: tamanho, quantidade... não o "não entendi o produto"."""
         duvida = self._duvida_item or {}
         vaga = duvida.get("campo") in {"produto", "intencao", "fora_do_pedido"} and not duvida.get("candidatos")
-        return "{} {}".format(inicio, (None if vaga else self._pendencia) or (
-            "Quer algo mais?" if self.carrinho else "O que vai querer?")).strip()
+        return bool(self._pendencia) and not vaga
 
     def _quer_esvaziar(self, normalizado):
         if NAO_ESVAZIAR.search(normalizado):
@@ -973,6 +1002,8 @@ class Atendimento:
         if campo == "intencao":
             return "Não entendi. Pode repetir o que você quer?"
         if campo == "qual_observacao":
+            if not duvida["itens"]:
+                return "Seu pedido ainda está vazio. Qual produto você quer {}?".format(duvida["observacao"])
             return "Qual item fica {}? Diga, por exemplo: {} {}.".format(
                 duvida["observacao"], _com_artigo(duvida["itens"][0]).lower(), duvida["observacao"])
         if campo == "qual_item":
@@ -1077,9 +1108,7 @@ class Atendimento:
                         for t in tamanhos)
             else:
                 # ler 18 produtos em voz alta cansa: fala as categorias e deixa a pessoa escolher
-                categorias = sorted({p.categoria for p in produtos}, key=lambda c: (not c.startswith("pizza"), c))
-                nomes = [" ".join(palavra + "s" for palavra in c.split()) for c in categorias]
-                fala = "Temos {}. O que você quer saber?".format(_juntar(nomes))
+                fala = "Temos {}. O que você quer saber?".format(_juntar(_categorias_faladas(produtos)))
         elif re.search(r"\b(?:preco|precos|custa|custam|quanto)\b", normalizado) and citados:
             unicos, aviso = self._produtos_da_consulta(normalizado, palavras, citados)
             tamanhos = repositorio.listar_tamanhos(db)
@@ -1101,6 +1130,10 @@ class Atendimento:
             nomes = [p.nome for p in repositorio.listar_cardapio(db, categoria)]
             fala = ("Temos {}. Quer saber o preço de alguma opção?".format(_juntar(nomes)) if nomes
                     else "Não temos opções de {} disponíveis agora.".format(categoria))
+        elif (fora := TEM_FORA_DO_CARDAPIO.fullmatch(normalizado.strip())) and not citados and not (
+                set(fora[1].split()) & NAO_E_ITEM):
+            # "tem cerveja?": nada do cardápio depois do verbo. O modelo levava até 1 minuto e podia inventar
+            fala = "Não temos {} no cardápio. Temos {}.".format(fora[1], _juntar(_categorias_faladas(produtos)))
         else:
             mensagens = [{"role": "system", "content": self._prompt_do_pedido(
                 produtos, repositorio.listar_tamanhos(db))}] + self.historico + [
@@ -1355,6 +1388,12 @@ class Atendimento:
                                 observacao=item.observacao if so_tamanho else "")
         except ErroPedido as erro:
             return [str(erro)]
+        if so_tamanho:
+            self._fala_da_troca = "Certo, {} {}.".format(acrescentar, _com_tamanho(item.nome, novo_tamanho or None))
+        else:
+            self._fala_da_troca = "Troquei {} {} por {} {}.".format(
+                retirar, _com_tamanho(item.nome, item.tamanho or None),
+                acrescentar, _com_tamanho(produtos[0].nome, novo_tamanho or None))
         return self._atualizar_carrinho(db, [
             {"produto": i.nome, "quantidade": i.quantidade, "observacao": i.observacao,
              "tamanho": i.tamanho or None}

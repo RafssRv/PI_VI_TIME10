@@ -419,7 +419,8 @@ class TestFechaOPedido:
         pendencia = ana_identificada.responder("acrescente uma borda")
         assert "Catupiry ou Borda de Cheddar" in pendencia
         ana_identificada.responder("quero trocar")
-        assert ana_identificada.responder(ultima_fala) == pendencia
+        # a troca feita se anuncia antes da pergunta que continua aberta
+        assert ana_identificada.responder(ultima_fala).endswith(pendencia)
         assert pendencia in ana_identificada.responder("sim")
         assert ana_identificada.etapa == "identificado"
         assert _pedidos_da(db, ana_identificada.cliente_id) == antes
@@ -2027,7 +2028,8 @@ class TestJeitosDeTrocar:
         antes = _pedidos_da(db, ana_identificada.cliente_id)
         ana_identificada.responder("uma calabresa grande no pix, é só isso")
         resposta = ana_identificada.responder("não, troca a calabresa por uma mussarela")
-        assert resposta.startswith("Seu pedido ficou assim: 1 Pizza de Mussarela grande.")
+        assert resposta.startswith("Troquei 1 Pizza de Calabresa grande por 1 Pizza de Mussarela grande. "
+                                   "Seu pedido ficou assim: 1 Pizza de Mussarela grande.")
         assert ana_identificada.etapa == "confirmando_pedido"
         assert _pedidos_da(db, ana_identificada.cliente_id) == antes
         assert "confirmado" in ana_identificada.responder("sim")
@@ -2161,10 +2163,29 @@ class TestObservacaoSemProduto:
         ana_identificada.responder("com bastante orégano")
         assert ana_identificada.carrinho[0]["observacao"] == "sem cebola e com bastante orégano"
 
-    def test_mesmo_ingrediente_substitui(self, ana_identificada):
-        ana_identificada.responder("uma calabresa grande sem cebola")
-        ana_identificada.responder("com cebola")
-        assert ana_identificada.carrinho[0]["observacao"] == "com cebola"
+    @pytest.mark.parametrize("fala", ["com cebola", "pode colocar cebola"])
+    def test_com_o_ingrediente_desfaz_o_sem(self, ana_identificada, fala):
+        ana_identificada.responder("uma calabresa grande sem cebola e sem azeitona")
+        resposta = ana_identificada.responder(fala)
+        assert resposta == "Ajustei para 1 Pizza de Calabresa grande (sem azeitona). Quer algo mais?"
+        assert ana_identificada.carrinho[0]["observacao"] == "sem azeitona"
+
+    def test_sem_depois_do_com_substitui(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande com bastante cebola")
+        ana_identificada.responder("sem cebola")
+        assert ana_identificada.carrinho[0]["observacao"] == "sem cebola"
+
+    def test_pedido_vazio_pergunta_o_produto_e_a_resposta_leva_a_observacao(self, ana_identificada):
+        resposta = ana_identificada.responder("sem cebola")
+        assert resposta == "Seu pedido ainda está vazio. Qual produto você quer sem cebola?"
+        ana_identificada.responder("uma calabresa grande")
+        assert ana_identificada.carrinho[0]["observacao"] == "sem cebola"
+
+    def test_resposta_de_qual_item_leva_a_observacao(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande e uma coca lata")
+        ana_identificada.responder("sem cebola")
+        ana_identificada.responder("a calabresa")
+        assert [i["observacao"] for i in ana_identificada.carrinho] == ["sem cebola", None]
 
 
 class TestPedeParaRepetir:
@@ -2189,6 +2210,50 @@ class TestPedeParaRepetir:
         saudacao = atendimento.saudacao()
         assert atendimento.responder("pode repetir?") == saudacao
         assert atendimento.etapa == "aguardando_cpf"
+
+
+class TestRespostasSemModelo:
+    @pytest.mark.parametrize("fala, item", [("tem cerveja?", "cerveja"), ("vocês têm vinho?", "vinho"),
+                                            ("tem esfiha?", "esfiha")])
+    def test_tem_o_que_nao_esta_no_cardapio(self, ana_identificada, llama, fala, item):
+        # antes: ia pro modelo, que levava até 1 minuto e podia inventar
+        resposta = ana_identificada.responder(fala)
+        assert resposta.startswith("Não temos {} no cardápio. Temos pizzas".format(item))
+        assert "bebidas" in resposta
+        assert llama.chamadas == []
+
+    def test_tem_o_que_esta_no_cardapio_continua_igual(self, ana_identificada):
+        assert ana_identificada.responder("tem coca?").startswith("Temos, sim.")
+
+    @pytest.mark.parametrize("pedido, fala, resposta", [
+        ("uma calabresa grande", "troca a calabresa por uma mussarela",
+         "Troquei 1 Pizza de Calabresa grande por 1 Pizza de Mussarela grande. Quer algo mais?"),
+        ("uma calabresa grande", "muda a calabresa pra pequena", "Certo, 1 Pizza de Calabresa pequena. Quer algo mais?"),
+        ("duas cocas lata", "troca uma coca por um guaraná",
+         "Troquei 1 Coca-Cola Lata por 1 Guaraná Lata. Quer algo mais?"),
+        ("uma coca lata", "troca a coca por uma calabresa",
+         "Troquei 1 Coca-Cola Lata por 1 Pizza de Calabresa. Qual o tamanho da Pizza de Calabresa: "
+         "pequena, média ou grande?"),
+    ])
+    def test_troca_diz_o_que_trocou(self, ana_identificada, llama, pedido, fala, resposta):
+        # antes: "Alteração anotada. Quer algo mais?"
+        ana_identificada.responder(pedido)
+        assert ana_identificada.responder(fala) == resposta
+        assert llama.chamadas == []
+
+    @pytest.mark.parametrize("fala", ["esquece", "deixa pra lá"])
+    def test_esquece_sem_pergunta_aberta(self, ana_identificada, fala):
+        ana_identificada.responder("uma calabresa grande")
+        assert ana_identificada.responder(fala) == "Tudo bem. Quer algo mais?"
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+
+    def test_esquece_larga_o_produto_nao_entendido(self, ana_identificada):
+        ana_identificada.responder("quero um sushi")
+        assert ana_identificada.responder("esquece") == "Tudo bem. O que vai querer?"
+
+    def test_esquece_nao_larga_a_pergunta_do_tamanho(self, ana_identificada):
+        ana_identificada.responder("uma calabresa")
+        assert "Qual o tamanho" in ana_identificada.responder("esquece")
 
 
 class TestFalaCurta:

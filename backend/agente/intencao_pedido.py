@@ -66,6 +66,10 @@ OBSERVACAO_SOLTA = re.compile(r"(?:(?:pode ser|quero|queria|e|ah|ent[aã]o)\s+)?
 TIRA_INGREDIENTE = re.compile(r"(?:tira|tire|retira|retire|n[aã]o\s+(?:coloca|coloque|bota|bote|p[oõ]e|ponha))\s+"
                               r"(?:(?:a|o|as|os)\s+)?(.+?)(?:\s+(?:da|do|na|no)\s+(.+?))?(?:,?\s*por favor)?",
                               re.IGNORECASE)
+# "pode colocar cebola": só desfaz um "sem cebola" já anotado
+COLOCA_INGREDIENTE = re.compile(r"(?:pode\s+)?(?:coloca|coloque|colocar|bota|bote|botar|p[oõ]e|ponha|p[oô]r)\s+"
+                                r"(?:(?:a|o|as|os)\s+)?(.+?)(?:\s+(?:da|do|na|no)\s+(.+?))?(?:,?\s*por favor)?",
+                                re.IGNORECASE)
 NAO_COLOCA = re.compile(r"nao\s+(?:" + VERBOS_DE_ADICIONAR + r"|manda|mande)\s+(.+?)(?:\s+nao)?")
 REMOVER = re.compile(r"\b(?:" + VERBOS_DE_REMOVER + r"|nao quero)\b")
 # Tamanho dito na fala: de pizza ("grande") ou de refrigerante ("lata", "de 600", "2 litros").
@@ -457,38 +461,60 @@ def _resposta_de_qual_item(texto, produtos, atual, pendente):
 
 def _observacao_solta(texto, produtos, atual):
     """
-    "sem cebola", "tira a cebola", "não coloca cebola na calabresa": a observação sem o produto (ou com
-    ele no fim) vira "Pizza de Calabresa sem cebola", que o caminho de correção já entende.
-    Devolve (texto, dúvida); com mais de um item no pedido e nenhum citado, pergunta qual.
+    "sem cebola", "tira a cebola", "não coloca cebola na calabresa", "pode colocar cebola": a observação
+    sem o produto (ou com ele no fim) vale para o item do pedido.
+    Devolve (texto, dúvida, edição): a edição é (posição do item no pedido, observação nova) e muda o
+    item direto. Com mais de um item no pedido e nenhum citado, pergunta qual.
     """
     limpo = texto.strip(" .,!?")
     solta = OBSERVACAO_SOLTA.fullmatch(limpo)
     tira = TIRA_INGREDIENTE.fullmatch(limpo)
+    coloca = COLOCA_INGREDIENTE.fullmatch(limpo)
     if solta:
         observacao, dono = solta[1], None
     elif tira:
         observacao, dono = "sem " + tira[1], tira[2]
+    elif coloca:
+        observacao, dono = "com " + coloca[1], coloca[2]
     else:
-        return texto, None
+        return texto, None, None
     if (mencoes(observacao, produtos)[1] or (dono and not mencoes(dono, produtos)[1])
             or set(_normalizar(observacao).split()) & set(TIPOS_DE_ITEM)):
-        return texto, None  # "sem a coca", "tira a coca" e "da casa" não são observação de item
+        return texto, None, None  # "sem a coca", "tira a coca" e "da casa" não são observação de item
     if dono:
         nomes = {p.nome for _, _, ps in mencoes(dono, produtos)[1] for p in ps}
         alvos = [i for i in atual if i["produto"] in nomes]
         if len(nomes) == 1 and not alvos:
-            return texto, {"campo": "fora_do_pedido", "produto": nomes.pop()}
+            return texto, {"campo": "fora_do_pedido", "produto": nomes.pop()}, None
+    elif len(atual) != 1:
+        if coloca:
+            return texto, None, None
+        return texto, {"campo": "qual_observacao", "observacao": observacao,
+                       "itens": [i["produto"] for i in atual]}, None
     else:
-        if len(atual) != 1:
-            return texto, {"campo": "qual_observacao", "observacao": observacao,
-                           "itens": [i["produto"] for i in atual]}
-        alvos, dono = atual, atual[0]["produto"]
-    anterior = alvos[0]["observacao"] if len(alvos) == 1 else None
+        alvos = atual
+    if len(alvos) != 1:
+        # duas linhas do mesmo produto: o caminho de correção pergunta qual
+        return "{} {}".format(dono, observacao), None, None
+    nova = _juntar_observacao(alvos[0]["observacao"], observacao)
+    if coloca and observacao in (nova or ""):
+        return texto, None, None  # "coloca X" só desfaz um "sem X"; senão segue o caminho normal
+    return texto, None, (atual.index(alvos[0]), nova)
+
+
+def _juntar_observacao(anterior, nova):
+    """
+    "com bastante orégano" soma ao "sem cebola"; "com cebola" desfaz o "sem cebola"; "sem cebola" troca o
+    "com cebola". Devolve a observação inteira, ou None quando não sobra nada.
+    """
     ingredientes = lambda obs: set(_normalizar(obs).split()) - {"sem", "com"}
-    if anterior and not ingredientes(anterior) & ingredientes(observacao):
-        # "com bastante orégano" depois de "sem cebola" soma; "com cebola" depois de "sem cebola" substitui
-        observacao = anterior + " e " + observacao
-    return "{} {}".format(dono, observacao), None
+    partes = [p for p in re.split(r"\s*(?:,|\be\b)\s*", anterior or "") if p]
+    mesmos = [p for p in partes if ingredientes(p) & ingredientes(nova)]
+    final = [p for p in partes if p not in mesmos]
+    desfaz = _normalizar(nova).startswith("com") and any(_normalizar(p).startswith("sem") for p in mesmos)
+    if not desfaz:
+        final.append(nova)
+    return " e ".join(final) or None
 
 
 def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabulario=TAMANHOS_BASE):
@@ -496,6 +522,11 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
     texto = _numero_do_nome(texto)
     if pendente and pendente.get("campo") == "qual_item":
         texto = _resposta_de_qual_item(texto, produtos, atual, pendente)
+        pendente = None
+    if pendente and pendente.get("campo") == "qual_observacao":
+        # "sem cebola" -> "qual item?" -> "a calabresa": a resposta leva a observação que ficou esperando
+        if mencoes(texto, produtos)[1] and not re.search(r"\b(?:sem|com)\b", _normalizar(texto)):
+            texto = texto.strip(" .,!?") + " " + pendente["observacao"]
         pendente = None
     texto, qual = _apelido_do_item(texto, produtos, atual)
     if qual:
@@ -523,10 +554,17 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
         if achados and set(fora) <= {"a", "o", "as", "os", "uma", "um"}:
             # "não coloca coca não": só o produto depois do verbo negado, então é tirar ele
             texto = "tira " + negado[1]
-    if atual:
-        texto, duvida = _observacao_solta(texto, produtos, atual)
-        if duvida:
-            return deepcopy(atual), duvida, []
+    texto, duvida, edicao = _observacao_solta(texto, produtos, atual)
+    if duvida:
+        return deepcopy(atual), duvida, []
+    if edicao:
+        novo = deepcopy(atual)
+        alvo = novo[edicao[0]]
+        alvo["observacao"] = edicao[1]
+        evidencia = {"acao": "corrigir", "produto": alvo["produto"], "quantidade": alvo["quantidade"],
+                     "tamanho": alvo.get("tamanho"), "observacao": edicao[1], "trecho": texto}
+        _juntar_iguais(novo)
+        return novo, None, [evidencia]
     texto, tamanhos = separar_tamanhos(texto, vocabulario)
     normal = _normalizar(texto)
     # "Não temos X" é aviso, não pergunta aberta: não pode prender as falas seguintes.
