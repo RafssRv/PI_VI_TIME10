@@ -2448,6 +2448,51 @@ class TestCorrigeOCadastro:
         assert atendimento.responder("é o João Pedro") == "Prazer, João! Qual é o seu telefone com DDD?"
 
 
+class TestFrasesLongas:
+    def test_observacao_nao_engole_o_proximo_item(self, ana_identificada, llama):
+        # antes: a mussarela sumia dentro da observação "sem cebola uma mussarela"
+        resposta = ana_identificada.responder("quero uma calabresa grande sem cebola, uma mussarela média "
+                                              "e duas cocas lata")
+        assert resposta == ("Anotei 1 Pizza de Calabresa grande (sem cebola). Anotei 1 Pizza de Mussarela média. "
+                            "Anotei 2 Coca-Cola Lata. Quer algo mais?")
+        assert llama.chamadas == []
+
+    def test_observacao_com_numero_continua_inteira(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande com dois sachês de ketchup")
+        assert ana_identificada.carrinho[0]["observacao"] == "com dois sachês de ketchup"
+
+    @pytest.mark.parametrize("fala, itens", [
+        ("me vê duas pizzas grandes, uma de calabresa e uma de frango com catupiry",
+         [("Pizza de Calabresa", 1, "grande"), ("Pizza de Frango com Catupiry", 1, "grande")]),
+        ("duas grandes, calabresa e mussarela",
+         [("Pizza de Calabresa", 1, "grande"), ("Pizza de Mussarela", 1, "grande")]),
+        ("três pizzas médias: calabresa, mussarela e portuguesa",
+         [("Pizza de Calabresa", 1, "média"), ("Pizza de Mussarela", 1, "média"), ("Pizza Portuguesa", 1, "média")]),
+        ("duas pizzas, calabresa e romeu e julieta",
+         [("Pizza de Calabresa", 1, None), ("Pizza Romeu e Julieta", 1, None)]),
+    ])
+    def test_quantidade_e_tamanho_valem_pra_cada_sabor(self, ana_identificada, llama, fala, itens):
+        # antes: "Não temos pizzas uma de no cardápio" ou 2 calabresas e 1 mussarela sem tamanho
+        ana_identificada.responder(fala)
+        assert _itens(ana_identificada) == itens
+        assert llama.chamadas == []
+
+    def test_mesma_pizza_dividida_em_tamanhos_continua_igual(self, ana_identificada):
+        ana_identificada.responder("duas calabresas, uma grande e uma média")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande"), ("Pizza de Calabresa", 1, "média")]
+
+    def test_pizza_de_quatro_queijos(self, ana_identificada):
+        # antes: o "quatro" virava quantidade e sobrava "Qual sabor você quer?"
+        resposta = ana_identificada.responder("queria uma pizza de quatro queijos tamanho grande e um guaraná lata")
+        assert resposta == "Anotei 1 Pizza Quatro Queijos grande. Anotei 1 Guaraná Lata. Quer algo mais?"
+
+    def test_retirada_na_loja(self, ana_identificada, llama):
+        ana_identificada.responder("uma calabresa grande")
+        assert ana_identificada.responder("vou retirar na loja") == (
+            "No momento os pedidos são só para entrega. Quer algo mais?")
+        assert llama.chamadas == []
+
+
 class TestFalaCurta:
     @pytest.mark.parametrize("fala, resposta", [
         ("tá", "Quer algo mais?"), ("é", "Quer algo mais?"), ("entendi", "Quer algo mais?"),

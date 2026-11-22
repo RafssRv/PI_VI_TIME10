@@ -83,6 +83,7 @@ ESCOLHE_PAGAMENTO = re.compile(r"(?:(?:eu|entao)\s+)?(?:posso|da pra|pode ser|se
 # "entregam no centro?": a área de entrega a pizzaria confirma, não dá pra prometer
 ENTREGA_EM_LUGAR = re.compile(r"\bentregam?\s+(?:no|na|em|pro|pra|ate|aqui|ai)\b")
 PERGUNTA_DE_ENTREGA = re.compile(r"\b(?:tem|faz|fazem|faria) (?:entrega|delivery)\b|\bentregam\b|\bvoces entregam\b")
+RETIRADA = re.compile(r"\bretirada\b|\b(?:retirar|retiro|buscar|busco|pegar|pego)\b.*\b(?:loja|balcao|pizzaria|ai|la)\b")
 PERGUNTA_DE_HORARIO = re.compile(r"\bque horas\b|\bhorario\b|\b(?:abrem|fecham)\b")
 # "não, quero mudar", "espera, quero alterar uma coisa": sai da confirmação sem dizer ainda o quê
 QUER_MUDAR = re.compile(r"(?:nao\s+)?(?:(?:espera|pera|calma)\s+)?(?:(?:eu\s+)?(?:quero|queria|preciso|vou|vamos)\s+)?"
@@ -1009,6 +1010,9 @@ class Atendimento:
                 return "Fazemos entrega, sim. Se o endereço está na área de entrega, a pizzaria confirma." + seguir
             endereco = self.endereco_entrega or self.endereco_do_cadastro
             return "Fazemos entrega, sim{}.".format(", em " + endereco if endereco else "") + seguir
+        if RETIRADA.search(normalizado):
+            # o pedido sempre sai com endereço de entrega: não existe retirada no sistema
+            return "No momento os pedidos são só para entrega." + seguir
         if PERGUNTA_DE_HORARIO.search(normalizado):
             return "A pizzaria precisa confirmar o horário de funcionamento." + seguir
         return None

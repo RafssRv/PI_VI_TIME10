@@ -67,6 +67,11 @@ OBSERVACAO_SOLTA = re.compile(r"(?:(?:sim|mas|n[aã]o|na verdade|pode ser|quero|
 TIRA_INGREDIENTE = re.compile(r"(?:tira|tire|retira|retire|n[aã]o\s+(?:coloca|coloque|bota|bote|p[oõ]e|ponha))\s+"
                               r"(?:(?:a|o|as|os)\s+)?(.+?)(?:\s+(?:da|do|na|no)\s+(.+?))?(?:,?\s*por favor)?",
                               re.IGNORECASE)
+# "duas pizzas grandes, uma de calabresa e uma de frango", "duas grandes, calabresa e mussarela"
+SABORES_DIVIDIDOS = re.compile(
+    r"(?P<inicio>.*?)\b(?P<n>duas|dois|tr[eê]s|quatro|[234])\s+(?P<pizzas>pizzas\b[\s,:]*)?"
+    r"(?P<tamanho>(?:tamanho\s+)?(?:pequenas?|m[eé]dias?|grandes?|brotos?))?\s*[,:]?\s*(?P<sabores>.+)",
+    re.IGNORECASE)
 # "mais uma", "manda outra", "mais duas iguais", "duas a mais": sem produto, repete o último item
 MAIS_DO_MESMO = re.compile(
     r"(?:(?:coloca|coloque|manda|mande|bota|bote|poe|ponha|quero|queria|me ve|traz|traga|e|pode ser)\s+)*"
@@ -151,7 +156,9 @@ def acao_do_trecho(texto, anterior="adicionar"):
 
 def _numero_do_nome(texto):
     # O Whisper escreve "Pizza 4 Queijos": esse 4 faz parte do nome, não é a quantidade.
-    return re.sub(r"\b4\s+queijos?\b", "quatro queijos", texto, flags=re.IGNORECASE)
+    texto = re.sub(r"\b4\s+queijos?\b", "quatro queijos", texto, flags=re.IGNORECASE)
+    # "pizza de quatro queijos": no cardápio é "Pizza Quatro Queijos", e o "quatro" depois do "de" virava quantidade
+    return re.sub(r"\b(pizzas?)\s+de\s+(quatro\s+queijos?)\b", r"\1 \2", texto, flags=re.IGNORECASE)
 
 
 def tamanho_canonico(palavra):
@@ -510,6 +517,29 @@ def _observacao_solta(texto, produtos, atual):
     return texto, None, (atual.index(alvos[0]), nova)
 
 
+def _sabores_divididos(texto, produtos):
+    """
+    "duas pizzas grandes, uma de calabresa e uma de frango": a quantidade e o tamanho vêm antes e valem
+    pra cada sabor. Vira "uma Pizza de Calabresa grande e uma Pizza de Frango com Catupiry grande", só
+    quando o número de sabores bate com a quantidade.
+    """
+    dividido = SABORES_DIVIDIDOS.fullmatch(texto.strip())
+    if not dividido or not (dividido["pizzas"] or dividido["tamanho"]):
+        return texto
+    palavras, achados = mencoes(dividido["sabores"], produtos)
+    # "duas pizzas grandes, calabresa e uma coca": a coca não é sabor, então não divide
+    if (len(achados) != quantidade(_normalizar(dividido["n"]))
+            or any(len(c) != 1 or grupo_tamanho(c[0]) != "pizza" for _, _, c in achados)):
+        return texto
+    entre = [p for i, p in enumerate(palavras[:achados[-1][1]]) if not any(a <= i < b for a, b, _ in achados)]
+    if not set(entre) <= {"uma", "um", "de", "da", "do", "e", "a", "o", "sabor", "sabores"}:
+        return texto
+    tamanho = re.sub(r"^tamanho\s+|s$", "", (dividido["tamanho"] or "").lower())
+    itens = " e ".join("uma {} {}".format(c[0].nome, tamanho).strip() for _, _, c in achados)
+    resto = " ".join(palavras[achados[-1][1]:])
+    return " ".join(p for p in (dividido["inicio"], itens, resto) if p)
+
+
 def _mais_do_mesmo(texto, produtos, atual, referencia):
     """
     "mais uma", "manda outra", "mais duas iguais": repete o último item citado, com o mesmo tamanho e a
@@ -550,7 +580,7 @@ def _juntar_observacao(anterior, nova):
 
 def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabulario=TAMANHOS_BASE):
     """Retorna (rascunho, pendência de campo, evidências) sem efeitos externos."""
-    texto = _numero_do_nome(texto)
+    texto = _sabores_divididos(_numero_do_nome(texto), produtos)
     if pendente and pendente.get("campo") == "qual_item":
         texto = _resposta_de_qual_item(texto, produtos, atual, pendente)
         pendente = None
@@ -646,7 +676,9 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
     for achado in achados:
         entre = " ".join(palavras[filtrados[-1][1]:achado[0]]) if filtrados else ""
         # "uma calabresa com uma coca" são dois itens; "calabresa sem cebola" é observação.
-        if re.search(r"\b(?:sem|com)\b", entre) and not re.search(r"\b(?:e|com)\s+(?:" + NUMERO + r"|mais|quero)\b", entre):
+        # "sem cebola, uma mussarela": a quantidade logo antes do nome abre outro item
+        if (re.search(r"\b(?:sem|com)\b", entre) and not re.search(r"\b(?:e|com)\s+(?:" + NUMERO + r"|mais|quero)\b", entre)
+                and not re.search(NUMERO + r"$", entre)):
             continue  # Nome usado como ingrediente/observação do produto anterior.
         filtrados.append(achado)
     achados = filtrados
@@ -708,12 +740,16 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
         prefixo = " ".join(palavras[anterior:inicio])
         # Só a última oração autoriza esta menção ("não quero X, quero Y").
         prefixo = re.split(r"\b(?:e|mas)\b", prefixo)[-1]
+        # "sem cebola, uma mussarela": a observação é do item anterior, aqui só vale a quantidade
+        if indice and re.search(r"\b(?:sem|com)\b", prefixo) and re.search(NUMERO + r"$", prefixo):
+            prefixo = re.search(NUMERO + r"$", prefixo).group()
         # "uma calabresa com uma coca": esse "com" separa dois itens, não é observação.
         prefixo = re.sub(r"^\s*com\s+(?=" + NUMERO + r")", "", prefixo)
         trecho = " ".join(palavras[inicio:fim])
         sufixo = PAGAMENTO_NA_FALA.sub("", " ".join(palavras[fim:seguinte])).strip()
         if indice + 1 < len(achados):
-            sufixo = re.sub(r"\s*\bcom\s+" + NUMERO + r"$", "", sufixo).strip()
+            # a quantidade do próximo item não é parte da observação deste
+            sufixo = re.sub(r"\s*(?:\b(?:com|e)\s+)?" + NUMERO + r"$", "", sufixo).strip()
         qtd = quantidade(prefixo)
         acao = acao_do_trecho(prefixo, acao)
         # A quantidade pendente é de um item a acrescentar: não vale para "tire as cocas".
