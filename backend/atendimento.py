@@ -961,6 +961,8 @@ class Atendimento:
         if campo == "qual_observacao":
             return "Qual item fica {}? Diga, por exemplo: {} {}.".format(
                 duvida["observacao"], _com_artigo(duvida["itens"][0]).lower(), duvida["observacao"])
+        if campo == "qual_item":
+            return "Qual delas: {}?".format(_juntar([_com_artigo(n).lower() for n in duvida["itens"]], "ou"))
         if campo == "qual_muda":
             para, quantidade = duvida["para"], duvida.get("quantidade")
             if not duvida["itens"]:

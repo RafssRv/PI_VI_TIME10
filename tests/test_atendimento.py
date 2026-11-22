@@ -2216,10 +2216,28 @@ class TestApelidoDoItem:
         assert _itens(ana_identificada) == itens
         assert llama.chamadas == []
 
-    def test_duas_pizzas_continua_perguntando(self, ana_identificada):
+    def test_duas_pizzas_pergunta_qual_e_aplica_nela(self, ana_identificada):
+        # antes: "Qual sabor?" e a resposta "a calabresa" somava uma terceira pizza
         ana_identificada.responder("uma calabresa grande e uma mussarela grande")
-        assert ana_identificada.responder("a pizza sem cebola") == "Claro! Qual sabor você quer?"
+        resposta = ana_identificada.responder("a pizza sem cebola")
+        assert resposta == "Qual delas: a pizza de calabresa ou a pizza de mussarela?"
         assert all(i["observacao"] is None for i in ana_identificada.carrinho)
+        ana_identificada.responder("a calabresa")
+        assert [(i["produto"], i["observacao"]) for i in ana_identificada.carrinho] == [
+            ("Pizza de Calabresa", "sem cebola"), ("Pizza de Mussarela", None)]
+
+    def test_resposta_so_com_o_sabor_tira_a_pizza_certa(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande e uma mussarela grande")
+        ana_identificada.responder("tira a pizza")
+        assert ana_identificada.responder("mussarela") == "Tirei 1 Pizza de Mussarela grande. Quer algo mais?"
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+
+    def test_outra_fala_esquece_a_pergunta(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande e uma mussarela grande")
+        ana_identificada.responder("a pizza é média")
+        ana_identificada.responder("quero uma coca lata")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande"), ("Pizza de Mussarela", 1, "grande"),
+                                            ("Coca-Cola", 1, "Lata")]
 
 
 class TestJeitosDeTirar:

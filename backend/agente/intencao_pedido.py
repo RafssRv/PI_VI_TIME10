@@ -426,15 +426,33 @@ def cardapio_completo(texto):
 
 
 def _apelido_do_item(texto, produtos, atual):
-    """"a pizza", "o refri": com um só item daquele tipo no pedido, o apelido vira o nome dele."""
+    """
+    "a pizza", "o refri": com um só item daquele tipo no pedido, o apelido vira o nome dele.
+    Devolve (texto, nomes do apelido que aponta mais de um item, ou None).
+    """
     categoria = {p.nome: _normalizar(p.categoria or "") for p in produtos}
+    ambiguos = []
 
     def trocar(achado):
         tipo = TIPOS_DE_ITEM[_normalizar(achado[2]).removesuffix("s")]
-        nomes = {i["produto"] for i in atual if tipo in categoria.get(i["produto"], "")}
-        return "{} {}".format(achado[1], nomes.pop()) if len(nomes) == 1 else achado[0]
+        nomes = list(dict.fromkeys(i["produto"] for i in atual if tipo in categoria.get(i["produto"], "")))
+        if len(nomes) > 1:
+            ambiguos.append(nomes)
+        return "{} {}".format(achado[1], nomes[0]) if len(nomes) == 1 else achado[0]
 
-    return APELIDO_DO_ITEM.sub(trocar, texto)
+    return APELIDO_DO_ITEM.sub(trocar, texto), (ambiguos[0] if ambiguos else None)
+
+
+def _resposta_de_qual_item(texto, produtos, atual, pendente):
+    """"a calabresa" responde "qual delas?": vale a fala guardada, aplicada nesse item. Outra fala segue normal."""
+    opcoes = [p for p in produtos if p.nome in pendente["itens"]]
+    palavras, achados = mencoes(texto, opcoes)
+    nomes = {p.nome for _, _, ps in achados for p in ps}
+    fora = [p for i, p in enumerate(palavras) if not any(a <= i < b for a, b, _ in achados)]
+    if len(nomes) != 1 or not set(fora) <= {"a", "o", "as", "os", "de", "da", "do", "essa", "esse", "pizza", "e"}:
+        return texto
+    nome = nomes.pop()
+    return _apelido_do_item(pendente["fala"], produtos, [i for i in atual if i["produto"] == nome])[0]
 
 
 def _observacao_solta(texto, produtos, atual):
@@ -476,8 +494,14 @@ def _observacao_solta(texto, produtos, atual):
 def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabulario=TAMANHOS_BASE):
     """Retorna (rascunho, pendência de campo, evidências) sem efeitos externos."""
     texto = _numero_do_nome(texto)
-    texto = _apelido_do_item(texto, produtos, atual)
-    muda =MUDA_A_QUANTIDADE.fullmatch(_normalizar(texto).strip(" .,!?"))
+    if pendente and pendente.get("campo") == "qual_item":
+        texto = _resposta_de_qual_item(texto, produtos, atual, pendente)
+        pendente = None
+    texto, qual = _apelido_do_item(texto, produtos, atual)
+    if qual:
+        # "a pizza sem cebola" com duas pizzas: pergunta qual, e a resposta aplica esta mesma fala nela
+        return deepcopy(atual), {"campo": "qual_item", "fala": texto, "itens": qual}, []
+    muda = MUDA_A_QUANTIDADE.fullmatch(_normalizar(texto).strip(" .,!?"))
     if muda:
         # "altere a coca para duas" vira "altere duas coca", que o caminho de correção já entende
         verbo, citado, numero = muda.groups()
