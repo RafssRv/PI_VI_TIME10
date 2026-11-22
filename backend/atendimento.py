@@ -18,7 +18,7 @@ from uuid import uuid4
 
 from agente.controle_pedido import ControlePedido, ErroPedido, ProdutoCardapio
 from agente.intencao_pedido import (CONSULTA_HISTORICO, CONSULTA_PEDIDO_ATUAL, CONSULTA_RECOMENDACAO, FALAS_DE_FECHAR,
-                                   AINDA_NAO_ACABOU, FECHAR, FIM_DO_PEDIDO, RECLAMA_DO_PEDIDO,
+                                   AINDA_NAO_ACABOU, FECHAR, FIM_DO_PEDIDO, MEIO_A_MEIO, RECLAMA_DO_PEDIDO,
                                    TAMANHO_INDISPONIVEL, TAMANHOS_BASE,
                                    cardapio_completo, comando_negado, eh_consulta, interpretar, mencoes,
                                    separar_tamanhos, tamanhos_do_banco)
@@ -103,6 +103,15 @@ CAMPO_COM_VALOR = re.compile(r"\b(?:nome|telefone|celular|fone|whatsapp|zap|ende
 DADO_ERRADO = re.compile(r"\b(?:errad[oa]|corrig\w*|mud\w*|troc\w*|alter\w*|na verdade)\b")
 VALOR_DO_CAMPO = re.compile(r"^.*?\b(?:nome|telefone|celular|fone|whatsapp|zap|endere[cç]o)\b"
                             r"(?:\s+(?:certo|correto|completo))?(?:\s+(?:[eé]|seria|fica))?\s*", re.IGNORECASE)
+# "troco pra 100", "troco para cem reais", "troco de 50"; e quem não precisa de troco
+VALOR_DO_TROCO = re.compile(r"\btroco\s+(?:pra|para|de|pra uma nota de)?\s*(?:r\s*)?"
+                            r"(\d+(?:[.,]\d{2})?|cento e cinquenta|duzentos|trezentos|quinhentos|cem|"
+                            r"cinquenta|vinte|trinta|quarenta|sessenta|setenta|oitenta|noventa|dez)\b")
+SEM_TROCO = re.compile(r"\b(?:nao (?:preciso|precisa|vou precisar) de troco|sem troco|nao precisa de troco|"
+                       r"dinheiro (?:certo|trocado|contado))\b")
+TROCO_POR_EXTENSO = {"dez": "10", "vinte": "20", "trinta": "30", "quarenta": "40", "cinquenta": "50",
+                     "sessenta": "60", "setenta": "70", "oitenta": "80", "noventa": "90", "cem": "100",
+                     "cento e cinquenta": "150", "duzentos": "200", "trezentos": "300", "quinhentos": "500"}
 DEIXA_PRA_LA = {"esquece", "esquece isso", "esquece entao", "deixa pra la", "deixa quieto", "nao precisa",
                 "nao precisa mais", "deixa"}
 SO_CONCORDA = {"ta", "e", "entendi", "sei", "ah", "ah ta", "ta ok", "blz", "ta entendi", "ah entendi", "ok entendi"}
@@ -294,6 +303,8 @@ class Atendimento:
         # "preco", "observacao"}
         self.carrinho = []
         self.pagamento = None
+        self.troco_para = None
+        self._pedindo_troco = False
         self.endereco_entrega = None
         self._controle = None
         self._token_resumo = None
@@ -374,6 +385,7 @@ class Atendimento:
             "total": format(sum((i["preco"] * i["quantidade"] for i in self.carrinho),
                                 Decimal("0.00")), ".2f"),
             "forma_pagamento": self.pagamento,
+            "troco_para": format(self.troco_para, ".2f") if self.troco_para else None,
             "endereco_entrega": self.endereco_entrega or self.endereco_do_cadastro,
         }
 
@@ -744,6 +756,8 @@ class Atendimento:
             return self._desfazer_identificacao()
         if self._pedindo_endereco:
             return self._receber_novo_endereco(texto)
+        if self._pedindo_troco:
+            return self._receber_troco(texto)
         if QUER_MUDAR_ENDERECO.search(normalizado):
             if ENDERECO_NA_FALA.search(texto):
                 return self._receber_novo_endereco(texto)
@@ -888,7 +902,7 @@ class Atendimento:
             self._controle.definir_pendencia(self._pendencia)
         mensagens += self.historico + [turno]
         palavras = set(normalizado.split())
-        fala_de_pagamento = bool(palavras & (set(repositorio.SINAIS_DE_PAGAMENTO) | {"cartao", "maquininha"}))
+        fala_de_pagamento = bool(palavras & (set(repositorio.SINAIS_DE_PAGAMENTO) | {"cartao", "maquininha", "troco"}))
         # o endereco vem da propria fala: testando, o modelo demorava e ainda inventava itens no json
         endereco_na_fala = ENDERECO_NA_FALA.search(texto)
         endereco_falado = None
@@ -926,6 +940,10 @@ class Atendimento:
                 curta = (len(faltando) == 1 and len(evidencias) == 1
                          and evidencias[0]["produto"] == faltando[0]["produto"])
                 duvida = {"campo": "tamanho", "produto": faltando[0]["produto"], "curta": curta}
+        if duvida and duvida["campo"] == "meio_a_meio" and len(duvida["sabores"]) == 2:
+            # o "sim" na fala seguinte pede uma de cada, igual ao "pedir de novo"
+            self._repetir = " e ".join("uma {} {}".format(nome, duvida["tamanho"] or "").strip()
+                                       for nome in duvida["sabores"])
         self._duvida_item = duvida
         if self.ultimo_rastro is not None:
             self.ultimo_rastro["alteracoes_autorizadas"] = evidencias
@@ -962,7 +980,7 @@ class Atendimento:
             else:
                 fala = "Entendido. Quer algo mais?"
                 if fala_de_pagamento and self.pagamento:
-                    fala = "Certo, pagamento {}. Quer algo mais?".format(PAGAMENTO_FALADO[self.pagamento])
+                    fala = "Certo, pagamento {}. Quer algo mais?".format(self._pagamento_falado())
 
         self.historico.append({"role": "assistant", "content": fala})
         return fala
@@ -1010,6 +1028,9 @@ class Atendimento:
                 return "Fazemos entrega, sim. Se o endereço está na área de entrega, a pizzaria confirma." + seguir
             endereco = self.endereco_entrega or self.endereco_do_cadastro
             return "Fazemos entrega, sim{}.".format(", em " + endereco if endereco else "") + seguir
+        if re.search(r"\bmeio a meio\b", normalizado) and not MEIO_A_MEIO.search(normalizado.replace("meio a meio", "")):
+            # "dá pra fazer meio a meio?" sem sabores; com sabores o interpretar já oferece uma de cada
+            return "Não fazemos pizza meio a meio, mas você pode pedir uma pizza de cada sabor." + seguir
         if RETIRADA.search(normalizado):
             # o pedido sempre sai com endereço de entrega: não existe retirada no sistema
             return "No momento os pedidos são só para entrega." + seguir
@@ -1138,6 +1159,11 @@ class Atendimento:
             return "Qual o tamanho {}: {}".format(_da(produto), self._opcoes(produto))
         if campo == "intencao":
             return "Não entendi. Pode repetir o que você quer?"
+        if campo == "meio_a_meio":
+            if len(duvida["sabores"]) == 2:
+                return "Não fazemos pizza meio a meio. Quer uma de cada sabor: {}?".format(
+                    _juntar([_com_tamanho(_com_artigo(n).lower(), duvida["tamanho"]) for n in duvida["sabores"]]))
+            return "Não fazemos pizza meio a meio. Qual sabor você quer?"
         if campo == "qual_observacao":
             if not duvida["itens"]:
                 return "Seu pedido ainda está vazio. Qual produto você quer {}?".format(duvida["observacao"])
@@ -1633,17 +1659,58 @@ class Atendimento:
         texto = _normalizar(falado)
         palavras = set(texto.split())
         sinais = set(repositorio.SINAIS_DE_PAGAMENTO) | {"cartao", "maquininha"}
+        troco = self._troco_da_fala(texto)
         if not palavras & sinais:
+            if troco is not None:
+                # "troco pra 100" sem dizer como paga: troco so existe em dinheiro
+                self.pagamento, self.troco_para = "dinheiro", troco or None
             # o cliente nao falou de pagamento nessa fala: mantem o q ja tinha
             return []
         try:
             self.pagamento = repositorio.interpretar_pagamento(falado)
+            if self.pagamento != "dinheiro":
+                self.troco_para = None
+            elif troco is not None:
+                self.troco_para = troco or None
             return []
         except ValueError:
             self.pagamento = None
             if "cartao" in texto or "maquininha" in texto:
                 return ["Crédito ou débito?"]
             return [FRASE_PEDE_PAGAMENTO]
+
+    def _troco_da_fala(self, texto):
+        """
+        Decimal do "troco pra 100", 0 para "não preciso de troco", None quando a fala não fala de troco.
+        """
+        if SEM_TROCO.search(texto):
+            return 0
+        valor = VALOR_DO_TROCO.search(texto)
+        if not valor:
+            return None
+        dito = valor.group(1).strip()
+        if dito in TROCO_POR_EXTENSO:
+            return Decimal(TROCO_POR_EXTENSO[dito])
+        return Decimal(dito.replace(",", ".")).quantize(Decimal("0.01"))
+
+    def _receber_troco(self, texto):
+        """resposta a "para quanto vai ser o troco?": "100", "pra cem", "não precisa"."""
+        self._pedindo_troco = False
+        normalizado = _normalizar(texto)
+        troco = self._troco_da_fala(normalizado)
+        if troco is None:
+            # "pra 100" ou só "100": aqui a pergunta já foi sobre o troco
+            troco = self._troco_da_fala("troco " + re.sub(r"^(?:e|eh|vai ser|seria|de)\s+", "", normalizado))
+        if troco is None:
+            return self._montar_pedido(texto)
+        self.troco_para = troco or None
+        return self._fechar_pedido()
+
+    def _pagamento_falado(self):
+        fala = PAGAMENTO_FALADO[self.pagamento]
+        if self.pagamento == "dinheiro" and self.troco_para:
+            fala += ", com troco para " + preco_falado(self.troco_para)
+        return fala
 
     def _perguntar_tamanho_que_falta(self):
         """pizza sem tamanho nao tem preco: vira a pendencia do pedido, uma pizza por vez."""
@@ -1675,6 +1742,11 @@ class Atendimento:
         self._fechamento_solicitado = True
         if not self.pagamento:
             return FRASE_PEDE_PAGAMENTO
+        total = sum((i["preco"] * i["quantidade"] for i in self.carrinho), Decimal("0.00"))
+        if self.troco_para is not None and self.troco_para <= total:
+            self.troco_para = None
+            self._pedindo_troco = True
+            return "O total ficou em {}. Para quanto vai ser o troco?".format(preco_falado(total))
         if not (self.endereco_entrega or self.endereco_do_cadastro):
             self._pedindo_endereco = True
             return "Qual é o endereço para entrega?"
@@ -1692,7 +1764,7 @@ class Atendimento:
             _juntar(itens),
             preco_falado(resumo.subtotal),
             self.endereco_entrega or self.endereco_do_cadastro,
-            PAGAMENTO_FALADO[self.pagamento],
+            self._pagamento_falado(),
         )
 
     def _fala_solta_na_confirmacao(self, texto):
@@ -1704,7 +1776,7 @@ class Atendimento:
         if self._quer_esvaziar(normalizado):
             return False
         # no pix, endereco novo e "tira a coca" sao mudancas no pedido, nao falas soltas
-        if palavras & (set(repositorio.SINAIS_DE_PAGAMENTO) | {"cartao", "maquininha", "endereco", "entrega", "rua",
+        if palavras & (set(repositorio.SINAIS_DE_PAGAMENTO) | {"cartao", "maquininha", "troco", "endereco", "entrega", "rua",
                                                                "avenida", "tira", "tire", "troca", "troque"}):
             return False
         db = self._sessao()
@@ -1748,6 +1820,7 @@ class Atendimento:
                  for i in self.carrinho],
                 endereco_entrega=self.endereco_entrega,
                 forma_pagamento=self.pagamento,
+                troco_para=self.troco_para,
             )
             numero = self.ultimo_pedido_id = pedido.id
             # Preserve a comanda antes de limpar o carrinho para o próximo pedido.

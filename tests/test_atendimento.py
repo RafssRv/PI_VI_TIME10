@@ -2493,6 +2493,83 @@ class TestFrasesLongas:
         assert llama.chamadas == []
 
 
+class TestTroco:
+    @pytest.mark.parametrize("falas", [
+        ["vou pagar em dinheiro, preciso de troco pra 100"],
+        ["dinheiro", "troco para cem reais"],
+        ["troco pra 100"],
+    ])
+    def test_troco_vai_pro_resumo_e_pro_banco(self, ana_identificada, llama, db, falas):
+        # antes: só "dinheiro" era gravado, e "troco pra 100" sozinho virava "Não temos troco pra 100"
+        ana_identificada.responder("uma calabresa grande")
+        for fala in falas:
+            assert ana_identificada.responder(fala) == (
+                "Certo, pagamento em dinheiro{}. Quer algo mais?".format(
+                    ", com troco para 100 reais" if "troco" in fala else ""))
+        resumo = ana_identificada.responder("só isso")
+        assert "pagamento em dinheiro, com troco para 100 reais. Posso confirmar?" in resumo
+        ana_identificada.responder("sim")
+        pedido = db.get(Pedido, ana_identificada.ultimo_pedido_id)
+        assert (pedido.forma_pagamento, str(pedido.troco_para)) == ("dinheiro", "100.00")
+        assert llama.chamadas == []
+
+    def test_troco_que_nao_cobre_o_total_pergunta_de_novo(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        ana_identificada.responder("dinheiro, troco pra 50")
+        assert ana_identificada.responder("só isso") == (
+            "O total ficou em 64 reais e 90 centavos. Para quanto vai ser o troco?")
+        assert ana_identificada.responder("pra 100").endswith("com troco para 100 reais. Posso confirmar?")
+
+    def test_trocar_pra_pix_apaga_o_troco(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        ana_identificada.responder("dinheiro, troco pra 100")
+        ana_identificada.responder("na verdade no pix")
+        assert ana_identificada.troco_para is None
+
+    def test_nao_precisa_de_troco(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        ana_identificada.responder("dinheiro, troco pra 100")
+        ana_identificada.responder("não preciso de troco")
+        assert ana_identificada.troco_para is None
+
+    def test_troco_na_confirmacao_rele_o_resumo(self, ana_identificada):
+        for fala in ("uma calabresa grande", "dinheiro", "só isso"):
+            ana_identificada.responder(fala)
+        resposta = ana_identificada.responder("troco pra 100")
+        assert resposta.endswith("com troco para 100 reais. Posso confirmar?")
+        assert ana_identificada.etapa == "confirmando_pedido"
+
+    def test_troco_aparece_na_comanda(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        eventos = ana_identificada.responder_com_eventos("dinheiro, troco pra 100")["eventos"]
+        assert eventos[-1]["troco_para"] == "100.00"
+
+
+class TestMeioAMeio:
+    def test_oferece_uma_de_cada_e_o_sim_anota(self, ana_identificada, llama):
+        # antes: "Quantas unidades inteiras você quer?"
+        resposta = ana_identificada.responder("uma pizza grande meia calabresa meia mussarela")
+        assert resposta == ("Não fazemos pizza meio a meio. Quer uma de cada sabor: "
+                            "a pizza de calabresa grande e a pizza de mussarela grande?")
+        assert ana_identificada.carrinho == []
+        ana_identificada.responder("sim")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande"), ("Pizza de Mussarela", 1, "grande")]
+        assert llama.chamadas == []
+
+    def test_nao_deixa_o_pedido_como_estava(self, ana_identificada):
+        ana_identificada.responder("metade frango metade calabresa")
+        assert ana_identificada.responder("não") == "Tudo bem. O que vai querer?"
+        assert ana_identificada.carrinho == []
+
+    def test_pergunta_sem_sabores(self, ana_identificada, llama):
+        assert ana_identificada.responder("dá pra fazer meio a meio?") == (
+            "Não fazemos pizza meio a meio, mas você pode pedir uma pizza de cada sabor. O que vai querer?")
+        assert llama.chamadas == []
+
+    def test_meia_sozinha_continua_perguntando_a_quantidade(self, ana_identificada):
+        assert ana_identificada.responder("meia coca") == "Quantas unidades inteiras de Coca-Cola você quer?"
+
+
 class TestFalaCurta:
     @pytest.mark.parametrize("fala, resposta", [
         ("tá", "Quer algo mais?"), ("é", "Quer algo mais?"), ("entendi", "Quer algo mais?"),

@@ -67,6 +67,8 @@ OBSERVACAO_SOLTA = re.compile(r"(?:(?:sim|mas|n[aã]o|na verdade|pode ser|quero|
 TIRA_INGREDIENTE = re.compile(r"(?:tira|tire|retira|retire|n[aã]o\s+(?:coloca|coloque|bota|bote|p[oõ]e|ponha))\s+"
                               r"(?:(?:a|o|as|os)\s+)?(.+?)(?:\s+(?:da|do|na|no)\s+(.+?))?(?:,?\s*por favor)?",
                               re.IGNORECASE)
+# "meia calabresa meia mussarela", "metade frango metade calabresa", "meio a meio"
+MEIO_A_MEIO = re.compile(r"\bmeio a meio\b|\b(?:meia|metade)\b.+\b(?:meia|metade)\b")
 # "duas pizzas grandes, uma de calabresa e uma de frango", "duas grandes, calabresa e mussarela"
 SABORES_DIVIDIDOS = re.compile(
     r"(?P<inicio>.*?)\b(?P<n>duas|dois|tr[eê]s|quatro|[234])\s+(?P<pizzas>pizzas\b[\s,:]*)?"
@@ -661,6 +663,12 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
                       "candidatos": list(dict.fromkeys(p.nome for _, _, ps in achados for p in ps))}, evidencias
     if any(re.match(r"nao\b", " ".join(palavras[fim:])) for _, fim, _ in achados):
         return novo, {"campo": "intencao"}, evidencias
+    if MEIO_A_MEIO.search(normal):
+        # a pizzaria não faz meio a meio: oferece uma pizza de cada sabor, no tamanho dito
+        sabores = list(dict.fromkeys(c[0].nome for _, _, c in achados if len(c) == 1 and grupo_tamanho(c[0])))
+        ditos = list(dict.fromkeys(t for _, t in tamanhos if t != TAMANHO_INDISPONIVEL))
+        return novo, {"campo": "meio_a_meio", "sabores": sabores,
+                      "tamanho": ditos[0] if len(ditos) == 1 else None}, evidencias
     if re.search(r"[-+−]\s*\d|\d+[.,]\d|\b(?:meia|meio|metade)\b", texto.lower()):
         duvida = {"campo": "quantidade", "acao": acao_do_trecho(normal)}
         if len(achados) == 1 and len(achados[0][2]) == 1:
@@ -728,7 +736,9 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
     for fragmento in re.split(r"\s+e\s+(?=" + NUMERO + r"|quero\b)", normal):
         if (quantidade(fragmento) is not None and not mencoes(fragmento, produtos)[1] and not esclarecendo_quantidade
                 and not respondeu_tamanho and not (divisoes and re.fullmatch(NUMERO, fragmento.strip()))):
-            if not re.search(r"\b(?:pix|dinheiro|credito|debito|rua|avenida|av|travessa|alameda|estrada|rodovia)\b",
+            # "troco pra 100": esse número é dinheiro, não quantidade de produto
+            if not re.search(r"\b(?:pix|dinheiro|troco|credito|debito|rua|avenida|av|travessa|alameda|estrada|"
+                             r"rodovia)\b",
                              fragmento):
                 duvida = {"campo": "produto", "quantidade": quantidade(fragmento)}
 
@@ -942,8 +952,8 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
     if not achados and not respondeu_tamanho:
         # Pagamento, endereço e fechamento são tratados pelo roteiro, sem reconstruir itens.
         if not FECHAR.search(normal) and not re.search(
-                r"\b(?:pix|pics|picks|piques|pixe|dinheiro|cartao|credito|debito|endereco|rua|avenida|av|travessa|"
-                r"alameda|estrada|rodovia)\b", normal):
+                r"\b(?:pix|pics|picks|piques|pixe|dinheiro|troco|cartao|credito|debito|endereco|rua|avenida|av|"
+                r"travessa|alameda|estrada|rodovia)\b", normal):
             duvida = pendente or {"campo": "produto", "quantidade": quantidade(normal)}
             desconhecido = re.sub(r"^(?:(?:eu|quero|queria|uma?|duas?|dois|tres|de)\s+)+", "", normal)
             if not pendente and desconhecido and not re.search(r"\b(?:incompreensivel|inaudivel|hmm|trecho)\b", desconhecido):

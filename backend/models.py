@@ -80,6 +80,8 @@ class Pedido(Base):
     cliente_id = Column(Integer, ForeignKey("cliente.id"), nullable=False)
     endereco_entrega = Column(Text)
     forma_pagamento = Column(String(20))
+    # nota com que o cliente paga em dinheiro ("troco pra 100"); None quando nao precisa de troco
+    troco_para = Column(Numeric(10, 2))
     status = Column(String(20), nullable=False, server_default="aberto")
     total = Column(Numeric(10, 2), nullable=False, server_default="0")
     criado_em = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

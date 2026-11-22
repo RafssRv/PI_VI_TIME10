@@ -274,7 +274,7 @@ def itens_mais_pedidos_da_casa(db, limite=3, categoria=None):
     return [(produto, int(quantidade)) for produto, quantidade in linhas]
 
 
-def salvar_pedido(db, cliente_id, itens, endereco_entrega=None, forma_pagamento=None):
+def salvar_pedido(db, cliente_id, itens, endereco_entrega=None, forma_pagamento=None, troco_para=None):
     """
     RF09/RF11 + RIA04: valida cada item contra o cardapio e grava pedido e itens numa transacao so.
     forma_pagamento pode vir None de proposito (pedido nasce 'aberto' e alguem fecha depois),
@@ -360,10 +360,19 @@ def salvar_pedido(db, cliente_id, itens, endereco_entrega=None, forma_pagamento=
         total += preco_unitario * quantidade
         validados.append((produto, quantidade, preco_unitario, item.get("observacao"), tamanho))
 
+    # troco so existe pagando em dinheiro, e com uma nota maior que o total
+    if troco_para is not None:
+        troco_para = Decimal(str(troco_para)).quantize(Decimal("0.01"))
+        if forma_pagamento != "dinheiro":
+            raise ValueError("troco so vale para pagamento em dinheiro.")
+        if troco_para <= total:
+            raise ValueError("troco para {} nao cobre o total de {}.".format(troco_para, total))
+
     pedido = Pedido(
         cliente_id=cliente_id,
         endereco_entrega=endereco_entrega or cliente.endereco,
         forma_pagamento=forma_pagamento,
+        troco_para=troco_para,
         total=total.quantize(Decimal("0.01")),
     )
     for produto, quantidade, preco_unitario, observacao, tamanho in validados:

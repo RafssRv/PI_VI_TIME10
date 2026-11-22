@@ -42,6 +42,8 @@ CREATE TABLE pedido (
     cliente_id INTEGER NOT NULL REFERENCES cliente(id),
     endereco_entrega TEXT,
     forma_pagamento VARCHAR(20),
+    -- "troco pra 100": nota com que o cliente vai pagar em dinheiro. vazio quando nao precisa de troco
+    troco_para NUMERIC(10,2) CHECK (troco_para > 0),
     status VARCHAR(20) NOT NULL DEFAULT 'aberto',
     total NUMERIC(10,2) NOT NULL DEFAULT 0,
     criado_em TIMESTAMPTZ NOT NULL DEFAULT now()

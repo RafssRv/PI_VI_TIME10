@@ -33,6 +33,7 @@
 //      de cima da mensagem, nao dentro de uma chave "pedido". o item usa os mesmos nomes do
 //      banco e a tela calcula o subtotal (preco_unitario x quantidade).
 //      forma_pagamento so aceita pix | dinheiro | cartao_credito | cartao_debito (ou null).
+//      troco_para ("100.00" ou null) so vem com dinheiro: a nota com que o cliente vai pagar.
 //      pedido_id=null indica rascunho; um número preserva a comanda já registrada.
 //  7 {"tipo":"pedido_salvo","pedido_id":42,"total":"91.80"}
 //      TEM QUE VIR ANTES do chamada_encerrada, senao o resumo diz "Pedido não salvo".
@@ -749,7 +750,8 @@ function desenharPedido(pedido, destino) {
     alvoCliente.textContent = "Cliente: ainda não identificado";
   }
 
-  alvoPagamento.textContent = formatarPagamento(pedido ? pedido.forma_pagamento : null);
+  alvoPagamento.textContent = formatarPagamento(pedido ? pedido.forma_pagamento : null) +
+    ((pedido && pedido.troco_para) ? " · troco para " + formatarDinheiro(pedido.troco_para) : "");
   alvoEntrega.textContent = (pedido && pedido.endereco_entrega) ? pedido.endereco_entrega : "a confirmar";
   alvoTotal.textContent = (pedido && pedido.total) ? formatarDinheiro(pedido.total) : "R$ 0,00";
 }

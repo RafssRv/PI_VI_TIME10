@@ -46,3 +46,16 @@ test("a comanda mostra o tamanho da pizza ao lado do nome", () => {
     .map((miolo) => miolo.children[0].textContent);
   assert.deepEqual(nomes, ["Pizza de Calabresa (média)", "Coca-Cola 2 Litros"]);
 });
+
+test("a comanda mostra o troco quando o pagamento é em dinheiro", () => {
+  const tela = carregarTela();
+  const pedido = {
+    tipo: "pedido", pedido_id: null, cliente: { nome: "Ana", telefone: null },
+    itens: [{ produto: "Pizza de Calabresa", quantidade: 1, preco_unitario: "64.90", tamanho: "grande" }],
+    total: "64.90", forma_pagamento: "dinheiro", troco_para: "100.00", endereco_entrega: "Rua Nova, 45",
+  };
+  tela.enviar(pedido);
+  assert.equal(tela.ler("comanda-pagamento").textContent, "Dinheiro · troco para R$ 100,00");
+  tela.enviar({ ...pedido, troco_para: null });
+  assert.equal(tela.ler("comanda-pagamento").textContent, "Dinheiro");
+});
