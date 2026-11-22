@@ -775,6 +775,13 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
         if permitido or re.match(r"e\s+(?!so isso|uma?\b|duas?\b|dois\b|tres\b|\d+\b)", sufixo):
             duvida = {"campo": "intencao"}
             continue
+        no_pedido = [p for p in candidatos if any(i["produto"] == p.nome for i in atual)]
+        if (len(candidatos) > 1 and len(no_pedido) == 1 and qtd is None and acao == "adicionar"
+                and re.search(r"\b(?:a|o)(?:\s+d[aeo])?\s*$", prefixo)):
+            # "a de catupiry": o artigo aponta o item que já está no pedido; a pergunta aberta continua
+            if pendente and pendente.get("campo") == "tamanho":
+                duvida = {**pendente, "referencia": True}
+            continue
         if len(candidatos) != 1:
             duvida = {"campo": "produto", "quantidade": qtd or 1,
                       "candidatos": [p.nome for p in candidatos], "trecho": trecho}
@@ -823,7 +830,10 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
                       "nao_encontrado": trecho + " " + sufixo}
             continue
         existentes = [i for i in novo if i["produto"] == produto.nome]
-        if re.search(r"\bnao\b", prefixo) and not REMOVER.search(prefixo):
+        if re.fullmatch(r"nao\s+(?:" + NUMERO + r")", prefixo.strip()) and existentes:
+            # "não, dois guaranás": corrige a quantidade do que acabou de ser anotado
+            acao = "corrigir"
+        elif re.search(r"\bnao\b", prefixo) and not REMOVER.search(prefixo):
             continue
         if indice in errados:
             duvida = {"campo": "produto", "quantidade": qtd or 1,

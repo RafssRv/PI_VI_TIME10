@@ -2622,6 +2622,45 @@ class TestDespedida:
         assert ana_identificada.responder("boa noite") == "Olá! O que vai querer?"
 
 
+class TestConversaCompleta:
+    def test_e_so_isso_no_cartao_vai_pro_resumo_depois_do_credito(self, ana_identificada, llama):
+        # antes: depois do "crédito" vinha "Quer algo mais?" e o "é só isso" se perdia
+        ana_identificada.responder("uma calabresa grande")
+        assert ana_identificada.responder("é só isso, no cartão") == "Crédito ou débito?"
+        assert ana_identificada.responder("crédito").startswith("Seu pedido ficou assim:")
+        assert ana_identificada.etapa == "confirmando_pedido"
+        assert llama.chamadas == []
+
+    def test_e_com_mais_um_item_diz_o_total_e_coloca_no_sim(self, ana_identificada, llama):
+        # antes: ia pro modelo, e "manda também" virava "Não temos manda tambem"
+        ana_identificada.responder("uma calabresa grande")
+        assert ana_identificada.responder("e com uma coca 2 litros?") == (
+            "Com 1 Coca-Cola 2 Litros, o pedido fica em 79 reais e 80 centavos. Quer que eu coloque?")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+        assert ana_identificada.responder("manda também") == "Anotei 1 Coca-Cola 2 Litros. Quer algo mais?"
+        assert llama.chamadas == []
+
+    def test_nao_dois_corrige_a_quantidade_com_o_tamanho_pendente(self, ana_identificada, llama):
+        ana_identificada.responder("um guaraná")
+        assert ana_identificada.responder("não, dois guaranás") == (
+            "Ajustei para 2 Guaraná. Qual o tamanho: lata, 600 ml ou 2 litros?")
+        ana_identificada.responder("lata")
+        assert _itens(ana_identificada) == [("Guaraná", 2, "Lata")]
+        assert llama.chamadas == []
+
+    def test_a_de_catupiry_aponta_a_pizza_ja_anotada(self, ana_identificada):
+        # antes: "Borda de Catupiry ou Pizza de Frango com Catupiry?" e o "grande" depois não era entendido
+        ana_identificada.responder("uma pizza de frango")
+        assert ana_identificada.responder("a de catupiry") == "Qual o tamanho: pequena, média ou grande?"
+        ana_identificada.responder("grande")
+        assert _itens(ana_identificada) == [("Pizza de Frango com Catupiry", 1, "grande")]
+
+    def test_quais_sabores_lista_as_pizzas(self, ana_identificada, llama):
+        resposta = ana_identificada.responder("quais sabores vocês têm?")
+        assert resposta.startswith("Temos Pizza") and "Pizza de Calabresa" in resposta
+        assert llama.chamadas == []
+
+
 class TestFalaCurta:
     @pytest.mark.parametrize("fala, resposta", [
         ("tá", "Quer algo mais?"), ("é", "Quer algo mais?"), ("entendi", "Quer algo mais?"),

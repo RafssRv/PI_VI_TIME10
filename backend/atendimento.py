@@ -39,6 +39,7 @@ ACEITES_DA_SUGESTAO = {
     "quero", "vou querer", "quero sim", "sim quero", "quero essa", "quero esse", "sim quero essa",
     "sim quero esse", "vou querer essa", "vou querer esse", "pode ser essa", "pode ser esse",
     "essa", "esse", "essa mesmo", "esse mesmo", "manda essa", "manda esse", "pode mandar",
+    "manda tambem", "manda", "coloca", "coloca tambem", "pode colocar", "pode por", "poe", "bota",
 }
 # um "sim" solto nao compra nada (regra 12 do prompt), mas tambem nao pode ficar sem resposta
 RESPOSTAS_VAGAS_A_SUGESTAO = {"sim", "pode ser", "ok", "claro", "isso", "beleza", "certo", "aham", "uhum",
@@ -119,10 +120,15 @@ FRASE_DESPEDIDA = "Obrigado pela ligação! Até mais."
 FECHAR_NO_SIM = "fechar o pedido"
 # "tem cerveja?", "vocês têm coca?": pergunta de cardápio, responde pelo banco
 TEM_ALGO = re.compile(r"(?:(?:voces|vcs|vc|voce|ai|e)\s+)*(?:tem|teria|vende|vendem)\b")
+# "e com uma coca 2 litros?", "e se eu colocar uma coca?": quanto fica com mais um item
+E_COM_MAIS = re.compile(r"(?:e\s+)?(?:com|se (?:eu )?(?:colocar|pedir|adicionar|acrescentar|por))\s+(.+?)"
+                        r"(?:\s+(?:quanto fica|fica quanto|da quanto|vai quanto))?")
 DEIXA_PRA_LA = {"esquece", "esquece isso", "esquece entao", "deixa pra la", "deixa quieto", "nao precisa",
                 "nao precisa mais", "deixa"}
 SO_CONCORDA = {"ta", "e", "entendi", "sei", "ah", "ah ta", "ta ok", "blz", "ta entendi", "ah entendi", "ok entendi"}
-SINONIMOS_DE_CATEGORIA = {"refrigerante": "bebida", "refri": "bebida", "suco": "bebida", "agua": "bebida"}
+SINONIMOS_DE_CATEGORIA = {"refrigerante": "bebida", "refri": "bebida", "suco": "bebida", "agua": "bebida",
+                          # "sabores" sem o s final vira "sabore"
+                          "sabor": "pizza", "sabore": "pizza"}
 ENDERECO_NA_FALA = re.compile(r"\b(?:rua|avenida|av|travessa|alameda|estrada|rodovia)\b.*", re.IGNORECASE)
 FRASE_PEDE_TAMANHO = "pequena, média ou grande?"
 # so valem ate a primeira leitura da tabela tamanho: dali em diante as opcoes sao as do banco
@@ -784,7 +790,11 @@ class Atendimento:
                 and not mencoes(texto, repositorio.listar_cardapio(db))[1]):
             self._largar_duvida_de_produto()
             problemas = self._atualizar_pagamento(texto)
-            return problemas[0] if problemas else self._fechar_pedido()
+            if problemas:
+                # "é só isso, no cartão": a resposta "crédito" já pode ler o resumo
+                self._fechamento_solicitado = True
+                return problemas[0]
+            return self._fechar_pedido()
         sugestoes, self._sugestoes = self._sugestoes, []
         repetir, self._repetir = self._repetir, None
         # a sugestao termina em pergunta ("quer pedir?"), entao o sim responde a ela e so vale na fala seguinte
@@ -977,6 +987,9 @@ class Atendimento:
             self.endereco_entrega = endereco_falado
 
         if self._pendencia:
+            if evidencias or (duvida or {}).get("referencia"):
+                # a fala foi entendida ("não, dois guaranás", "a de catupiry"): repetir a pergunta não é desculpa
+                self._ultima_pergunta = None
             fala = self._esclarecer(self._pendencia)
             if evidencias:
                 fala = self._reconhecer_alteracoes(evidencias) + " " + fala
@@ -991,7 +1004,9 @@ class Atendimento:
                 fala = "Certo, a entrega será em {}. Quer algo mais?".format(endereco_falado)
             else:
                 fala = "Entendido. Quer algo mais?"
-                if fala_de_pagamento and self.pagamento:
+                if fala_de_pagamento and self.pagamento and self._fechamento_solicitado:
+                    fala = self._fechar_pedido()
+                elif fala_de_pagamento and self.pagamento:
                     fala = "Certo, pagamento {}. Quer algo mais?".format(self._pagamento_falado())
 
         self.historico.append({"role": "assistant", "content": fala})
@@ -1306,6 +1321,8 @@ class Atendimento:
             unicos, aviso = self._produtos_da_consulta(normalizado, palavras, citados)
             fala = aviso or " ".join("{}: {}.".format(p.nome, p.descricao or "ingredientes não informados")
                                      for p in unicos)
+        elif com_mais := self._quanto_fica_com(produtos, normalizado):
+            fala = com_mais
         elif disponivel := self._falar_se_tem(db, normalizado, palavras, citados):
             fala = disponivel
         elif (self._categoria_citada(normalizado) and not any(len(c) == 1 for _, _, c in citados)
@@ -1335,6 +1352,19 @@ class Atendimento:
                 fala = "Qual informação do cardápio você gostaria de consultar?"
         self.historico.extend([{"role": "user", "content": texto}, {"role": "assistant", "content": fala}])
         return fala
+
+    def _quanto_fica_com(self, produtos, normalizado):
+        """"e com uma coca 2 litros?": quanto o pedido fica com o item a mais; o sim seguinte coloca."""
+        hipotese = E_COM_MAIS.fullmatch(normalizado.strip())
+        if not hipotese or not self.carrinho:
+            return None
+        proposto, duvida, evidencias = interpretar(hipotese[1], produtos, self.carrinho, None, None, self._vocabulario)
+        if duvida or not evidencias or any(e["acao"] != "adicionar" for e in evidencias):
+            return None
+        total = sum((i["preco"] * i["quantidade"] for i in proposto), Decimal("0.00"))
+        itens = _juntar(["{} {}".format(e["quantidade"], _com_tamanho(e["produto"], e.get("tamanho"))) for e in evidencias])
+        self._repetir = hipotese[1]
+        return "Com {}, o pedido fica em {}. Quer que eu coloque?".format(itens, preco_falado(total))
 
     def _produtos_da_consulta(self, normalizado, palavras, citados):
         """
