@@ -2130,6 +2130,27 @@ class TestMudaAQuantidade:
         assert ana_identificada.responder("muda pra duas") == "Seu pedido ainda está vazio. O que vai querer?"
 
 
+class TestJeitosDeTirar:
+    @pytest.mark.parametrize("fala", ["esquece a coca", "não quero mais a coca", "não coloca coca não",
+                                      "muda a coca pra zero"])
+    def test_tira_o_item(self, ana_identificada, llama, fala):
+        # antes: "Não entendi" ou "Qual é a observação para Coca-Cola?"
+        ana_identificada.responder("uma calabresa grande e uma coca lata")
+        assert ana_identificada.responder(fala) == "Tirei 1 Coca-Cola Lata. Quer algo mais?"
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+        assert llama.chamadas == []
+
+    def test_nao_quero_mais_uma_tira_so_uma(self, ana_identificada):
+        ana_identificada.responder("duas cocas lata")
+        ana_identificada.responder("não quero mais uma coca")
+        assert _itens(ana_identificada) == [("Coca-Cola", 1, "Lata")]
+
+    def test_nao_coloca_o_que_nao_foi_pedido(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        assert ana_identificada.responder("não coloca coca não") == "Coca-Cola não está no seu pedido. Quer algo mais?"
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+
+
 class TestFalaSemPedido:
     @pytest.mark.parametrize("fala, resposta", [
         ("oi", "Olá! O que vai querer?"),

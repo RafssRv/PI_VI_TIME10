@@ -52,7 +52,8 @@ FIM_DO_PEDIDO = re.compile(r"\b(?:mais nada|nada mais|so isso|quero pagar|pode c
 VERBOS_DE_ADICIONAR = (r"adicione|adicionar|adiciona|acrescente|acrescentar|acrescenta|inclua|incluir|inclui|"
                        r"coloque|colocar|coloca|bote|botar|bota|ponha|poe|anote|anotar|anota")
 VERBOS_DE_REMOVER = (r"tire|tira|tirar|retire|retira|retirar|remova|remover|remove|exclua|excluir|exclui|"
-                     r"cancele|cancelar|cancela")
+                     r"cancele|cancelar|cancela|esquece|esqueca|esquecer")
+NAO_COLOCA = re.compile(r"nao\s+(?:" + VERBOS_DE_ADICIONAR + r"|manda|mande)\s+(.+?)(?:\s+nao)?")
 REMOVER = re.compile(r"\b(?:" + VERBOS_DE_REMOVER + r"|nao quero)\b")
 # Tamanho dito na fala: de pizza ("grande") ou de refrigerante ("lata", "de 600", "2 litros").
 # "Em média" não é tamanho, e o endereço ("Rua Grande") nem é olhado.
@@ -427,7 +428,15 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
         if len(nomes) == 1 and not any(i["produto"] in nomes for i in atual):
             # mudar a quantidade do que não foi pedido não é pedir de novo
             return deepcopy(atual), {"campo": "fora_do_pedido", "produto": nomes.pop()}, []
-        texto = "{} {} {}".format(verbo, numero, citado)
+        # "muda a coca pra zero" é tirar a coca
+        texto = "tira " + citado if numero == "zero" else "{} {} {}".format(verbo, numero, citado)
+    negado = NAO_COLOCA.fullmatch(_normalizar(texto).strip(" .,!?"))
+    if negado:
+        palavras, achados = mencoes(negado[1], produtos)
+        fora = [p for i, p in enumerate(palavras) if not any(a <= i < b for a, b, _ in achados)]
+        if achados and set(fora) <= {"a", "o", "as", "os", "uma", "um"}:
+            # "não coloca coca não": só o produto depois do verbo negado, então é tirar ele
+            texto = "tira " + negado[1]
     texto, tamanhos = separar_tamanhos(texto, vocabulario)
     normal = _normalizar(texto)
     # "Não temos X" é aviso, não pergunta aberta: não pode prender as falas seguintes.
@@ -668,7 +677,7 @@ def interpretar(texto, produtos, atual, pendente=None, referencia=None, vocabula
             # "Tire cebola da pizza" não é autorização para tirar a pizza.
             resto = REMOVER.sub("", prefixo).strip()
             resto = re.sub(NUMERO, "", resto)
-            if re.sub(r"\b(?:a|o|as|os|uma|um|sim|nao|pode|poderia|por|favor|eu|quero|queria|me|entao|agora)\b",
+            if re.sub(r"\b(?:a|o|as|os|uma|um|sim|nao|pode|poderia|por|favor|eu|quero|queria|me|entao|agora|mais)\b",
                       "", resto).strip():
                 duvida = {"campo": "observacao", "produto": produto.nome}
                 continue
