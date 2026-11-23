@@ -1,6 +1,6 @@
 # IARA
 
-A Iara atende os pedidos de uma pizzaria por voz. O cliente abre a página, clica em Ligar e conversa como faria pelo telefone: diz o CPF, pergunta preço, escolhe os sabores e fala como vai pagar. No fim ela lê o pedido inteiro, e só grava depois que o cliente confirma.
+A IARA atende os pedidos de uma pizzaria por voz. O cliente abre a página, clica em Ligar e conversa como faria pelo telefone: diz o CPF, pergunta preço, escolhe os sabores e fala como vai pagar. No fim ela lê o pedido inteiro, e só grava depois que o cliente confirma.
 
 Tudo roda no computador da pizzaria. O reconhecimento de fala, o modelo de linguagem, a voz e o banco de dados ficam na mesma máquina, sem API paga, e o áudio da conversa não é enviado para fora. A internet só é usada na instalação e na primeira chamada, para baixar as dependências e os modelos.
 
@@ -20,11 +20,11 @@ A resposta vira áudio no Piper e volta para a tela, que também mostra a legend
 
 Para pedir é preciso informar o CPF. Quem já tem cadastro é reconhecido pelo nome, e quem não tem faz o cadastro na própria conversa.
 
-O cardápio de exemplo tem 27 sabores de pizza, bebidas, sobremesas e bordas. As pizzas são vendidas nos tamanhos pequena, média e grande, e os refrigerantes em lata, 600 ml ou 2 litros. Se o cliente não disser o tamanho, a Iara pergunta. Ela não faz pizza meio a meio e oferece uma de cada sabor no lugar.
+O cardápio de exemplo tem 27 sabores de pizza, bebidas, sobremesas e bordas. As pizzas são vendidas nos tamanhos pequena, média e grande, e os refrigerantes em lata, 600 ml ou 2 litros. Se o cliente não disser o tamanho, a IARA pergunta. Ela não faz pizza meio a meio e oferece uma de cada sabor no lugar.
 
 Durante a conversa dá para trocar, tirar ou mudar itens, pedir sem cebola, mudar o endereço de entrega, pagar com Pix, cartão ou dinheiro com troco, perguntar o que foi pedido da última vez e pedir uma sugestão. A sugestão vem do histórico do cliente ou, se ele nunca pediu, dos itens mais vendidos.
 
-Existe também um painel para o dono da pizzaria, em [localhost:3000/admin/](http://localhost:3000/admin/). Ele mostra o faturamento, os produtos mais vendidos, os últimos pedidos e as chamadas que estão acontecendo, com a transcrição e o tempo de cada etapa. Como o painel ainda não tem login, os dados dele só são liberados no ambiente de desenvolvimento.
+Existe também um painel para o dono da pizzaria, em [localhost:3000/admin/](http://localhost:3000/admin/). Ele mostra o faturamento, os produtos mais vendidos, os últimos pedidos e as chamadas que estão acontecendo, com a transcrição e o tempo de cada etapa. Também é por lá que se acompanha o pedido depois da ligação: ele começa aberto, passa para em preparo, sai para entrega e termina como entregue, ou pode ser cancelado antes de sair. Como o painel ainda não tem login, os dados dele só são liberados no ambiente de desenvolvimento.
 
 ## Como rodar
 
@@ -48,41 +48,29 @@ Na primeira chamada o Whisper baixa o modelo `base`, então ela demora mais. A v
 
 ### Se você já tinha o banco de uma versão anterior
 
-Estes comandos acrescentam os tamanhos e o troco sem apagar clientes nem pedidos. Podem ser executados mais de uma vez.
+Estes comandos atualizam o banco sem apagar clientes nem pedidos. Rode nesta ordem. Eles podem ser executados mais de uma vez.
 
 ```powershell
 docker cp database/migracao_tamanhos.sql pizzaria-db:/tmp/migracao_tamanhos.sql
 docker exec pizzaria-db psql -U pizzaria -d pizzaria -f /tmp/migracao_tamanhos.sql
 docker cp database/migracao_troco.sql pizzaria-db:/tmp/migracao_troco.sql
 docker exec pizzaria-db psql -U pizzaria -d pizzaria -f /tmp/migracao_troco.sql
+docker cp database/migracao_status.sql pizzaria-db:/tmp/migracao_status.sql
+docker exec pizzaria-db psql -U pizzaria -d pizzaria -f /tmp/migracao_status.sql
+docker cp database/migracao_integridade.sql pizzaria-db:/tmp/migracao_integridade.sql
+docker exec pizzaria-db psql -U pizzaria -d pizzaria -f /tmp/migracao_integridade.sql
 python backend/seed.py --completar
 ```
+
+A migração de status troca o antigo `concluido` por `entregue` e encerra os pedidos que ficaram em `aberto` por mais de 12 horas. A de integridade cria regras para forma de pagamento, troco e preços. Se algum registro antigo quebrar uma delas, o Postgres informa qual foi e não aplica as regras até o registro ser corrigido.
 
 Se não fizer questão dos dados, `npm run banco:recriar` apaga o banco e cria outro do zero. Depois dele, rode o `npm run seed` de novo.
 
 ### Quando algo não funciona
 
-<<<<<<< HEAD
-E da coluna de andamento do pedido (painel "Pedidos em andamento"). Ela converte o antigo `concluido` em `entregue` e fecha os pedidos `aberto` com mais de 12 horas:
-
-```powershell
-docker cp database/migracao_status.sql pizzaria-db:/tmp/migracao_status.sql
-docker exec pizzaria-db psql -U pizzaria -d pizzaria -f /tmp/migracao_status.sql
-```
-
-E das regras de integridade (forma de pagamento, troco só em dinheiro, preços positivos). Se alguma linha antiga quebrar uma regra, o Postgres diz qual e nada é alterado:
-
-```powershell
-docker cp database/migracao_integridade.sql pizzaria-db:/tmp/migracao_integridade.sql
-docker exec pizzaria-db psql -U pizzaria -d pizzaria -f /tmp/migracao_integridade.sql
-```
-
-O Whisper baixa o modelo `base` no primeiro uso. A voz do Piper fica em `backend/agente/models/piper/`.
-=======
 Se aparecer erro de senha para o usuário `pizzaria`, é provável que outro PostgreSQL instalado no Windows esteja usando a porta 5432. Pare esse serviço e suba o banco novamente.
 
-Se a Iara responder perguntas simples e falhar em frases mais complicadas, confira se o Ollama está aberto e se o modelo foi baixado com `ollama list`.
->>>>>>> 155c76ce438572544cbffb812cc6f35946f3a061
+Se a IARA responder perguntas simples e falhar em frases mais complicadas, confira se o Ollama está aberto e se o modelo foi baixado com `ollama list`.
 
 ## Configuração
 
@@ -100,16 +88,7 @@ O projeto roda sem nenhuma configuração na máquina de desenvolvimento. Estas 
 
 ## Dados do cliente
 
-<<<<<<< HEAD
-- `backend/`: API, atendimento, banco e regras de pedido.
-- `backend/agente/`: prompt, interpretação de pedidos, serviços de voz e modelos.
-- `frontend/`: interface da chamada, estilos e recursos visuais.
-- `database/banco.sql`: esquema aplicado pelo Docker e pelos testes; `database/migracao_tamanhos.sql` atualiza um banco criado antes dos tamanhos de pizza, `database/migracao_troco.sql`, um criado antes do troco, `database/migracao_status.sql`, um criado antes do andamento do pedido, e `database/migracao_integridade.sql` acrescenta as regras de integridade.
-- `scripts/diagnostico/`: página de diagnóstico do WebSocket, disponível em `/teste` durante o desenvolvimento.
-- `tests/`: testes Python; `tests/frontend/` reúne os testes JavaScript.
-=======
 O CPF não é gravado em texto. O banco guarda um hash HMAC-SHA256 gerado com o segredo da variável `CPF_HMAC_SECRET`, e é por ele que o cliente é encontrado. Na legenda da chamada e no painel, o CPF aparece como "CPF informado".
->>>>>>> 155c76ce438572544cbffb812cc6f35946f3a061
 
 O modelo de linguagem não tem acesso ao banco. Todas as consultas e gravações passam por `backend/repositorio.py`.
 
@@ -130,7 +109,7 @@ Os testes em Python usam um banco separado, chamado `pizzaria_teste`, que é rec
 
 ## O que ainda falta
 
-A Iara atende pelo navegador do computador e não está ligada a uma linha telefônica. Os pedidos aparecem no painel, mas não há uma tela para a cozinha acompanhar o preparo. O sistema também não calcula taxa nem prazo de entrega, e ainda não testamos várias chamadas ao mesmo tempo.
+A IARA atende pelo navegador do computador e não está ligada a uma linha telefônica. O andamento do pedido é marcado à mão no painel, que ainda não tem login. O sistema também não calcula taxa nem prazo de entrega, e ainda não testamos várias chamadas ao mesmo tempo.
 
 ## Equipe
 
