@@ -35,6 +35,13 @@ docker cp database/migracao_troco.sql pizzaria-db:/tmp/migracao_troco.sql
 docker exec pizzaria-db psql -U pizzaria -d pizzaria -f /tmp/migracao_troco.sql
 ```
 
+E da coluna de andamento do pedido (painel "Pedidos em andamento"). Ela converte o antigo `concluido` em `entregue` e fecha os pedidos `aberto` com mais de 12 horas:
+
+```powershell
+docker cp database/migracao_status.sql pizzaria-db:/tmp/migracao_status.sql
+docker exec pizzaria-db psql -U pizzaria -d pizzaria -f /tmp/migracao_status.sql
+```
+
 O Whisper baixa o modelo `base` no primeiro uso. A voz do Piper fica em `backend/agente/models/piper/`.
 
 ## Configuração
@@ -56,7 +63,7 @@ Variáveis de ambiente do backend, a maioria lida por [backend/config.py](backen
 - `backend/`: API, atendimento, banco e regras de pedido.
 - `backend/agente/`: prompt, interpretação de pedidos, serviços de voz e modelos.
 - `frontend/`: interface da chamada, estilos e recursos visuais.
-- `database/banco.sql`: esquema aplicado pelo Docker e pelos testes; `database/migracao_tamanhos.sql` atualiza um banco criado antes dos tamanhos de pizza e `database/migracao_troco.sql`, um criado antes do troco.
+- `database/banco.sql`: esquema aplicado pelo Docker e pelos testes; `database/migracao_tamanhos.sql` atualiza um banco criado antes dos tamanhos de pizza, `database/migracao_troco.sql`, um criado antes do troco, e `database/migracao_status.sql`, um criado antes do andamento do pedido.
 - `scripts/diagnostico/`: página de diagnóstico do WebSocket, disponível em `/teste` durante o desenvolvimento.
 - `tests/`: testes Python; `tests/frontend/` reúne os testes JavaScript.
 

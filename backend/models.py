@@ -73,8 +73,17 @@ class Tamanho(Base):
         return "<Tamanho id={} nome={!r} desconto={}>".format(self.id, self.nome, self.desconto)
 
 
+# andamento do pedido: o atendente grava "aberto", o painel avanca um passo por vez
+STATUS_DO_PEDIDO = ("aberto", "em_preparo", "saiu_entrega", "entregue", "cancelado")
+
+
 class Pedido(Base):
     __tablename__ = "pedido"
+    __table_args__ = (
+        CheckConstraint("status IN ({})".format(", ".join("'{}'".format(s) for s in STATUS_DO_PEDIDO)),
+                        name="pedido_status_valido"),
+        CheckConstraint("troco_para > 0", name="ck_pedido_troco_positivo"),
+    )
 
     id = Column(Integer, primary_key=True)
     cliente_id = Column(Integer, ForeignKey("cliente.id"), nullable=False)

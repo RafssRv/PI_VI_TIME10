@@ -156,3 +156,26 @@ def montar_painel(pedidos, itens, primeiras, cardapio, dias, desde, agora, anter
             "indisponiveis": sorted(p.nome for p in cardapio if not p.ativo),
         },
     }
+
+
+def montar_em_andamento(pedidos, agora):
+    """
+    Cartão "Pedidos em andamento": o que a cozinha e a entrega precisam ver de cada pedido.
+    O endereço entra porque o entregador precisa dele; telefone e CPF não saem daqui.
+    """
+    def item(i):
+        nome = i.produto.nome + (" " + i.tamanho.nome if i.tamanho else "")
+        return {"quantidade": i.quantidade, "produto": nome, "observacao": i.observacao}
+
+    return {
+        "gerado_em": _local(agora).isoformat(),
+        "pedidos": [
+            {"id": p.id, "criado_em": _local(p.criado_em).isoformat(), "status": p.status,
+             "cliente": _primeiro_nome(p.cliente.nome if p.cliente else None),
+             "itens": [item(i) for i in p.itens], "total": _dinheiro(p.total),
+             "forma_pagamento": p.forma_pagamento,
+             "troco_para": _dinheiro(p.troco_para) if p.troco_para else None,
+             "endereco_entrega": p.endereco_entrega}
+            for p in pedidos
+        ],
+    }

@@ -167,6 +167,28 @@ tbody tr:last-child td { border-bottom: 0; }
 .selo.concluido, .selo.entregue { background: #dcf1e5; color: #1f6e43; }
 .selo.cancelado { background: #fde2e3; color: #a3262b; }
 
+/* Pedidos em andamento */
+.andamento-cartao { margin-bottom: 20px; }
+.andamento { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; }
+.andamento .vazio { color: var(--tinta-suave); }
+.pedido-andamento {
+  display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--linha);
+  border-radius: 10px; background: var(--papel);
+}
+.pedido-andamento header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.pedido-andamento ul { list-style: none; font-size: 14px; }
+.pedido-andamento li small { display: block; color: var(--tinta-suave); }
+.pedido-andamento .entrega { font-size: 13px; color: var(--tinta-suave); }
+.pedido-andamento .acoes { display: flex; gap: 8px; margin-top: auto; }
+.pedido-andamento .acoes button {
+  padding: 6px 10px; border-radius: 8px; font-size: 13px; font-weight: 600;
+  transition: transform 160ms var(--ease-out);
+}
+.pedido-andamento .acoes button:active { transform: scale(0.97); }
+.pedido-andamento .acoes button:disabled { opacity: 0.5; cursor: wait; }
+.pedido-andamento .avancar { background: var(--marca); color: #fff; }
+.pedido-andamento .cancelar { background: var(--fundo); color: #a3262b; }
+
 /* Cardapio */
 .cardapio .numero { font-size: 30px; font-weight: 700; }
 .cardapio p { font-size: 14px; color: var(--tinta-suave); }

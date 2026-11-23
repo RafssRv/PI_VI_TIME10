@@ -12,7 +12,7 @@ import painel
 AGORA = datetime(2026, 11, 4, 15, 0, tzinfo=timezone.utc).astimezone()
 
 
-def pedido(id, dias_atras, total, cliente_id=1, nome="Ana Beatriz Moraes", forma="pix", status="concluido"):
+def pedido(id, dias_atras, total, cliente_id=1, nome="Ana Beatriz Moraes", forma="pix", status="entregue"):
     return SimpleNamespace(id=id, criado_em=AGORA - timedelta(days=dias_atras), total=Decimal(total),
                            forma_pagamento=forma, status=status, cliente_id=cliente_id, nome=nome)
 

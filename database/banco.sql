@@ -44,7 +44,10 @@ CREATE TABLE pedido (
     forma_pagamento VARCHAR(20),
     -- "troco pra 100": nota com que o cliente vai pagar em dinheiro. vazio quando nao precisa de troco
     troco_para NUMERIC(10,2) CHECK (troco_para > 0),
-    status VARCHAR(20) NOT NULL DEFAULT 'aberto',
+    -- aberto (o atendente gravou) -> em_preparo -> saiu_entrega -> entregue; cancelado antes de sair
+    status VARCHAR(20) NOT NULL DEFAULT 'aberto'
+        CONSTRAINT pedido_status_valido
+        CHECK (status IN ('aberto', 'em_preparo', 'saiu_entrega', 'entregue', 'cancelado')),
     total NUMERIC(10,2) NOT NULL DEFAULT 0,
     criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -67,3 +70,7 @@ CREATE INDEX idx_pedido_cliente ON pedido (cliente_id);
 
 -- e pra montar/ler o pedido a gnt puxa os itens pelo pedido_id
 CREATE INDEX idx_item_pedido_pedido ON item_pedido (pedido_id);
+
+-- painel "pedidos em andamento": so os que ainda nao foram entregues nem cancelados
+CREATE INDEX idx_pedido_em_andamento ON pedido (criado_em)
+    WHERE status IN ('aberto', 'em_preparo', 'saiu_entrega');

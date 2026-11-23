@@ -22,6 +22,14 @@ const STATUS = {
   cancelado: "Cancelado"
 };
 
+// andamento do pedido: um passo por vez, cancelar só antes de sair para entrega (igual ao backend)
+const PROXIMA_ACAO = {
+  aberto: { status: "em_preparo", rotulo: "Começar preparo" },
+  em_preparo: { status: "saiu_entrega", rotulo: "Saiu para entrega" },
+  saiu_entrega: { status: "entregue", rotulo: "Marcar entregue" }
+};
+const PODE_CANCELAR = new Set(["aberto", "em_preparo"]);
+
 // ---------- formatacao basica ----------
 function escapar(texto) {
   return String(texto ?? "").replace(/[&<>"']/g, (c) => ({
@@ -150,6 +158,32 @@ function barrasHorizontais(linhas) {
       <span class="trilho"><span style="width:${((linha.valor / maximo) * 100).toFixed(1)}%;animation-delay:${i * 60}ms"></span></span>
       ${linha.detalhe ? `<span class="detalhe">${escapar(linha.detalhe)}</span>` : ""}
     </li>`).join("");
+}
+
+// cartão de cada pedido que a cozinha e a entrega ainda precisam tocar
+function htmlDoAndamento(pedidos) {
+  if (!pedidos.length) return `<p class="vazio">Nenhum pedido esperando preparo ou entrega.</p>`;
+  return pedidos.map((p) => {
+    const proxima = PROXIMA_ACAO[p.status];
+    const pagamento = (PAGAMENTOS[p.forma_pagamento || "nao_informado"] || p.forma_pagamento) +
+      (p.troco_para ? ` · troco para ${formatarDinheiro(p.troco_para)}` : "");
+    const itens = p.itens.map((i) => `<li>${escapar(i.quantidade)}× ${escapar(i.produto)}${
+      i.observacao ? `<small>${escapar(i.observacao)}</small>` : ""}</li>`).join("");
+    return `
+      <article class="pedido-andamento" data-pedido="${escapar(p.id)}">
+        <header>
+          <span class="pedido-id">#${escapar(p.id)} · ${escapar(formatarQuando(p.criado_em))}</span>
+          <span class="selo ${escapar(p.status)}">${escapar(STATUS[p.status] || p.status)}</span>
+        </header>
+        <strong>${escapar(p.cliente)}</strong>
+        <ul>${itens}</ul>
+        <p class="entrega">${escapar(p.endereco_entrega || "endereço a confirmar")}<br>${escapar(pagamento)} · ${escapar(formatarDinheiro(p.total))}</p>
+        <div class="acoes">
+          ${proxima ? `<button type="button" class="avancar" data-status="${proxima.status}">${proxima.rotulo}</button>` : ""}
+          ${PODE_CANCELAR.has(p.status) ? `<button type="button" class="cancelar" data-status="cancelado">Cancelar</button>` : ""}
+        </div>
+      </article>`;
+  }).join("");
 }
 
 // ========================================================
@@ -304,6 +338,45 @@ function iniciarPainel(documento, janela) {
     }
   }
 
+  // ---------- PEDIDOS EM ANDAMENTO ----------
+  const emAndamento = $("em-andamento");
+
+  async function carregarEmAndamento() {
+    try {
+      const resposta = await fetch("/api/admin/pedidos/andamento", { cache: "no-store" });
+      if (!resposta.ok) throw new Error("Não consegui ler os pedidos em andamento.");
+      const dados = await resposta.json();
+      emAndamento.innerHTML = htmlDoAndamento(dados.pedidos);
+      const n = dados.pedidos.length;
+      $("andamento-contador").textContent = n ? `${n} ${n === 1 ? "pedido" : "pedidos"}` : "";
+    } catch (erro) {
+      mostrarAviso(erro instanceof TypeError ? "Não consegui falar com o servidor backend." : erro.message);
+    }
+  }
+
+  emAndamento?.addEventListener("click", async (evento) => {
+    const botao = evento.target.closest("button[data-status]");
+    if (!botao) return;
+    const cartao = botao.closest("[data-pedido]");
+    const id = cartao.dataset.pedido;
+    if (botao.dataset.status === "cancelado" && !janela.confirm(`Cancelar o pedido #${id}?`)) return;
+    cartao.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+    try {
+      const resposta = await fetch(`/api/admin/pedidos/${encodeURIComponent(id)}/status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: botao.dataset.status })
+      });
+      // 409: outra tela já mudou o pedido; a lista nova mostra o status certo
+      if (resposta.status === 409) mostrarAviso(`O pedido #${id} já tinha mudado de status. A lista foi atualizada.`);
+      else if (!resposta.ok) throw new Error("Não consegui mudar o status do pedido.");
+    } catch (erro) {
+      mostrarAviso(erro instanceof TypeError ? "Não consegui falar com o servidor backend." : erro.message);
+    }
+    await carregarEmAndamento();
+    carregarDashboard();
+  });
+
   botoesPeriodo.forEach((botao) => botao.addEventListener("click", () => {
     dias = Number(botao.dataset.dias);
     janela.localStorage?.setItem("painel-dias", String(dias));
@@ -328,8 +401,12 @@ function iniciarPainel(documento, janela) {
 
   marcarPeriodo();
   carregarDashboard();
+  carregarEmAndamento();
   janela.setInterval(() => {
-    if (documento.visibilityState !== "hidden" && abaAtiva === "dashboard") carregarDashboard();
+    if (documento.visibilityState !== "hidden" && abaAtiva === "dashboard") {
+      carregarDashboard();
+      carregarEmAndamento();
+    }
   }, ATUALIZAR_A_CADA_MS);
 
   // ---------- 2. MONITORAMENTO AO VIVO (WEBSOCKET) ----------
@@ -528,6 +605,8 @@ function iniciarPainel(documento, janela) {
         }
       } else if (msg.tipo === "chamada_encerrada") {
         chamadasAtivasMap.delete(msg.chamada.id);
+        // a ligação gravou um pedido: ele já aparece para a cozinha sem esperar a próxima atualização
+        if (msg.chamada.pedido_id) carregarEmAndamento();
         historicoChamadasList.unshift(msg.chamada);
         renderizarChamadasAtivas();
         renderizarHistorico();
