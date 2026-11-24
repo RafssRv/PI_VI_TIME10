@@ -130,7 +130,7 @@
 
   // ---------- 3. legenda com palavras entrando ----------
   const conversa = document.getElementById("conversa");
-  const NOMES = { "VOCÊ": "Você", "ATENDENTE": "Atendente" };
+  const NOMES = { "VOCÊ": "Você" };
 
   function enfeitarFala(fala) {
     const quem = fala.querySelector(".quem");

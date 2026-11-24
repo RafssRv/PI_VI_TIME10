@@ -458,7 +458,7 @@ function iniciarPainel(documento, janela) {
       // Renderizar transcrições recentes
       const dialogos = (ch.transcricoes || []).map((t) => `
         <div class="msg-linha ${t.quem}">
-          <span class="msg-autor">${t.quem === "cliente" ? "Cliente" : "Atendente IA"}</span>
+          <span class="msg-autor">${t.quem === "cliente" ? "Cliente" : "IARA"}</span>
           ${escapar(t.texto)}
         </div>
       `).join("") || `<p class="fraco" style="text-align:center;padding:10px;">Aguardando falas...</p>`;
@@ -478,23 +478,23 @@ function iniciarPainel(documento, janela) {
           <div class="chamada-cabecalho">
             <div>
               <span class="chamada-id-titulo">Chamada #${ch.id.slice(0, 8)}</span>
-              <span class="selo ${etapa}" style="margin-left:8px;">${etapa.toUpperCase()}</span>
+              <span class="selo ${etapa}" style="margin-left:8px;">${escapar(capitalizar(etapa))}</span>
             </div>
             <span class="chamada-duracao">Turno: <strong>#${ch.turno_atual || 0}</strong></span>
           </div>
 
           <div class="pipeline-status-etapas">
             <div class="etapa-item ${etapa === 'ouvindo' ? 'ativa' : ''}">1. Ouvindo</div>
-            <div class="etapa-item ${etapa === 'transcrevendo' ? 'ativa' : ''}">2. Whisper</div>
-            <div class="etapa-item ${etapa === 'pensando' ? 'ativa' : ''}">3. Llama</div>
-            <div class="etapa-item ${etapa === 'respondendo' ? 'ativa' : ''}">4. Piper</div>
+            <div class="etapa-item ${etapa === 'transcrevendo' ? 'ativa' : ''}">2. Transcrevendo</div>
+            <div class="etapa-item ${etapa === 'pensando' ? 'ativa' : ''}">3. Pensando</div>
+            <div class="etapa-item ${etapa === 'respondendo' ? 'ativa' : ''}">4. Respondendo</div>
           </div>
 
           <div class="metricas-barra-latencias">
-            <div class="metrica-chip"><span>Whisper (STT)</span><strong>${latWhisper}</strong></div>
-            <div class="metrica-chip"><span>Llama 3.2 (LLM)</span><strong>${latLlm}</strong></div>
-            <div class="metrica-chip"><span>Piper (TTS)</span><strong>${latPiper}</strong></div>
-            <div class="metrica-chip destaque-total"><span>Total do Turno</span><strong>${latTotal}</strong></div>
+            <div class="metrica-chip"><span>Transcrição (Whisper)</span><strong>${latWhisper}</strong></div>
+            <div class="metrica-chip"><span>Atendimento (regras e Llama)</span><strong>${latLlm}</strong></div>
+            <div class="metrica-chip"><span>Voz (Piper)</span><strong>${latPiper}</strong></div>
+            <div class="metrica-chip destaque-total"><span>Total do turno</span><strong>${latTotal}</strong></div>
           </div>
 
           <div class="dialogo-ao-vivo">
