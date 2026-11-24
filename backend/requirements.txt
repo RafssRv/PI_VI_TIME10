@@ -2,15 +2,16 @@ fastapi==0.110.1
 uvicorn==0.29.0
 # 2.0.41+ eh a primeira que funciona no python 3.14 (a 2.0.29 quebra no import)
 sqlalchemy>=2.0.41,<2.1
-psycopg[binary]
-websockets
+psycopg[binary]>=3.3,<3.4
+websockets>=17,<18
 
+# faixas testadas na entrega: atualizacao de versao nova so dentro delas
 # agente de voz (pasta backend/agente)
-faster-whisper
+faster-whisper>=1.2,<1.3
 # o av 19 quebra o faster-whisper, por isso fica numa versao antes dele
 av<19
-piper-tts
-requests
+piper-tts>=1.8,<1.9
+requests>=2.34,<3
 
 # so para rodar a suite de testes (npm run teste)
-pytest
+pytest>=9,<10

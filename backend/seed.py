@@ -342,7 +342,7 @@ def main():
             len(produtos), ativos, len(produtos) - ativos))
         print("tamanhos: {}".format(", ".join("{} {}".format(g, n) for g, n in tamanhos)))
         print("clientes: {}".format(len(clientes)))
-        print("pedidos: {} concluidos, espalhados pelos ultimos 5 meses".format(pedidos))
+        print("pedidos: {} entregues, espalhados pelos ultimos 5 meses".format(pedidos))
         print("")
         print("cpfs pra testar a identificacao por voz (rf03):")
         for cliente, cpf in clientes:
