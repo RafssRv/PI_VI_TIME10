@@ -11,28 +11,35 @@
 @font-face { font-family: "Courier Prime"; src: url("fontes/courier-prime-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: swap; }
 
 /* as cores do fundo do celular sao "propriedades registradas" pra poder animar a troca */
-@property --c1 { syntax: "<color>"; inherits: true; initial-value: #3a1712; }
-@property --c2 { syntax: "<color>"; inherits: true; initial-value: #1d0b08; }
-@property --c3 { syntax: "<color>"; inherits: true; initial-value: #120605; }
+@property --c1 { syntax: "<color>"; inherits: true; initial-value: #24493a; }
+@property --c2 { syntax: "<color>"; inherits: true; initial-value: #13281f; }
+@property --c3 { syntax: "<color>"; inherits: true; initial-value: #0b1712; }
 
 /* ---------- cores e medidas ---------- */
+/* "cantina a noite": parede verde-manjericao, letreiro dourado, comanda de papel termico */
 :root {
-  --pedra: #d9dbd5;          /* fundo da pagina */
-  --pedra-funda: #c7cac2;
-  --tinta: #1b1c1a;          /* texto principal */
+  --parede: #1d3a2e;         /* fundo da pagina, verde laqueado */
+  --parede-funda: #142a21;
+  --filete: rgba(217, 167, 82, .28);  /* linhas douradas finas */
+  --clara: #eef0e8;          /* texto sobre o verde */
+  --clara-suave: #a9b8ad;
+  --ouro: #d9a752;           /* letreiro e etapa ativa */
+  --tinta: #1b1c1a;          /* texto no papel */
   --tinta-suave: #5b5e57;
-  --papel: #ffffff;
-  --marca: #c8442b;          /* cor da empresa (troca por empresa no futuro) */
-  --verde: #2e9e61;          /* ligar / conectado */
-  --vermelho: #e5484d;       /* desligar / erro */
-  --amarelo: #fff1a8;        /* marca-texto do item novo na comanda */
+  --papel: #fbfbf8;
+  --marca: #d9a752;
+  --verde: #3fae6a;          /* ligar / conectado */
+  --vermelho: #d8473a;       /* desligar / erro, cor de tomate */
+  --amarelo: #fbe7a6;        /* marca-texto do item novo na comanda */
+
+  --serifa: "Sitka Display", "Sitka Heading", Constantia, "Palatino Linotype", Georgia, serif;
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
 
-  --c1: #3a1712;
-  --c2: #1d0b08;
-  --c3: #120605;
+  --c1: #24493a;
+  --c2: #13281f;
+  --c3: #0b1712;
 }
 
 [hidden] { display: none !important; }
@@ -41,8 +48,12 @@
 
 body {
   min-height: 100vh;
-  background: var(--pedra);
-  color: var(--tinta);
+  /* luz de luminaria vinda de cima, como num salao a noite */
+  background:
+    radial-gradient(70% 55% at 50% -10%, rgba(217, 167, 82, .14), transparent 70%),
+    linear-gradient(var(--parede), var(--parede-funda));
+  background-attachment: fixed;
+  color: var(--clara);
   font-family: "Onest", system-ui, sans-serif;
   font-size: 15px;
   line-height: 1.45;
@@ -68,18 +79,18 @@ button:focus-visible, summary:focus-visible { outline: 3px solid var(--marca); o
 #bastidores { align-self: center; }
 
 .bastidores-topo { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-bottom: 20px; }
-.bastidores-topo h2 { font-size: 17px; font-weight: 600; }
+.bastidores-topo h2 { font-family: var(--serifa); font-size: 26px; font-weight: 400; line-height: 1.15; color: var(--ouro); }
 
-#chip-conexao { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--tinta-suave); }
-.bolinha { width: 8px; height: 8px; border-radius: 50%; background: #9a9d95; }
-.bolinha.conectado { background: var(--verde); box-shadow: 0 0 0 4px rgba(46, 158, 97, .18); }
+#chip-conexao { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--clara-suave); }
+.bolinha { width: 8px; height: 8px; border-radius: 50%; background: #6f8277; }
+.bolinha.conectado { background: var(--verde); box-shadow: 0 0 0 4px rgba(63, 174, 106, .2); }
 .bolinha.conectando { background: #d99a2b; }
 .bolinha.erro { background: var(--vermelho); }
 
 /* as 4 etapas, em pe, ligadas por um trilho */
 #tira-etapas { list-style: none; position: relative; }
 #tira-etapas::before {
-  content: ""; position: absolute; left: 6px; top: 10px; bottom: 10px; width: 2px; background: var(--pedra-funda);
+  content: ""; position: absolute; left: 6px; top: 10px; bottom: 10px; width: 1px; background: var(--filete);
 }
 .etapa {
   position: relative; display: grid; grid-template-columns: 1fr auto; column-gap: 12px;
@@ -87,56 +98,58 @@ button:focus-visible, summary:focus-visible { outline: 3px solid var(--marca); o
 }
 .etapa::before {
   content: ""; position: absolute; left: 0; top: 14px; width: 14px; height: 14px; border-radius: 50%;
-  background: var(--pedra); border: 2px solid #9a9d95;
+  background: var(--parede); border: 1px solid var(--clara-suave);
   transition: background-color 200ms ease, border-color 200ms ease;
 }
 .etapa-nome { font-weight: 600; font-size: 15px; }
-.etapa-desc { grid-column: 1 / -1; font-size: 13px; color: var(--tinta-suave); }
-.etapa-tempo { grid-row: 1; grid-column: 2; font-size: 13px; color: var(--tinta-suave); font-variant-numeric: tabular-nums; }
+.etapa-desc { grid-column: 1 / -1; font-size: 13px; color: var(--clara-suave); }
+.etapa-tempo { grid-row: 1; grid-column: 2; font-size: 13px; color: var(--clara-suave); font-variant-numeric: tabular-nums; }
 
-.etapa.ativa::before { background: var(--marca); border-color: var(--marca); animation: pulsar-etapa 1.2s ease-in-out infinite; }
-.etapa.ativa .etapa-tempo { color: var(--marca); font-weight: 600; }
+.etapa.ativa::before { background: var(--ouro); border-color: var(--ouro); animation: pulsar-etapa 1.2s ease-in-out infinite; }
+.etapa.ativa .etapa-nome, .etapa.ativa .etapa-tempo { color: var(--ouro); }
+.etapa.ativa .etapa-tempo { font-weight: 600; }
 .etapa.ativa .etapa-tempo::after { content: "…"; }
-.etapa.feita::before { background: var(--tinta); border-color: var(--tinta); }
+.etapa.feita::before { background: var(--clara); border-color: var(--clara); }
 .etapa.falhou::before { background: var(--vermelho); border-color: var(--vermelho); }
-.etapa.falhou .etapa-tempo { color: var(--vermelho); font-weight: 600; }
+.etapa.falhou .etapa-tempo { color: #f08a7e; font-weight: 600; }
 
 @keyframes pulsar-etapa {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(200, 68, 43, .35); }
-  50% { box-shadow: 0 0 0 6px rgba(200, 68, 43, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(217, 167, 82, .4); }
+  50% { box-shadow: 0 0 0 6px rgba(217, 167, 82, 0); }
 }
 
 .bloco-turno {
   display: flex; align-items: baseline; gap: 8px; margin-top: 18px; padding-top: 16px;
-  border-top: 1px solid var(--pedra-funda); font-size: 14px;
+  border-top: 1px solid var(--filete); font-size: 14px;
 }
-.bloco-turno strong { font-size: 20px; font-variant-numeric: tabular-nums; }
-.bloco-turno span { margin-left: auto; font-size: 13px; color: var(--tinta-suave); }
+.bloco-turno strong { font-family: var(--serifa); font-size: 30px; font-weight: 400; color: var(--ouro); font-variant-numeric: tabular-nums lining-nums; }
+.bloco-turno span { margin-left: auto; font-size: 13px; color: var(--clara-suave); }
 
 .nivel-mic { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; font-size: 14px; }
 #barras-mic { display: flex; align-items: center; gap: 3px; height: 22px; }
 #barras-mic span {
-  width: 3px; height: 4px; border-radius: 2px; background: var(--tinta-suave);
+  width: 3px; height: 4px; border-radius: 2px; background: var(--clara-suave);
   transform-origin: center; transition: transform 80ms linear;
 }
 body[data-estado="ouvindo"] #barras-mic span { background: var(--verde); }
 
 #detalhes-tecnicos { margin-top: 22px; font-size: 13px; }
-#detalhes-tecnicos summary { cursor: pointer; color: var(--tinta-suave); font-weight: 500; }
+#detalhes-tecnicos summary { cursor: pointer; color: var(--clara-suave); font-weight: 500; }
 #detalhes-tecnicos h3 { font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
 #player { width: 100%; height: 36px; }
 #link-painel { display: inline-block; margin-top: 18px; font-size: 13px; font-weight: 600; color: var(--marca); text-decoration: none; }
 #link-painel:hover { text-decoration: underline; }
 #log {
-  list-style: none; max-height: 180px; overflow-y: auto; background: rgba(255, 255, 255, .5);
+  list-style: none; max-height: 180px; overflow-y: auto; background: rgba(0, 0, 0, .22);
   border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.5;
 }
 
 /* ================= coluna 2: o celular ================= */
 #celular {
   width: 392px; height: clamp(640px, calc(100vh - 48px), 800px); border-radius: 56px; padding: 12px;
-  background: #121212;
-  box-shadow: 0 40px 80px -30px rgba(27, 28, 26, .55), 0 0 0 1px rgba(255, 255, 255, .06) inset;
+  background: #0e1411;
+  /* aro dourado fino, como o friso do letreiro */
+  box-shadow: 0 50px 90px -30px rgba(0, 0, 0, .7), 0 0 0 1px rgba(217, 167, 82, .35), 0 0 0 1px rgba(255, 255, 255, .05) inset;
 }
 .tela {
   position: relative; width: 100%; height: 100%; border-radius: 44px; overflow: hidden;
@@ -164,10 +177,11 @@ body[data-estado="ouvindo"] #barras-mic span { background: var(--verde); }
 }
 
 /* cada estado da chamada tem a sua cor */
-body[data-estado="ouvindo"]     { --c1: #d4502f; --c2: #8e2a1c; --c3: #2a0d0a; }
-body[data-estado="conectando"]  { --c1: #7a3426; --c2: #3e160f; --c3: #170807; }
-body[data-estado="processando"] { --c1: #d98a2b; --c2: #a8441f; --c3: #2a120a; }
-body[data-estado="falando"]     { --c1: #e86a3a; --c2: #b8321f; --c3: #2e0c09; }
+/* manjericao ouvindo, forno pensando, tomate falando */
+body[data-estado="ouvindo"]     { --c1: #3f9a64; --c2: #1f5a3c; --c3: #0c2118; }
+body[data-estado="conectando"]  { --c1: #35614a; --c2: #1a3328; --c3: #0b1712; }
+body[data-estado="processando"] { --c1: #d9a752; --c2: #8d5a1d; --c3: #22160a; }
+body[data-estado="falando"]     { --c1: #e0603f; --c2: #a5301f; --c3: #2a0c08; }
 body[data-estado="erro"]        { --c1: #4b4b4b; --c2: #2b2120; --c3: #121010; }
 
 .barra-sistema {
@@ -185,7 +199,7 @@ body[data-estado="erro"]        { --c1: #4b4b4b; --c2: #2b2120; --c3: #121010; }
 #orbe-canvas { width: 220px; height: 220px; display: block; }
 #anel { display: none; }
 
-.empresa { font-size: 28px; font-weight: 600; letter-spacing: -0.015em; margin-top: 4px; }
+.empresa { font-family: var(--serifa); font-size: 32px; font-weight: 400; line-height: 1.15; margin-top: 4px; }
 .linha-tempo { margin-top: 4px; font-size: 16px; color: rgba(255, 255, 255, .78); }
 #timer { font-variant-numeric: tabular-nums; }
 #timer::after { content: " ·"; }
@@ -248,11 +262,18 @@ body[data-estado="ocioso"] #timer { display: none; }
 }
 
 /* ================= coluna 3: comanda ================= */
-#comanda { align-self: center; }
+/* a comanda fica presa num trilho de cozinha, levemente torta como papel pendurado */
+#comanda { align-self: center; position: relative; padding-top: 10px; color: var(--tinta); }
+#comanda::before {
+  content: ""; position: absolute; top: 0; left: -12px; right: -12px; height: 16px; z-index: 1; border-radius: 3px;
+  background: linear-gradient(#e6e8e4 0%, #9ea39c 45%, #6c716a 55%, #b9bdb6 100%);
+  box-shadow: 0 6px 12px -4px rgba(0, 0, 0, .55);
+}
 .papel {
-  background: var(--papel); padding: 26px 26px 34px;
+  background: var(--papel); padding: 30px 26px 34px; color: var(--tinta);
   font-family: "Courier Prime", ui-monospace, monospace; font-size: 15px;
-  box-shadow: 0 18px 40px -24px rgba(27, 28, 26, .45);
+  transform: rotate(-0.8deg); transform-origin: top center;
+  box-shadow: 0 24px 40px -22px rgba(0, 0, 0, .6);
   /* borda de baixo picotada, como papel de impressora */
   -webkit-mask: radial-gradient(circle 8px at 50% 100%, transparent 98%, #000) 0 0 / 18px 100% repeat-x;
           mask: radial-gradient(circle 8px at 50% 100%, transparent 98%, #000) 0 0 / 18px 100% repeat-x;
@@ -272,7 +293,7 @@ body[data-estado="ocioso"] #timer { display: none; }
 .item .observacao { font-size: 13px; color: var(--tinta-suave); }
 .item .pontilhado { display: none; }
 .item .subtotal { font-variant-numeric: tabular-nums; }
-.item .selo-novo { display: inline-block; margin-left: 6px; font-family: "Onest", sans-serif; font-size: 10px; font-weight: 700; color: var(--marca); vertical-align: 2px; }
+.item .selo-novo { display: inline-block; margin-left: 6px; font-family: "Onest", sans-serif; font-size: 10px; font-weight: 700; color: #a5301f; vertical-align: 2px; }
 /* item novo: entra "impresso" e fica com marca-texto por um instante */
 .item.novo { animation: imprimir 420ms var(--ease-out) both, marca-texto 4s ease-out both; }
 @keyframes imprimir { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
@@ -292,8 +313,8 @@ body[data-estado="ocioso"] #timer { display: none; }
 }
 
 #comanda-aviso {
-  margin-top: 14px; padding: 10px 12px; font-size: 13px; color: var(--tinta);
-  background: rgba(255, 255, 255, .55); border-left: 3px solid #d99a2b; border-radius: 4px;
+  margin-top: 18px; padding: 10px 12px; font-size: 13px; color: var(--clara);
+  background: rgba(0, 0, 0, .2); border-left: 3px solid var(--ouro); border-radius: 4px;
 }
 
 /* ================= aviso de erro ================= */
@@ -312,21 +333,22 @@ body[data-estado="ocioso"] #timer { display: none; }
 /* ================= resumo do fim da chamada ================= */
 #resumo {
   position: fixed; inset: 0; z-index: 30; display: grid; place-items: center;
-  background: rgba(27, 28, 26, .55); animation: fundo-entra 200ms ease both;
+  background: rgba(8, 18, 13, .7); animation: fundo-entra 200ms ease both;
 }
 .resumo-caixa {
-  width: min(420px, 92vw); background: var(--papel); padding: 28px 26px 24px;
+  width: min(420px, 92vw); background: var(--papel); color: var(--tinta); padding: 28px 26px 24px;
+  border-top: 4px solid var(--ouro);
   font-family: "Courier Prime", ui-monospace, monospace;
   animation: resumo-entra 320ms var(--ease-out) both;
 }
-#resumo-titulo { font-family: "Onest", sans-serif; font-size: 22px; font-weight: 700; }
+#resumo-titulo { font-family: var(--serifa); font-size: 28px; font-weight: 400; }
 #resumo-linhas { font-size: 13px; color: var(--tinta-suave); margin-top: 4px; }
 #resumo-cliente { font-size: 14px; margin-top: 12px; padding-bottom: 10px; border-bottom: 1px dashed #9a9d95; }
 #resumo-itens { padding: 10px 0; }
 .resumo-rodape { border-top: 1px dashed #9a9d95; padding-top: 10px; }
 .resumo-botoes { display: flex; gap: 10px; margin-top: 22px; font-family: "Onest", sans-serif; }
-.botao-resumo { flex: 1; padding: 12px; border-radius: 12px; font-weight: 600; background: var(--pedra); }
-.botao-resumo.forte { background: var(--verde); color: #fff; }
+.botao-resumo { flex: 1; padding: 12px; border-radius: 12px; font-weight: 600; background: #e7e9e3; }
+.botao-resumo.forte { background: var(--parede); color: var(--clara); }
 .botao-resumo:active { transform: scale(0.97); }
 @keyframes fundo-entra { from { opacity: 0; } }
 @keyframes resumo-entra { from { opacity: 0; transform: translateY(12px) scale(0.98); } }

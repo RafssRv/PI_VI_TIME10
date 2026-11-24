@@ -2,7 +2,7 @@
 // (o projeto roda sem biblioteca externa, 100% nativo para funcionar sem internet).
 
 const ATUALIZAR_A_CADA_MS = 30000;
-const CORES = ["#c8442b", "#d99a2b", "#2e9e61", "#5b5e57", "#8e2a1c", "#9a9d95"];
+const CORES = ["#2f6b4f", "#d9a752", "#c8442b", "#7c8f83", "#8d5a1d", "#b9bdb6"];
 
 const PAGAMENTOS = {
   pix: "Pix",
@@ -440,7 +440,6 @@ function iniciarPainel(documento, janela) {
     if (chamadasAtivasMap.size === 0) {
       containerAtivas.innerHTML = `
         <div class="vazio-monitor">
-          <span class="icone-vazio">🎧</span>
           <p>Nenhuma chamada acontecendo no momento.</p>
           <small class="fraco">Quando um cliente iniciar a ligação pelo navegador, ela aparecerá aqui em tempo real com transcrição e latências.</small>
         </div>`;

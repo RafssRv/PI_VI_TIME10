@@ -118,8 +118,8 @@
     // a bolha principal, com reflexo de metal no canto de cima
     const corpo = ctx.createRadialGradient(centro - raio * 0.35, centro - raio * 0.4, raio * 0.1, centro, centro, raio * 1.1);
     corpo.addColorStop(0, "rgba(255, 255, 255, 0.98)");
-    corpo.addColorStop(0.45, "rgba(255, 244, 238, 0.85)");
-    corpo.addColorStop(1, "rgba(255, 220, 205, 0.35)");
+    corpo.addColorStop(0.45, "rgba(250, 246, 234, 0.86)");
+    corpo.addColorStop(1, "rgba(236, 226, 200, 0.35)");
     ctx.fillStyle = corpo;
     contorno(raio, amplitude, tempo);
     ctx.fill();
