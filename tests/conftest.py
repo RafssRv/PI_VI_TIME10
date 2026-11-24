@@ -176,3 +176,13 @@ def ana(db, cpf_da_ana):
     import repositorio
 
     return repositorio.buscar_cliente_por_cpf(db, cpf_da_ana)
+
+
+@pytest.fixture(autouse=True)
+def _sem_ollama_de_verdade(monkeypatch):
+    """o aquecimento da saudacao pre-carrega o ollama: nos testes isso nao sai da maquina."""
+    import agente.services.llm_service as llm
+
+    chamadas = []
+    monkeypatch.setattr(llm, "precarregar", lambda: chamadas.append(1))
+    return chamadas

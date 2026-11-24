@@ -101,3 +101,7 @@ class TestTroco:
     def test_sem_troco_fica_vazio(self, db, ana):
         pedido = repositorio.salvar_pedido(db, ana.id, self.ITEM, forma_pagamento="dinheiro")
         assert pedido.troco_para is None
+
+
+def test_no_pix_grudado_pelo_whisper():
+    assert repositorio.interpretar_pagamento("Nopix é só isso") == "pix"

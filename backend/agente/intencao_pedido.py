@@ -113,7 +113,9 @@ MUDA_A_QUANTIDADE = re.compile(r"(.*?\b(?:mude|muda|altere|altera|deixe|deixa))\
 NAO_E_PRODUTO = {"quanto", "quanta", *VERBOS_DE_ADICIONAR.split("|"), *VERBOS_DE_REMOVER.split("|")}
 # Grafias que ficam longe demais do nome para a comparação aproximada.
 GRAFIAS = {"calabreza": "calabresa", "mozarela": "mussarela", "muzarela": "mussarela",
-           "muzzarela": "mussarela", "mozzarela": "mussarela", "mozzarella": "mussarela"}
+           "muzzarela": "mussarela", "mozzarela": "mussarela", "mozzarella": "mussarela",
+           # "moçarela" e "muçarela" sao as grafias do dicionario, e o whisper escreve assim
+           "mocarela": "mussarela", "mucarela": "mussarela", "mozarella": "mussarela"}
 # Fala inteira que encerra o pedido. A cortesia ("obrigado") é retirada antes de comparar.
 FALAS_DE_FECHAR = {
     "e so isso", "so isso", "so isso mesmo", "e so isso mesmo", "e isso", "e isso ai", "e isso mesmo",

@@ -1563,6 +1563,16 @@ class TestEcoDoWhisper:
     def test_trecho_repetido_vira_um_so(self, ouvido, esperado):
         assert juntar_segmentos([SimpleNamespace(text=ouvido, no_speech_prob=0.1)]) == esperado
 
+    @pytest.mark.parametrize("ouvido, esperado", [
+        ("Nopix é só isso.", "no pix é só isso."),
+        ("Notepix é só isso.", "no pix é só isso."),
+        ("vou pagar no pix", "vou pagar no pix"),
+        ("Pix", "Pix"),
+    ])
+    def test_no_pix_grudado_pelo_whisper(self, ouvido, esperado):
+        # visto no ensaio da entrega: "no pix" virava uma palavra só e o pagamento não era entendido
+        assert juntar_segmentos([SimpleNamespace(text=ouvido, no_speech_prob=0.1)]) == esperado
+
     @pytest.mark.parametrize("ouvido", ["111.111.111-11", "111 222 333 96", "1 1 1 2 2 2 3 3 3 9 6", "19 99999 9999"])
     def test_numero_repetido_nao_e_eco(self, ouvido):
         assert juntar_segmentos([SimpleNamespace(text=ouvido, no_speech_prob=0.1)]) == ouvido
@@ -2369,6 +2379,19 @@ class TestNaConfirmacaoDoPedido:
     def test_tirar_o_ultimo_item_avisa_que_esvaziou(self, no_resumo):
         assert no_resumo.responder("tira a calabresa") == "Seu pedido está vazio. O que vai querer?"
         assert no_resumo.ultimo_pedido_id is None
+
+
+class TestGrafiaDoWhisper:
+    @pytest.mark.parametrize("fala", ["duas pizzas de moçarela médias", "duas muçarelas médias"])
+    def test_mocarela_e_mussarela(self, ana_identificada, llama, fala):
+        # antes: "Não temos pizzas de mocarela no cardápio" (grafia do dicionário, que o Whisper usa)
+        ana_identificada.responder(fala)
+        assert _itens(ana_identificada) == [("Pizza de Mussarela", 2, "média")]
+        assert llama.chamadas == []
+
+    def test_no_pix_grudado_fecha_o_pedido(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        assert ana_identificada.responder("Nopix é só isso").startswith("Seu pedido ficou assim:")
 
 
 class TestEsqueciDePedir:

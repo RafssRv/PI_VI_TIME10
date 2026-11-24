@@ -46,6 +46,12 @@ def _aquecer_agente():
     except Exception:
         # o primeiro turno tenta de novo e mostra o erro na tela
         logger.warning("etapa=aquecer_agente categoria=carregamento")
+    try:
+        from agente.services.llm_service import precarregar
+        precarregar()
+    except Exception:
+        # ollama desligado: as regras atendem quase tudo, e a fala que precisar dele mostra o erro
+        logger.warning("etapa=aquecer_ollama categoria=indisponivel")
 
 
 def aquecer_durante_a_saudacao():

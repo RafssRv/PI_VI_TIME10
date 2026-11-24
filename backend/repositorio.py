@@ -28,6 +28,8 @@ SINAIS_DE_PAGAMENTO = {
     "picks": "pix",
     "piques": "pix",
     "pixe": "pix",
+    # "no pix" grudado, como o whisper escreveu no ensaio da entrega
+    "nopix": "pix",
     "dinheiro": "dinheiro",
     "especie": "dinheiro",
     "vivo": "dinheiro",
