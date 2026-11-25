@@ -708,6 +708,18 @@ class TestHistoricoERecomendacao:
         assert "mais pedidos da casa" in resposta
         assert campeao.nome in resposta
 
+    def test_pizzaria_sem_nenhuma_venda_sugere_do_cardapio(self, atendimento, monkeypatch, llama):
+        # banco recem-criado: nem o cliente nem a casa tem historico
+        monkeypatch.setattr(repositorio, "itens_mais_pedidos_da_casa", lambda *a, **k: [])
+        _cadastrar_ate_confirmar(atendimento)
+        atendimento.responder("sim")
+        resposta = atendimento.responder("o que você recomenda?")
+        assert "Uma opção do cardápio é Pizza" in resposta
+        assert atendimento.carrinho == []
+        atendimento.responder("sim")
+        assert len(atendimento.carrinho) == 1
+        assert llama.chamadas == []
+
     def test_sem_conta_tambem_recebe_sugestao_real(self, atendimento, llama):
         atendimento.responder(CPF_NOVO)
         atendimento.responder("não")
