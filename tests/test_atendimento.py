@@ -3088,3 +3088,34 @@ class TestTamanhoCadastradoNoBanco:
     def test_tamanho_novo_entra_na_dica_do_whisper(self, tamanhos_novos, ana_identificada):
         dica = ana_identificada.dica_de_transcricao()
         assert "gigante" in dica and "350 ml" in dica
+
+
+class TestFecharComMicrofoneRuim:
+    """
+    falas reais de uma chamada de teste: o whisper errava o "so isso mesmo" e o
+    "finalize/feche o pedido" nao estava nas frases de fechar, entao a iara nunca fechava
+    """
+
+    @pytest.mark.parametrize("fala", [
+        "Sais mesmo.", "Sai-se o mesmo.", "Sai-se mesmo.", "Saís su mesmo.", "Saíso Mesmo.", "só isso mesmo",
+        "Finalize o pedido.", "Feche o pedido.", "Não, feche o pedido.", "pode finalizar o pedido",
+    ])
+    def test_fecha_o_pedido(self, ana_identificada, fala):
+        ana_identificada.responder("Pode ser uma pizza de Calabresa.")
+        ana_identificada.responder("Pequena.")
+        assert "Como você vai pagar" in ana_identificada.responder(fala)
+
+    @pytest.mark.parametrize("fala", ["não feche o pedido", "esse mesmo", "sim mesmo", "suco mesmo"])
+    def test_nao_fecha_sem_motivo(self, ana_identificada, fala):
+        ana_identificada.responder("Pode ser uma pizza de Calabresa.")
+        ana_identificada.responder("Pequena.")
+        assert "Como você vai pagar" not in ana_identificada.responder(fala)
+
+    @pytest.mark.parametrize("fala", ["Sai-se mesmo.", "Só isso mesmo.", "Pode finalizar o pedido."])
+    def test_fecha_depois_de_um_nao_entendi(self, ana_identificada, fala):
+        # o "nao entendi" ficava pendente e toda fala de fechar caia nele de novo
+        ana_identificada.responder("Acho que uma pizza de Calabresa.")
+        ana_identificada.responder("Uma pizza de Calabresa.")
+        ana_identificada.responder("Grande.")
+        assert "Não entendi" in ana_identificada.responder("eu acho que talvez")
+        assert "Como você vai pagar" in ana_identificada.responder(fala)

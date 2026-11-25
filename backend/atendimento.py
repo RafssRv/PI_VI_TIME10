@@ -17,7 +17,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from agente.controle_pedido import ControlePedido, ErroPedido, ProdutoCardapio
-from agente.intencao_pedido import (CONSULTA_HISTORICO, CONSULTA_PEDIDO_ATUAL, CONSULTA_RECOMENDACAO, FALAS_DE_FECHAR,
+from agente.intencao_pedido import (CONSULTA_HISTORICO, CONSULTA_PEDIDO_ATUAL, CONSULTA_RECOMENDACAO, eh_fala_de_fechar,
                                    AINDA_NAO_ACABOU, FECHAR, FIM_DO_PEDIDO, MEIO_A_MEIO, RECLAMA_DO_PEDIDO,
                                    TAMANHO_INDISPONIVEL, TAMANHOS_BASE,
                                    cardapio_completo, comando_negado, eh_consulta, interpretar, mencoes,
@@ -906,7 +906,7 @@ class Atendimento:
             self.historico.extend([{"role": "user", "content": texto},
                                    {"role": "assistant", "content": fala}])
             return fala
-        if sem_cortesia in FALAS_DE_FECHAR:
+        if eh_fala_de_fechar(sem_cortesia, texto):
             self._largar_duvida_de_produto()
             return self._fechar_pedido()
         # "nao" responde ao "quer algo mais?". com pergunta pendente, desiste dela e nao fecha nada
@@ -1124,7 +1124,8 @@ class Atendimento:
         """
         if not self._pendencia or not self._duvida_item:
             return False
-        if self._duvida_item.get("campo") not in {"produto", "fora_do_pedido"}:
+        # "intencao" eh o "nao entendi": sem largar ela, depois de um "nao entendi" o pedido nunca fechava
+        if self._duvida_item.get("campo") not in {"produto", "intencao", "fora_do_pedido"}:
             return False
         self._pendencia = self._duvida_item = self._ultima_pergunta = None
         self._tentativas = 0

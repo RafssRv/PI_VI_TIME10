@@ -72,7 +72,7 @@ const LIMIAR_MAXIMO = 0.05;         // acima disso sempre eh voz
 const FATOR_RUIDO = 3;              // voz = 3x mais alta q o barulho da sala
 const MS_TOLERANCIA_FALA = 400;     // pausa curta entre palavras nao conta como parar de falar
 const MS_PARA_CONFIRMAR_FALA = 300;
-const MS_DE_SILENCIO = 1200;
+const MS_DE_SILENCIO = 1800;         // com 1,2 s a fala era cortada quando o cliente parava pra pensar
 const MS_DESTAQUE_ITEM = 4000;      // quanto tempo o item novo fica em destaque na comanda
 
 // textos de cada estado da chamada, num lugar so.
@@ -962,7 +962,7 @@ function desenharBarras(nivel) {
   }
 }
 
-// percebe quando o cliente parou: juntou 300 ms de voz e depois ficou 1,2 s quieto
+// percebe quando o cliente parou: juntou 300 ms de voz e depois ficou 1,8 s quieto
 function vigiarSilencio(nivel, agora) {
   const passou = ultimoQuadro ? Math.min(agora - ultimoQuadro, 100) : 0;
   ultimoQuadro = agora;

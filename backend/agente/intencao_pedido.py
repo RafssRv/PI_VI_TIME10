@@ -7,7 +7,7 @@ não aproximados. Amplie com uma regressão de fala real ao aceitar outra constr
 import re
 from copy import deepcopy
 from functools import lru_cache
-from difflib import get_close_matches
+from difflib import SequenceMatcher, get_close_matches
 
 from repositorio import _normalizar, grupo_tamanho
 
@@ -125,6 +125,28 @@ FALAS_DE_FECHAR = {
     "acabei", "acabou", "mais nada", "nada mais", "nao quero mais nada", "ta bom assim", "esta bom assim",
     "quero pagar", "vou pagar", "pagar", "pode cobrar", "encerrar", "pode encerrar",
 }
+# "finalize o pedido", "feche", "pode encerrar a conta": a ordem de fechar dita de varios jeitos
+ORDEM_DE_FECHAR = re.compile(r"(?:pode |quero |vamos )?(?:finaliz|fech|encerr)(?:a|e|ar)"
+                             r"(?: (?:o|meu) pedido| a conta)?")
+
+
+def parece_so_isso_mesmo(fala):
+    """
+    o microfone ruim faz o whisper ouvir "so isso mesmo" como "sais mesmo", "saiso mesmo" ou
+    "sai-se mesmo". frase curta que comeca com s, termina em "mesmo" e soa parecido conta como fechar
+    """
+    palavras = fala.split()
+    if not 2 <= len(palavras) <= 4 or palavras[-1] != "mesmo" or not palavras[0].startswith("s"):
+        return False
+    # o "so i" quase sempre vira "sai" no whisper
+    return palavras[0].startswith("sai") or SequenceMatcher(None, "soissomesmo", "".join(palavras)).ratio() >= 0.78
+
+
+def eh_fala_de_fechar(fala, texto_cru=""):
+    # "nao, feche o pedido": com a virgula, o "nao" responde o "quer algo mais?" e o resto fecha
+    if re.match(r"\s*n[aã]o\s*[,.!]", texto_cru, re.IGNORECASE):
+        fala = fala.removeprefix("nao ")
+    return fala in FALAS_DE_FECHAR or bool(ORDEM_DE_FECHAR.fullmatch(fala)) or parece_so_isso_mesmo(fala)
 
 
 def quantidade(texto):

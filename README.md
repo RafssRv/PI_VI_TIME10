@@ -8,7 +8,7 @@ Este é o trabalho do Time 10 no Projeto Integrador VI, do curso de Engenharia d
 
 ## Como funciona
 
-A tela grava o microfone e percebe sozinha quando a pessoa parou de falar, depois de 1,2 segundo de silêncio. O áudio vai para o servidor por WebSocket e o Whisper transforma a fala em texto.
+A tela grava o microfone e percebe sozinha quando a pessoa parou de falar, depois de 1,8 segundo de silêncio. O áudio vai para o servidor por WebSocket e o Whisper transforma a fala em texto.
 
 Com o texto em mãos, quem decide o que fazer é o código em Python. Ele procura os produtos no cardápio, entende quantidades, tamanhos, trocas e forma de pagamento, e responde preços com o que está no banco. O Llama 3.2, que roda pelo Ollama, só é chamado quando essas regras não dão conta da fala. A resposta dele nunca altera o pedido diretamente.
 
