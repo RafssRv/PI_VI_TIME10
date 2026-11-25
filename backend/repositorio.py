@@ -28,6 +28,8 @@ SINAIS_DE_PAGAMENTO = {
     "picks": "pix",
     "piques": "pix",
     "pixe": "pix",
+    # "no pix" grudado, como o whisper escreveu no ensaio da entrega
+    "nopix": "pix",
     "dinheiro": "dinheiro",
     "especie": "dinheiro",
     "vivo": "dinheiro",
@@ -274,7 +276,7 @@ def itens_mais_pedidos_da_casa(db, limite=3, categoria=None):
     return [(produto, int(quantidade)) for produto, quantidade in linhas]
 
 
-def salvar_pedido(db, cliente_id, itens, endereco_entrega=None, forma_pagamento=None):
+def salvar_pedido(db, cliente_id, itens, endereco_entrega=None, forma_pagamento=None, troco_para=None):
     """
     RF09/RF11 + RIA04: valida cada item contra o cardapio e grava pedido e itens numa transacao so.
     forma_pagamento pode vir None de proposito (pedido nasce 'aberto' e alguem fecha depois),
@@ -360,10 +362,19 @@ def salvar_pedido(db, cliente_id, itens, endereco_entrega=None, forma_pagamento=
         total += preco_unitario * quantidade
         validados.append((produto, quantidade, preco_unitario, item.get("observacao"), tamanho))
 
+    # troco so existe pagando em dinheiro, e com uma nota maior que o total
+    if troco_para is not None:
+        troco_para = Decimal(str(troco_para)).quantize(Decimal("0.01"))
+        if forma_pagamento != "dinheiro":
+            raise ValueError("troco so vale para pagamento em dinheiro.")
+        if troco_para <= total:
+            raise ValueError("troco para {} nao cobre o total de {}.".format(troco_para, total))
+
     pedido = Pedido(
         cliente_id=cliente_id,
         endereco_entrega=endereco_entrega or cliente.endereco,
         forma_pagamento=forma_pagamento,
+        troco_para=troco_para,
         total=total.quantize(Decimal("0.01")),
     )
     for produto, quantidade, preco_unitario, observacao, tamanho in validados:
@@ -423,6 +434,42 @@ def dados_do_painel(db, desde=None, ate=None):
         desde, ate,
     ).all()
     return pedidos, itens
+
+
+# --- andamento do pedido (cozinha e entrega) ---
+# um passo por vez; cancelar so antes de sair pra entrega
+PROXIMO_STATUS = {"aberto": "em_preparo", "em_preparo": "saiu_entrega", "saiu_entrega": "entregue"}
+PODE_CANCELAR = {"aberto", "em_preparo"}
+EM_ANDAMENTO = tuple(PROXIMO_STATUS)
+
+
+def pedidos_em_andamento(db):
+    """pedidos que ainda nao foram entregues nem cancelados, do mais antigo pro mais novo, com os itens."""
+    return (
+        db.query(Pedido)
+        .options(joinedload(Pedido.cliente),
+                 selectinload(Pedido.itens).joinedload(ItemPedido.produto),
+                 selectinload(Pedido.itens).joinedload(ItemPedido.tamanho))
+        .filter(Pedido.status.in_(EM_ANDAMENTO))
+        .order_by(Pedido.criado_em, Pedido.id)
+        .all()
+    )
+
+
+def mudar_status(db, pedido_id, novo):
+    """
+    avanca ou cancela o pedido. LookupError se ele nao existe; ValueError se o passo nao vale
+    (pular etapa, voltar, mexer em pedido entregue ou cancelado).
+    """
+    pedido = db.get(Pedido, pedido_id)
+    if pedido is None:
+        raise LookupError("pedido {} nao existe.".format(pedido_id))
+    permitido = novo == PROXIMO_STATUS.get(pedido.status) or (novo == "cancelado" and pedido.status in PODE_CANCELAR)
+    if not permitido:
+        raise ValueError("o pedido {} esta {!r} e nao pode ir para {!r}.".format(pedido_id, pedido.status, novo))
+    pedido.status = novo
+    db.commit()
+    return pedido
 
 
 def primeiras_compras(db, cliente_ids):

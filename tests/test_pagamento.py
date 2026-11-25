@@ -81,3 +81,27 @@ class TestNoPedido:
         """o cliente ainda vai decidir; o pedido nasce aberto e alguem fecha depois."""
         pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "margherita", "tamanho": "grande", "quantidade": 1}])
         assert pedido.forma_pagamento is None
+
+
+class TestTroco:
+    ITEM = [{"produto": "margherita", "tamanho": "grande", "quantidade": 1}]
+
+    def test_troco_em_dinheiro_e_gravado(self, db, ana):
+        pedido = repositorio.salvar_pedido(db, ana.id, self.ITEM, forma_pagamento="dinheiro", troco_para=100)
+        assert str(pedido.troco_para) == "100.00"
+
+    def test_troco_so_vale_em_dinheiro(self, db, ana):
+        with pytest.raises(ValueError, match="dinheiro"):
+            repositorio.salvar_pedido(db, ana.id, self.ITEM, forma_pagamento="pix", troco_para=100)
+
+    def test_troco_menor_que_o_total_nao_grava(self, db, ana):
+        with pytest.raises(ValueError, match="nao cobre"):
+            repositorio.salvar_pedido(db, ana.id, self.ITEM, forma_pagamento="dinheiro", troco_para=10)
+
+    def test_sem_troco_fica_vazio(self, db, ana):
+        pedido = repositorio.salvar_pedido(db, ana.id, self.ITEM, forma_pagamento="dinheiro")
+        assert pedido.troco_para is None
+
+
+def test_no_pix_grudado_pelo_whisper():
+    assert repositorio.interpretar_pagamento("Nopix é só isso") == "pix"

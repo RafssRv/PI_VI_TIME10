@@ -24,6 +24,12 @@ NUMEROS_FALADOS = {
     "nove": "9",
 }
 
+DEZENAS_FALADAS = {
+    "dez": "10", "onze": "11", "doze": "12", "treze": "13", "quatorze": "14", "catorze": "14", "quinze": "15",
+    "dezesseis": "16", "dezessete": "17", "dezoito": "18", "dezenove": "19", "vinte": "20", "trinta": "30",
+    "quarenta": "40", "cinquenta": "50", "sessenta": "60", "setenta": "70", "oitenta": "80", "noventa": "90",
+}
+
 PALAVRAS_DE_NAO = {"nao", "dispenso", "negativo", "nunca"}
 PALAVRAS_DE_SIM = {
     "sim", "quero", "claro", "pode", "ok", "okay", "isso", "bora", "aceito", "gostaria",
@@ -34,7 +40,7 @@ PALAVRAS_DE_SIM = {
 # o que a pessoa fala antes do dado em si: "meu nome e joao", "moro na rua x"
 PREFIXO_NOME = re.compile(
     r"^\s*(?:o\s+)?(?:meu\s+nome\s+(?:completo\s+)?(?:é|e)|(?:eu\s+)?me\s+chamo|"
-    r"(?:eu\s+)?sou\s+(?:o|a)?|é)\s+",
+    r"(?:eu\s+)?sou\s+(?:o|a)?|(?:aqui\s+)?é(?:\s+(?:o|a)(?=\s))?)\s+",
     re.IGNORECASE,
 )
 PREFIXO_ENDERECO = re.compile(
@@ -84,6 +90,9 @@ QUANTIDADES_DA_TROCA = {
 def _item_da_troca(texto):
     texto = re.sub(r"^(?:a|o|as|os|mais)\s+", "", texto)
     partes = texto.split(maxsplit=1)
+    if not partes:
+        # "muda a calabresa pra pequena": tirado o tamanho, desse lado nao sobra nada
+        return None, ""
     quantidade = QUANTIDADES_DA_TROCA.get(partes[0])
     if partes[0].isdigit():
         quantidade = int(partes[0])
@@ -103,11 +112,20 @@ def _nome_na_troca(texto):
 def extrair_digitos(texto):
     """junta todos os digitos da fala, escritos com numero ou por extenso."""
     digitos = []
-    for palavra in _normalizar(texto).split():
+    palavras = _normalizar(texto).split()
+    for indice, palavra in enumerate(palavras):
         if palavra.isdigit():
             digitos.append(palavra)
         elif palavra in NUMEROS_FALADOS:
-            digitos.append(NUMEROS_FALADOS[palavra])
+            # "vinte e um": a unidade toma o lugar do zero da dezena
+            if (indice >= 2 and palavras[indice - 1] == "e" and palavras[indice - 2] in DEZENAS_FALADAS
+                    and DEZENAS_FALADAS[palavras[indice - 2]].endswith("0") and digitos):
+                digitos[-1] = digitos[-1][0] + NUMEROS_FALADOS[palavra]
+            else:
+                digitos.append(NUMEROS_FALADOS[palavra])
+        elif palavra in DEZENAS_FALADAS:
+            # telefone ditado em dezenas: "dezenove, nove nove..."
+            digitos.append(DEZENAS_FALADAS[palavra])
     return "".join(digitos)
 
 
@@ -131,6 +149,8 @@ LIMITE_SEM_FALA = 0.45
 def juntar_segmentos(segmentos):
     """Descarta o que o Whisper provavelmente inventou de um ruído, para não virar pedido."""
     texto = "".join(s.text for s in segmentos if s.no_speech_prob < LIMITE_SEM_FALA)
+    # "no pix" sai grudado ("Nopix", "Notepix"): nenhuma palavra do portugues termina em "pix"
+    texto = re.sub(r"\b[^\W\d_]+pix\b", "no pix", texto, flags=re.IGNORECASE)
     # O modelo às vezes repete o trecho ("pudim de leite, pudim de leite"), e isso cobraria dois.
     # Sem dígitos no trecho: número repetido em CPF ou telefone é dado, não eco.
     return re.sub(r"\b([^\W\d_][^\d]{3,}?)(?:[\s,.;]+\1\b)+", r"\1", texto, flags=re.IGNORECASE)
@@ -147,6 +167,22 @@ def confirmacao_explicita(texto):
         "pode fechar", "positivo", "podia", "pois nao", "fechou", "bora", "pode mandar", "manda ver",
         "sim senhor", "sim senhora", "isso ai", "otimo", "ta otimo", "show", "confirmar", "sim confirma",
     }
+
+
+# "sim, pode mandar", "isso mesmo, pode confirmar": só palavras de confirmação, com pelo menos uma forte.
+# "tá" e "é" sozinhos continuam sem gravar nada: são fracas
+CONFIRMACAO_FORTE = {"sim", "pode", "confirmar", "confirma", "confirmo", "confirmado", "isso", "certo", "correto",
+                     "ok", "okay", "claro", "beleza", "perfeito", "positivo", "exato", "exatamente", "fechado",
+                     "fechou", "certeza"}
+CONFIRMACAO_FRACA = {"mesmo", "ai", "mandar", "manda", "ver", "fechar", "fecha", "ta", "esta", "tudo", "com", "por",
+                     "favor", "obrigado", "obrigada", "valeu", "bom", "otimo", "pois", "e", "pode", "sim", "senhor",
+                     "senhora", "o", "pedido", "isso", "agora", "ja", "entao", "show", "bora", "aham", "uhum"}
+
+
+def confirmacao_composta(texto):
+    palavras = set(_normalizar(texto).split())
+    return ("?" not in texto and bool(palavras & CONFIRMACAO_FORTE)
+            and palavras <= CONFIRMACAO_FORTE | CONFIRMACAO_FRACA)
 
 
 def parece_confirmacao(texto):

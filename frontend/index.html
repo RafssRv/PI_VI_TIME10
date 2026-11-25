@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pizzaria Exemplo · atendimento por voz</title>
+  <title>IARA · Pizzaria Exemplo</title>
   <link rel="icon" type="image/svg+xml" href="logo.svg">
   <!-- o ?v=2 obriga o navegador a baixar a versao nova em vez de usar a guardada. mudou o css ou o js? aumente o numero -->
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="style.css?v=8">
 </head>
 <body data-estado="ocioso">
 
@@ -41,7 +41,7 @@
         </li>
         <li class="etapa" id="etapa-3">
           <span class="etapa-nome">Pensando</span>
-          <span class="etapa-desc">o Llama escreve a resposta</span>
+          <span class="etapa-desc">a IARA entende o pedido e decide a resposta</span>
           <span class="etapa-tempo">aguardando</span>
         </li>
         <li class="etapa" id="etapa-4">
@@ -88,7 +88,7 @@
           </div>
           <h1 class="empresa">Pizzaria Exemplo</h1>
           <p class="linha-tempo"><span id="timer">00:00</span> <span id="rotulo-estado">Chamada não iniciada</span></p>
-          <p id="sublinha-estado">clique em Ligar e fale normalmente</p>
+          <p id="sublinha-estado">clique em Ligar e fale com a IARA</p>
         </div>
 
         <!-- a conversa aparece como legenda ao vivo -->
@@ -154,8 +154,8 @@
   <!-- audio que o piper devolve; toca sozinho e com o microfone pausado -->
   <audio id="audio-resposta" hidden></audio>
 
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=7"></script>
   <!-- so visual (orbe, legenda, relogio). nao mexe na logica da chamada -->
-  <script src="visual.js?v=2"></script>
+  <script src="visual.js?v=4"></script>
 </body>
 </html>

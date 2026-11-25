@@ -3,7 +3,7 @@
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Body, Depends, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -46,3 +46,31 @@ def obter_painel(dias: int = Query(30), db=Depends(get_db)):
         logger.warning("etapa=painel categoria=banco")
         return JSONResponse(status_code=503, content={"erro": "Não consegui consultar o banco."})
     return painel.montar_painel(pedidos, itens, primeiras, cardapio, dias, desde, agora, anterior)
+
+
+@router.get("/pedidos/andamento")
+def obter_em_andamento(db=Depends(get_db)):
+    """pedidos que a cozinha e a entrega ainda precisam tocar."""
+    try:
+        pedidos = repositorio.pedidos_em_andamento(db)
+    except SQLAlchemyError:
+        logger.warning("etapa=pedidos_em_andamento categoria=banco")
+        return JSONResponse(status_code=503, content={"erro": "Não consegui consultar o banco."})
+    return painel.montar_em_andamento(pedidos, datetime.now().astimezone())
+
+
+@router.post("/pedidos/{pedido_id}/status")
+def mudar_status(pedido_id: int, status: str = Body(..., embed=True), db=Depends(get_db)):
+    """um passo por vez: aberto -> em_preparo -> saiu_entrega -> entregue, ou cancelado antes de sair."""
+    try:
+        pedido = repositorio.mudar_status(db, pedido_id, status)
+    except LookupError:
+        return JSONResponse(status_code=404, content={"erro": "Pedido não encontrado."})
+    except ValueError:
+        return JSONResponse(status_code=409, content={"erro": "Esse pedido não pode ir para esse status."})
+    except SQLAlchemyError:
+        db.rollback()
+        logger.warning("etapa=mudar_status categoria=banco pedido=%s", pedido_id)
+        return JSONResponse(status_code=503, content={"erro": "Não consegui gravar no banco."})
+    logger.info("etapa=mudar_status pedido=%s status=%s", pedido.id, pedido.status)
+    return {"id": pedido.id, "status": pedido.status}

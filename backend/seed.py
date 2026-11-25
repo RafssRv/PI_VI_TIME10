@@ -244,7 +244,7 @@ def inserir_pedidos(sessao, clientes, produtos, tamanhos):
                 cliente_id=cliente.id,
                 endereco_entrega=cliente.endereco,
                 forma_pagamento=random.choice(FORMAS_PAGAMENTO),
-                status="concluido",
+                status="entregue",
                 criado_em=momento,
             )
 
@@ -342,7 +342,7 @@ def main():
             len(produtos), ativos, len(produtos) - ativos))
         print("tamanhos: {}".format(", ".join("{} {}".format(g, n) for g, n in tamanhos)))
         print("clientes: {}".format(len(clientes)))
-        print("pedidos: {} concluidos, espalhados pelos ultimos 5 meses".format(pedidos))
+        print("pedidos: {} entregues, espalhados pelos ultimos 5 meses".format(pedidos))
         print("")
         print("cpfs pra testar a identificacao por voz (rf03):")
         for cliente, cpf in clientes:

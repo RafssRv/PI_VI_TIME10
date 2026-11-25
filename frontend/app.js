@@ -33,6 +33,7 @@
 //      de cima da mensagem, nao dentro de uma chave "pedido". o item usa os mesmos nomes do
 //      banco e a tela calcula o subtotal (preco_unitario x quantidade).
 //      forma_pagamento so aceita pix | dinheiro | cartao_credito | cartao_debito (ou null).
+//      troco_para ("100.00" ou null) so vem com dinheiro: a nota com que o cliente vai pagar.
 //      pedido_id=null indica rascunho; um número preserva a comanda já registrada.
 //  7 {"tipo":"pedido_salvo","pedido_id":42,"total":"91.80"}
 //      TEM QUE VIR ANTES do chamada_encerrada, senao o resumo diz "Pedido não salvo".
@@ -77,11 +78,11 @@ const MS_DESTAQUE_ITEM = 4000;      // quanto tempo o item novo fica em destaque
 // textos de cada estado da chamada, num lugar so.
 // o botao "Conectando" ganha os tres pontinhos piscando pelo css
 const ESTADOS = {
-  ocioso:      { rotulo: "Chamada não iniciada", sublinha: "clique em Ligar e fale normalmente", botao: "Ligar" },
+  ocioso:      { rotulo: "Chamada não iniciada", sublinha: "clique em Ligar e fale com a IARA", botao: "Ligar" },
   conectando:  { rotulo: "Chamando…",            sublinha: "abrindo microfone",                   botao: "Conectando" },
   ouvindo:     { rotulo: "Pode falar",           sublinha: "microfone ligado",                    botao: "Desligar" },
   processando: { rotulo: "Anotando seu pedido…", sublinha: "microfone pausado",                  botao: "Desligar" },
-  falando:     { rotulo: "Atendente falando",    sublinha: "microfone pausado", botao: "Desligar" },
+  falando:     { rotulo: "IARA falando",         sublinha: "microfone pausado", botao: "Desligar" },
   encerrada:   { rotulo: "Chamada encerrada",    sublinha: "",                                   botao: "Ligar de novo" },
   erro:        { rotulo: "Não deu certo",        sublinha: "",                                   botao: "Tentar de novo" }
 };
@@ -572,7 +573,7 @@ function criarFala(quem, parcial) {
 
   const rotulo = document.createElement("span");
   rotulo.className = "quem";
-  rotulo.textContent = quem === "cliente" ? "VOCÊ" : "ATENDENTE";
+  rotulo.textContent = quem === "cliente" ? "VOCÊ" : "IARA";
   bloco.appendChild(rotulo);
 
   const texto = document.createElement("p");
@@ -749,7 +750,8 @@ function desenharPedido(pedido, destino) {
     alvoCliente.textContent = "Cliente: ainda não identificado";
   }
 
-  alvoPagamento.textContent = formatarPagamento(pedido ? pedido.forma_pagamento : null);
+  alvoPagamento.textContent = formatarPagamento(pedido ? pedido.forma_pagamento : null) +
+    ((pedido && pedido.troco_para) ? " · troco para " + formatarDinheiro(pedido.troco_para) : "");
   alvoEntrega.textContent = (pedido && pedido.endereco_entrega) ? pedido.endereco_entrega : "a confirmar";
   alvoTotal.textContent = (pedido && pedido.total) ? formatarDinheiro(pedido.total) : "R$ 0,00";
 }

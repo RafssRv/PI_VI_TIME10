@@ -23,3 +23,9 @@ def conversar(mensagens, formato=None):
     resposta.raise_for_status()
 
     return resposta.json()["message"]["content"]
+
+
+def precarregar():
+    # pedido sem prompt so carrega o modelo: a 1a duvida da chamada levava ~60 s, depois disso ~1 s
+    requests.post(URL_DO_OLLAMA.rstrip("/") + "/api/generate",
+                  json={"model": MODELO_DO_OLLAMA, "keep_alive": "30m"}, timeout=120).raise_for_status()

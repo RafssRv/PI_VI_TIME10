@@ -355,6 +355,22 @@ class TestAtendenteFalaPrimeiro:
         monkeypatch.setattr(turno_de_voz, "carregar_agente", falha)
         turno_de_voz._aquecer_agente()
 
+    def test_aquecimento_pre_carrega_o_ollama(self, monkeypatch, _sem_ollama_de_verdade):
+        # a 1a duvida que so o modelo responde levava ~60 s com o ollama frio
+        monkeypatch.setattr(turno_de_voz, "carregar_agente", lambda: None)
+        turno_de_voz._aquecer_agente()
+        assert _sem_ollama_de_verdade == [1]
+
+    def test_ollama_desligado_nao_derruba_o_aquecimento(self, monkeypatch):
+        import agente.services.llm_service as llm
+
+        def desligado():
+            raise ConnectionError("ollama fora do ar")
+
+        monkeypatch.setattr(turno_de_voz, "carregar_agente", lambda: None)
+        monkeypatch.setattr(llm, "precarregar", desligado)
+        turno_de_voz._aquecer_agente()
+
 
 def test_cpf_ditado_nao_chega_ao_monitor_do_admin(tmp_path, monkeypatch):
     registros = []

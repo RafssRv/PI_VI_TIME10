@@ -4,6 +4,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -37,6 +38,10 @@ class Cliente(Base):
 
 class Produto(Base):
     __tablename__ = "produto"
+    __table_args__ = (
+        CheckConstraint("preco > 0", name="produto_preco_positivo"),
+        CheckConstraint("grupo_tamanho IN ('pizza', 'refrigerante')", name="produto_grupo_valido"),
+    )
 
     id = Column(Integer, primary_key=True)
     nome = Column(String(100), nullable=False)
@@ -57,6 +62,7 @@ class Tamanho(Base):
     __table_args__ = (
         CheckConstraint("fatias > 0", name="ck_tamanho_fatias_positivas"),
         CheckConstraint("desconto >= 0", name="ck_tamanho_desconto_nao_negativo"),
+        CheckConstraint("grupo IN ('pizza', 'refrigerante')", name="tamanho_grupo_valido"),
         UniqueConstraint("grupo", "nome", name="tamanho_grupo_nome_key"),
     )
 
@@ -73,13 +79,29 @@ class Tamanho(Base):
         return "<Tamanho id={} nome={!r} desconto={}>".format(self.id, self.nome, self.desconto)
 
 
+# andamento do pedido: o atendente grava "aberto", o painel avanca um passo por vez
+STATUS_DO_PEDIDO = ("aberto", "em_preparo", "saiu_entrega", "entregue", "cancelado")
+
+
 class Pedido(Base):
     __tablename__ = "pedido"
+    __table_args__ = (
+        CheckConstraint("status IN ({})".format(", ".join("'{}'".format(s) for s in STATUS_DO_PEDIDO)),
+                        name="pedido_status_valido"),
+        CheckConstraint("troco_para > 0", name="ck_pedido_troco_positivo"),
+        CheckConstraint("forma_pagamento IN ('pix', 'dinheiro', 'cartao_credito', 'cartao_debito')",
+                        name="pedido_forma_pagamento_valida"),
+        CheckConstraint("troco_para IS NULL OR (forma_pagamento IS NOT NULL AND forma_pagamento = 'dinheiro')", name="pedido_troco_so_em_dinheiro"),
+        CheckConstraint("total >= 0", name="pedido_total_nao_negativo"),
+        Index("idx_pedido_criado_em", "criado_em"),
+    )
 
     id = Column(Integer, primary_key=True)
     cliente_id = Column(Integer, ForeignKey("cliente.id"), nullable=False)
     endereco_entrega = Column(Text)
     forma_pagamento = Column(String(20))
+    # nota com que o cliente paga em dinheiro ("troco pra 100"); None quando nao precisa de troco
+    troco_para = Column(Numeric(10, 2))
     status = Column(String(20), nullable=False, server_default="aberto")
     total = Column(Numeric(10, 2), nullable=False, server_default="0")
     criado_em = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
