@@ -1290,7 +1290,7 @@ class TestSaudacao:
                 return SimpleNamespace(hour=hora)
         monkeypatch.setattr("atendimento.datetime", Relogio)
         fala = atendimento.saudacao()
-        assert fala.startswith("Olá, {}! Seja bem-vindo à pizzaria.".format(periodo))
+        assert fala.startswith("Olá, {}! Aqui é a IARA, seja bem-vindo à pizzaria.".format(periodo))
         assert "CPF" in fala
         assert atendimento.etapa == "aguardando_cpf"
 
@@ -3039,6 +3039,62 @@ class TestEsvaziaOPedido:
         ana_identificada.responder("uma calabresa média")
         ana_identificada.responder("troca a calabresa")
         ana_identificada.responder("cancele a troca")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "média")]
+
+    def test_troca_pra_perto_de_dinheiro_eh_troco(self, ana_identificada):
+        # ensaio de voz: o whisper ouviu "troco pra cem" como "troca pra cem"
+        ana_identificada.responder("uma calabresa grande")
+        resposta = ana_identificada.responder("vou pagar em dinheiro, troca pra cem")
+        assert "troca" not in resposta.lower()
+        assert ana_identificada.pagamento == "dinheiro"
+        assert ana_identificada.troco_para == Decimal("100")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+
+    def test_troco_mal_ouvido_perto_de_dinheiro_nao_vira_troca(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        resposta = ana_identificada.responder("Vou pagar em dinheiro, troca o paceno.")
+        assert "Repita a troca" not in resposta
+        assert ana_identificada.pagamento == "dinheiro"
+
+    def test_troca_de_produto_com_dinheiro_continua_troca(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande e uma coca lata")
+        ana_identificada.responder("vou pagar em dinheiro, troca a coca lata por uma água mineral")
+        assert "Coca-Cola Lata" not in [nome for nome, _, _ in _itens(ana_identificada)]
+
+    @pytest.mark.parametrize("fala", ["sim, pode confirmar", "pode confirmar o pedido"])
+    def test_pode_confirmar_durante_o_pedido_le_o_resumo_sem_gravar(self, ana_identificada, db, fala):
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        ana_identificada.responder("uma calabresa média, no pix")
+        assert "Seu pedido ficou assim" in ana_identificada.responder(fala)
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes
+
+    def test_pode_confirmar_depois_de_um_produto_inexistente(self, ana_identificada):
+        # ensaio de voz: "só isso" virou "Sorriso", e o "pode confirmar" ficava preso no "não temos"
+        ana_identificada.responder("uma calabresa média, no pix")
+        ana_identificada.responder("sorriso")
+        assert "Seu pedido ficou assim" in ana_identificada.responder("sim, pode confirmar")
+
+    def test_so_isso_no_meio_da_troca_fecha_o_pedido(self, ana_identificada):
+        ana_identificada.responder("uma calabresa média, no pix")
+        ana_identificada.responder("troca a calabresa")
+        resposta = ana_identificada.responder("só isso")
+        assert "Seu pedido ficou assim" in resposta
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "média")]
+
+    def test_troca_mal_entendida_nao_prende_a_chamada(self, ana_identificada):
+        # ensaio de voz: "troca pra cima" virou troca, e nem "pode confirmar" saia mais dela
+        ana_identificada.responder("uma calabresa média, no pix")
+        ana_identificada.responder("troca a calabresa")
+        assert "troca" in ana_identificada.responder("sais sou").lower()
+        resposta = ana_identificada.responder("sais sou")
+        assert resposta == "Não entendi a troca, então mantive seu pedido como estava. Quer algo mais?"
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "média")]
+        assert "Seu pedido ficou assim" in ana_identificada.responder("só isso")
+
+    def test_pode_confirmar_no_meio_da_troca_le_o_resumo(self, ana_identificada):
+        ana_identificada.responder("uma calabresa média, no pix")
+        ana_identificada.responder("troca a calabresa")
+        assert "Seu pedido ficou assim" in ana_identificada.responder("sim, pode confirmar")
         assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "média")]
 
     def test_tirar_um_item_continua_tirando_so_ele(self, ana_identificada):

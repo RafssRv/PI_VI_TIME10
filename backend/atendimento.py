@@ -466,7 +466,8 @@ class Atendimento:
             self.etapa = "aguardando_cpf"
         hora = datetime.now().hour
         periodo = "bom dia" if 5 <= hora < 12 else "boa tarde" if 12 <= hora < 18 else "boa noite"
-        self._ultima_resposta = "Olá, {}! Seja bem-vindo à pizzaria. {}".format(periodo, FRASE_PEDE_CPF)
+        # o piper le "IARA" como nome, nao soletra (conferido sintetizando e transcrevendo de volta)
+        self._ultima_resposta = "Olá, {}! Aqui é a IARA, seja bem-vindo à pizzaria. {}".format(periodo, FRASE_PEDE_CPF)
         return self._ultima_resposta
 
     def _inicio(self, texto):
@@ -798,6 +799,9 @@ class Atendimento:
         if (FIM_DO_PEDIDO.search(sem_cortesia) and not AINDA_NAO_ACABOU.search(texto) and not responde_tamanho
                 and not mencoes(texto, repositorio.listar_cardapio(db))[1]):
             self._largar_duvida_de_produto()
+            if self._troca_pendente:
+                # "só isso" no meio de uma troca incompleta: fecha com o pedido como estava
+                self._desistir_da_troca()
             problemas = self._atualizar_pagamento(texto)
             if problemas:
                 # "é só isso, no cartão": a resposta "crédito" já pode ler o resumo
@@ -825,6 +829,12 @@ class Atendimento:
         escolhido = self._resposta_da_ambiguidade(texto)
         if escolhido:
             texto = escolhido
+            normalizado = _normalizar(texto)
+        # o whisper ouviu "pagar em dinheiro, troco pra cem" como "troca pra cima" e "troca o paceno":
+        # perto de dinheiro, e sem o "por" de uma troca de produto, eh troco
+        palavras = normalizado.split()
+        if "dinheiro" in palavras and "troca" in palavras and "por" not in palavras:
+            texto = re.sub(r"\btroca\b", "troco", texto, flags=re.IGNORECASE)
             normalizado = _normalizar(texto)
         if comando_negado(texto):
             self._fechamento_solicitado = False
@@ -862,12 +872,22 @@ class Atendimento:
             muda_para and mencoes(muda_para[1], cardapio)[1]
             and (mencoes(muda_para[2], cardapio)[1] or separar_tamanhos(muda_para[2], self._vocabulario)[1])))
         if self._troca_pendente:
-            if sem_cortesia in DESISTE_DA_TROCA:
-                self._troca_pendente = False
-                self._pendencia = self._pendencia_antes_da_troca
-                self._pendencia_antes_da_troca = None
-                if self._controle:
-                    self._controle.definir_pendencia(self._pendencia)
+            # "so isso", ou a terceira fala sem troca: desiste dela e segue com a fala.
+            # sem isso a chamada ficava presa repetindo a pergunta da troca
+            presa = self._ultima_pergunta == self._pendencia and self._tentativas >= 2
+            if not pede_troca and sem_cortesia not in DESISTE_DA_TROCA and (
+                    presa or eh_fala_de_fechar(sem_cortesia, texto)):
+                self._desistir_da_troca()
+                self._tentativas = 0
+                self._ultima_pergunta = None
+                if not eh_fala_de_fechar(sem_cortesia, texto):
+                    fala = "Não entendi a troca, então mantive seu pedido como estava. " + (
+                        self._esclarecer(self._pendencia) if self._pendencia else "Quer algo mais?")
+                    self.historico.extend([{"role": "user", "content": texto},
+                                           {"role": "assistant", "content": fala}])
+                    return fala
+            elif sem_cortesia in DESISTE_DA_TROCA:
+                self._desistir_da_troca()
                 fala = self._continuar_pedido()
                 if fala.startswith("Alteração anotada"):
                     # nada foi alterado: a troca foi abandonada
@@ -875,7 +895,7 @@ class Atendimento:
                 self.historico.extend([{"role": "user", "content": texto},
                                        {"role": "assistant", "content": fala}])
                 return fala
-            if not pede_troca:
+            if self._troca_pendente and not pede_troca:
                 return self._esclarecer(self._pendencia)
         if pede_troca:
             if not self._troca_pendente:
@@ -1242,6 +1262,14 @@ class Atendimento:
                 return "Não entendi um dos produtos. Pode repetir o nome dele?"
             return "Entendi {} unidades, mas faltou o nome. Qual é o produto dessas {} unidades?".format(qtd, qtd)
         return "Não identifiquei o produto no cardápio. Pode repetir só o nome do produto?"
+
+    def _desistir_da_troca(self):
+        # a troca nao mudou nada no carrinho: volta a pergunta que estava aberta antes dela
+        self._troca_pendente = False
+        self._pendencia = self._pendencia_antes_da_troca
+        self._pendencia_antes_da_troca = None
+        if self._controle:
+            self._controle.definir_pendencia(self._pendencia)
 
     def _esclarecer(self, pergunta):
         if self._ultima_pergunta == pergunta:

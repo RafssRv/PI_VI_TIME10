@@ -124,6 +124,8 @@ FALAS_DE_FECHAR = {
     "finalizar", "finaliza", "pode finalizar", "quero finalizar", "finaliza o pedido", "terminei",
     "acabei", "acabou", "mais nada", "nada mais", "nao quero mais nada", "ta bom assim", "esta bom assim",
     "quero pagar", "vou pagar", "pagar", "pode cobrar", "encerrar", "pode encerrar",
+    # ainda montando o pedido, "pode confirmar" so pede o resumo: gravar exige outro sim depois dele
+    "pode confirmar", "sim pode confirmar", "pode confirmar o pedido", "confirma o pedido",
 }
 # "finalize o pedido", "feche", "pode encerrar a conta": a ordem de fechar dita de varios jeitos
 ORDEM_DE_FECHAR = re.compile(r"(?:pode |quero |vamos )?(?:finaliz|fech|encerr)(?:a|e|ar)"

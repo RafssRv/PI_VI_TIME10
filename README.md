@@ -72,6 +72,26 @@ Se aparecer erro de senha para o usuário `pizzaria`, é provável que outro Pos
 
 Se a IARA responder perguntas simples e falhar em frases mais complicadas, confira se o Ollama está aberto e se o modelo foi baixado com `ollama list`.
 
+### Antes de apresentar
+
+1. Abra o Docker e o Ollama e rode `npm run dev`. Espere o terminal mostrar que o servidor está em `localhost:3000`.
+2. Abra [localhost:3000](http://localhost:3000) e o painel em [localhost:3000/admin](http://localhost:3000/admin), de preferência lado a lado. Na aba "Monitoramento ao vivo" do painel, a chamada aparece em tempo real.
+3. Faça uma ligação de aquecimento e diga um CPF do seed. Na primeira chamada o Whisper leva uns 10 segundos para carregar, e o modelo do Ollama pode levar até um minuto se acabou de ser aberto. Desligue e só então comece a apresentação.
+4. Use um fone com microfone, ou fale perto do microfone do notebook. Depois de cada frase, espere cerca de 2 segundos em silêncio: é assim que a IARA percebe que você terminou de falar.
+
+Um roteiro que mostra quase tudo em uma chamada:
+
+| Você fala | O que mostrar |
+| :-- | :-- |
+| o CPF de um cliente do seed | a IARA chama o cliente pelo nome |
+| "o que você me recomenda?" | a sugestão vem do histórico do cliente |
+| "quero uma pizza de calabresa grande e uma coca lata" | os itens aparecem na comanda com preço |
+| "tira a cebola da calabresa" | a observação entra no item |
+| "dinheiro, preciso de troco para cem reais" | pagamento e troco na comanda |
+| "só isso" e depois "sim, pode confirmar" | o pedido é gravado e aparece em "Pedidos em andamento" no painel |
+
+No painel, o botão "Começar preparo" leva o pedido até "entregue", um passo por vez.
+
 ## Configuração
 
 O projeto roda sem nenhuma configuração na máquina de desenvolvimento. Estas variáveis de ambiente mudam o padrão:
@@ -109,7 +129,7 @@ Os testes em Python usam um banco separado, chamado `pizzaria_teste`, que é rec
 
 ## O que ainda falta
 
-A IARA atende pelo navegador do computador e não está ligada a uma linha telefônica. O andamento do pedido é marcado à mão no painel, que ainda não tem login. O sistema também não calcula taxa nem prazo de entrega, e ainda não testamos várias chamadas ao mesmo tempo.
+A IARA atende pelo navegador do computador e não está ligada a uma linha telefônica. O andamento do pedido é marcado à mão no painel, que ainda não tem login. O sistema também não calcula taxa nem prazo de entrega. Testamos três chamadas ao mesmo tempo, mas não uma carga maior.
 
 ## Equipe
 

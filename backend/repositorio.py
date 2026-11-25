@@ -245,7 +245,8 @@ def itens_mais_pedidos_do_cliente(db, cliente_id, limite=3, categoria=None):
         db.query(Produto, func.sum(ItemPedido.quantidade))
         .join(ItemPedido, ItemPedido.produto_id == Produto.id)
         .join(Pedido, Pedido.id == ItemPedido.pedido_id)
-        .filter(Pedido.cliente_id == cliente_id, Produto.ativo.is_(True))
+        # pedido cancelado nao eh o "de sempre" do cliente
+        .filter(Pedido.cliente_id == cliente_id, Pedido.status != "cancelado", Produto.ativo.is_(True))
     )
     if categoria:
         consulta = consulta.filter(Produto.categoria.ilike("%" + categoria + "%"))
@@ -263,7 +264,8 @@ def itens_mais_pedidos_da_casa(db, limite=3, categoria=None):
     consulta = (
         db.query(Produto, func.sum(ItemPedido.quantidade))
         .join(ItemPedido, ItemPedido.produto_id == Produto.id)
-        .filter(Produto.ativo.is_(True))
+        .join(Pedido, Pedido.id == ItemPedido.pedido_id)
+        .filter(Pedido.status != "cancelado", Produto.ativo.is_(True))
     )
     if categoria:
         consulta = consulta.filter(Produto.categoria.ilike("%" + categoria + "%"))
