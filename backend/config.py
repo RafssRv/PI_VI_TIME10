@@ -18,6 +18,13 @@ URL_DO_BANCO = os.getenv(
 URL_DO_OLLAMA = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 MODELO_DO_OLLAMA = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 
+# voz do piper para síntese de resposta. padrão: pt_BR-dii-medium (feminina).
+# opções disponíveis em backend/agente/models/piper/:
+#   "pt_BR-dii-medium" (feminina natural / suave)
+#   "pt_BR-sage-medium" (feminina expressiva / firme)
+#   "pt_BR-cadu-medium" (masculina original)
+VOZ_DO_PIPER = os.getenv("PIPER_VOICE", "pt_BR-dii-medium")
+
 _SEGREDO_DE_DESENVOLVIMENTO = "segredo-local-so-pra-desenvolvimento-nao-use-de-verdade"
 
 # fora do ambiente de desenvolvimento (AMBIENTE=producao, homolog, oq for) o servidor nem sobe
