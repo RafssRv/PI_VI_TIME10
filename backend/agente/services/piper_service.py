@@ -43,11 +43,29 @@ _voz = None
 _trava = threading.Lock()
 
 
+def _resolver_caminho_modelo():
+    try:
+        from config import VOZ_DO_PIPER
+        nome = VOZ_DO_PIPER
+    except Exception:
+        nome = "pt_BR-dii-medium"
+
+    if not nome.endswith(".onnx"):
+        nome = f"{nome}.onnx"
+
+    caminho = PASTA_AGENTE / "models" / "piper" / nome
+    if not caminho.exists():
+        # fallback para cadu caso o arquivo do modelo configurado nao esteja presente
+        caminho = PASTA_AGENTE / "models" / "piper" / "pt_BR-cadu-medium.onnx"
+    return caminho
+
+
 def _carregar_voz():
     global _voz
     if _voz is None:
         from piper import PiperVoice
-        _voz = PiperVoice.load(str(PASTA_AGENTE / "models" / "piper" / "pt_BR-cadu-medium.onnx"))
+        caminho_modelo = _resolver_caminho_modelo()
+        _voz = PiperVoice.load(str(caminho_modelo))
     return _voz
 
 
@@ -59,7 +77,13 @@ def sintetizar_resposta(texto, caminho=None):
         with _trava:
             voz = _carregar_voz()
             with wave.open(str(output), "wb") as arquivo:
-                voz.synthesize_wav(texto, arquivo)
+                # ajustes para fala mais natural (menos acelerada e com variacao tonal suave)
+                try:
+                    from piper.config import SynthesisConfig
+                    config = SynthesisConfig(length_scale=1.05, noise_scale=0.7, noise_w_scale=0.8)
+                    voz.synthesize_wav(texto, arquivo, syn_config=config)
+                except (TypeError, ImportError, AttributeError):
+                    voz.synthesize_wav(texto, arquivo)
     except Exception:
         # o erro original pode repetir a fala do cliente: nao vai pra mensagem nem pro log
         raise RuntimeError("o piper falhou") from None

@@ -105,6 +105,7 @@ O projeto roda sem nenhuma configuração na máquina de desenvolvimento. Estas 
 | `OLLAMA_MODEL` | Modelo de linguagem. O padrão é `llama3.2:3b`. Para usar outro, baixe antes com `ollama pull`. |
 | `WHISPER_MODEL` | Tamanho do Whisper. O padrão é `base`. |
 | `WHISPER_DEVICE` | O padrão é `cuda`. Sem placa NVIDIA, o Whisper passa a usar o processador. |
+| `PIPER_VOICE` | Modelo de voz do Piper. O padrão é `pt_BR-dii-medium` (feminina). Outras opções: `pt_BR-sage-medium` (feminina) ou `pt_BR-cadu-medium` (masculina). |
 
 ## Dados do cliente
 
