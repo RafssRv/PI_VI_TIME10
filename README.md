@@ -44,7 +44,7 @@ Depois abra [localhost:3000](http://localhost:3000) e libere o microfone.
 
 O `npm run seed` só é necessário na primeira vez. Ele cadastra o cardápio, alguns clientes fictícios e pedidos antigos, e mostra no terminal os CPFs que podem ser usados nos testes. Nas próximas vezes basta o `npm run dev`, que também liga o banco.
 
-Na primeira chamada o Whisper baixa o modelo `base`, então ela demora mais. A voz do Piper já vem no repositório, em `backend/agente/models/piper/`.
+Na primeira chamada o Whisper baixa o modelo `base`, então ela demora mais. As vozes do Piper já vêm no repositório, em `backend/agente/models/piper/`. A IARA fala com a voz feminina `pt_BR-dii-medium`, e a variável `PIPER_VOICE` troca para outra (veja [Configuração](#configuração)). O motivo da troca e a comparação entre as vozes estão em [docs/voz.md](docs/voz.md).
 
 ### Se você já tinha o banco de uma versão anterior
 
@@ -117,7 +117,7 @@ O modelo de linguagem não tem acesso ao banco. Todas as consultas e gravações
 
 A pasta `backend` tem o servidor e as regras da conversa. O arquivo principal é o `atendimento.py`, que conduz a chamada da saudação até a confirmação. Em `backend/agente` ficam a interpretação das falas, o prompt e os serviços de transcrição, linguagem e voz.
 
-A tela da chamada está em `frontend` e o painel em `frontend/admin`. O esquema do banco e as migrações estão em `database`, e os testes em `tests`. A pasta `scripts/diagnostico` guarda uma página usada para testar o WebSocket sem a tela.
+A tela da chamada está em `frontend` e o painel em `frontend/admin`. O esquema do banco e as migrações estão em `database`, e os testes em `tests`. A pasta `scripts/diagnostico` guarda uma página usada para testar o WebSocket sem a tela, e a pasta `docs` reúne relatórios de decisões, como o da troca de voz.
 
 ## Testes
 
