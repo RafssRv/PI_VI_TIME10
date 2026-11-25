@@ -708,6 +708,18 @@ class TestHistoricoERecomendacao:
         assert "mais pedidos da casa" in resposta
         assert campeao.nome in resposta
 
+    def test_pizzaria_sem_nenhuma_venda_sugere_do_cardapio(self, atendimento, monkeypatch, llama):
+        # banco recem-criado: nem o cliente nem a casa tem historico
+        monkeypatch.setattr(repositorio, "itens_mais_pedidos_da_casa", lambda *a, **k: [])
+        _cadastrar_ate_confirmar(atendimento)
+        atendimento.responder("sim")
+        resposta = atendimento.responder("o que você recomenda?")
+        assert "Uma opção do cardápio é Pizza" in resposta
+        assert atendimento.carrinho == []
+        atendimento.responder("sim")
+        assert len(atendimento.carrinho) == 1
+        assert llama.chamadas == []
+
     def test_sem_conta_tambem_recebe_sugestao_real(self, atendimento, llama):
         atendimento.responder(CPF_NOVO)
         atendimento.responder("não")
@@ -1278,7 +1290,7 @@ class TestSaudacao:
                 return SimpleNamespace(hour=hora)
         monkeypatch.setattr("atendimento.datetime", Relogio)
         fala = atendimento.saudacao()
-        assert fala.startswith("Olá, {}! Seja bem-vindo à pizzaria.".format(periodo))
+        assert fala.startswith("Olá, {}! Aqui é a IARA, seja bem-vindo à pizzaria.".format(periodo))
         assert "CPF" in fala
         assert atendimento.etapa == "aguardando_cpf"
 
@@ -3029,6 +3041,62 @@ class TestEsvaziaOPedido:
         ana_identificada.responder("cancele a troca")
         assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "média")]
 
+    def test_troca_pra_perto_de_dinheiro_eh_troco(self, ana_identificada):
+        # ensaio de voz: o whisper ouviu "troco pra cem" como "troca pra cem"
+        ana_identificada.responder("uma calabresa grande")
+        resposta = ana_identificada.responder("vou pagar em dinheiro, troca pra cem")
+        assert "troca" not in resposta.lower()
+        assert ana_identificada.pagamento == "dinheiro"
+        assert ana_identificada.troco_para == Decimal("100")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "grande")]
+
+    def test_troco_mal_ouvido_perto_de_dinheiro_nao_vira_troca(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande")
+        resposta = ana_identificada.responder("Vou pagar em dinheiro, troca o paceno.")
+        assert "Repita a troca" not in resposta
+        assert ana_identificada.pagamento == "dinheiro"
+
+    def test_troca_de_produto_com_dinheiro_continua_troca(self, ana_identificada):
+        ana_identificada.responder("uma calabresa grande e uma coca lata")
+        ana_identificada.responder("vou pagar em dinheiro, troca a coca lata por uma água mineral")
+        assert "Coca-Cola Lata" not in [nome for nome, _, _ in _itens(ana_identificada)]
+
+    @pytest.mark.parametrize("fala", ["sim, pode confirmar", "pode confirmar o pedido"])
+    def test_pode_confirmar_durante_o_pedido_le_o_resumo_sem_gravar(self, ana_identificada, db, fala):
+        antes = _pedidos_da(db, ana_identificada.cliente_id)
+        ana_identificada.responder("uma calabresa média, no pix")
+        assert "Seu pedido ficou assim" in ana_identificada.responder(fala)
+        assert _pedidos_da(db, ana_identificada.cliente_id) == antes
+
+    def test_pode_confirmar_depois_de_um_produto_inexistente(self, ana_identificada):
+        # ensaio de voz: "só isso" virou "Sorriso", e o "pode confirmar" ficava preso no "não temos"
+        ana_identificada.responder("uma calabresa média, no pix")
+        ana_identificada.responder("sorriso")
+        assert "Seu pedido ficou assim" in ana_identificada.responder("sim, pode confirmar")
+
+    def test_so_isso_no_meio_da_troca_fecha_o_pedido(self, ana_identificada):
+        ana_identificada.responder("uma calabresa média, no pix")
+        ana_identificada.responder("troca a calabresa")
+        resposta = ana_identificada.responder("só isso")
+        assert "Seu pedido ficou assim" in resposta
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "média")]
+
+    def test_troca_mal_entendida_nao_prende_a_chamada(self, ana_identificada):
+        # ensaio de voz: "troca pra cima" virou troca, e nem "pode confirmar" saia mais dela
+        ana_identificada.responder("uma calabresa média, no pix")
+        ana_identificada.responder("troca a calabresa")
+        assert "troca" in ana_identificada.responder("sais sou").lower()
+        resposta = ana_identificada.responder("sais sou")
+        assert resposta == "Não entendi a troca, então mantive seu pedido como estava. Quer algo mais?"
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "média")]
+        assert "Seu pedido ficou assim" in ana_identificada.responder("só isso")
+
+    def test_pode_confirmar_no_meio_da_troca_le_o_resumo(self, ana_identificada):
+        ana_identificada.responder("uma calabresa média, no pix")
+        ana_identificada.responder("troca a calabresa")
+        assert "Seu pedido ficou assim" in ana_identificada.responder("sim, pode confirmar")
+        assert _itens(ana_identificada) == [("Pizza de Calabresa", 1, "média")]
+
     def test_tirar_um_item_continua_tirando_so_ele(self, ana_identificada):
         ana_identificada.responder("uma calabresa média e uma coca lata")
         ana_identificada.responder("tira a coca")
@@ -3076,3 +3144,34 @@ class TestTamanhoCadastradoNoBanco:
     def test_tamanho_novo_entra_na_dica_do_whisper(self, tamanhos_novos, ana_identificada):
         dica = ana_identificada.dica_de_transcricao()
         assert "gigante" in dica and "350 ml" in dica
+
+
+class TestFecharComMicrofoneRuim:
+    """
+    falas reais de uma chamada de teste: o whisper errava o "so isso mesmo" e o
+    "finalize/feche o pedido" nao estava nas frases de fechar, entao a iara nunca fechava
+    """
+
+    @pytest.mark.parametrize("fala", [
+        "Sais mesmo.", "Sai-se o mesmo.", "Sai-se mesmo.", "Saís su mesmo.", "Saíso Mesmo.", "só isso mesmo",
+        "Finalize o pedido.", "Feche o pedido.", "Não, feche o pedido.", "pode finalizar o pedido",
+    ])
+    def test_fecha_o_pedido(self, ana_identificada, fala):
+        ana_identificada.responder("Pode ser uma pizza de Calabresa.")
+        ana_identificada.responder("Pequena.")
+        assert "Como você vai pagar" in ana_identificada.responder(fala)
+
+    @pytest.mark.parametrize("fala", ["não feche o pedido", "esse mesmo", "sim mesmo", "suco mesmo"])
+    def test_nao_fecha_sem_motivo(self, ana_identificada, fala):
+        ana_identificada.responder("Pode ser uma pizza de Calabresa.")
+        ana_identificada.responder("Pequena.")
+        assert "Como você vai pagar" not in ana_identificada.responder(fala)
+
+    @pytest.mark.parametrize("fala", ["Sai-se mesmo.", "Só isso mesmo.", "Pode finalizar o pedido."])
+    def test_fecha_depois_de_um_nao_entendi(self, ana_identificada, fala):
+        # o "nao entendi" ficava pendente e toda fala de fechar caia nele de novo
+        ana_identificada.responder("Acho que uma pizza de Calabresa.")
+        ana_identificada.responder("Uma pizza de Calabresa.")
+        ana_identificada.responder("Grande.")
+        assert "Não entendi" in ana_identificada.responder("eu acho que talvez")
+        assert "Como você vai pagar" in ana_identificada.responder(fala)

@@ -8,7 +8,7 @@ Este é o trabalho do Time 10 no Projeto Integrador VI, do curso de Engenharia d
 
 ## Como funciona
 
-A tela grava o microfone e percebe sozinha quando a pessoa parou de falar, depois de 1,2 segundo de silêncio. O áudio vai para o servidor por WebSocket e o Whisper transforma a fala em texto.
+A tela grava o microfone e percebe sozinha quando a pessoa parou de falar, depois de 1,8 segundo de silêncio. O áudio vai para o servidor por WebSocket e o Whisper transforma a fala em texto.
 
 Com o texto em mãos, quem decide o que fazer é o código em Python. Ele procura os produtos no cardápio, entende quantidades, tamanhos, trocas e forma de pagamento, e responde preços com o que está no banco. O Llama 3.2, que roda pelo Ollama, só é chamado quando essas regras não dão conta da fala. A resposta dele nunca altera o pedido diretamente.
 
@@ -44,7 +44,7 @@ Depois abra [localhost:3000](http://localhost:3000) e libere o microfone.
 
 O `npm run seed` só é necessário na primeira vez. Ele cadastra o cardápio, alguns clientes fictícios e pedidos antigos, e mostra no terminal os CPFs que podem ser usados nos testes. Nas próximas vezes basta o `npm run dev`, que também liga o banco.
 
-Na primeira chamada o Whisper baixa o modelo `base`, então ela demora mais. A voz do Piper já vem no repositório, em `backend/agente/models/piper/`.
+Na primeira chamada o Whisper baixa o modelo `base`, então ela demora mais. As vozes do Piper já vêm no repositório, em `backend/agente/models/piper/`. A IARA fala com a voz feminina `pt_BR-dii-medium`, e a variável `PIPER_VOICE` troca para outra (veja [Configuração](#configuração)). O motivo da troca e a comparação entre as vozes estão em [docs/voz.md](docs/voz.md).
 
 ### Se você já tinha o banco de uma versão anterior
 
@@ -72,6 +72,26 @@ Se aparecer erro de senha para o usuário `pizzaria`, é provável que outro Pos
 
 Se a IARA responder perguntas simples e falhar em frases mais complicadas, confira se o Ollama está aberto e se o modelo foi baixado com `ollama list`.
 
+### Antes de apresentar
+
+1. Abra o Docker e o Ollama e rode `npm run dev`. Espere o terminal mostrar que o servidor está em `localhost:3000`.
+2. Abra [localhost:3000](http://localhost:3000) e o painel em [localhost:3000/admin](http://localhost:3000/admin), de preferência lado a lado. Na aba "Monitoramento ao vivo" do painel, a chamada aparece em tempo real.
+3. Faça uma ligação de aquecimento e diga um CPF do seed. Na primeira chamada o Whisper leva uns 10 segundos para carregar, e o modelo do Ollama pode levar até um minuto se acabou de ser aberto. Desligue e só então comece a apresentação.
+4. Use um fone com microfone, ou fale perto do microfone do notebook. Depois de cada frase, espere cerca de 2 segundos em silêncio: é assim que a IARA percebe que você terminou de falar.
+
+Um roteiro que mostra quase tudo em uma chamada:
+
+| Você fala | O que mostrar |
+| :-- | :-- |
+| o CPF de um cliente do seed | a IARA chama o cliente pelo nome |
+| "o que você me recomenda?" | a sugestão vem do histórico do cliente |
+| "quero uma pizza de calabresa grande e uma coca lata" | os itens aparecem na comanda com preço |
+| "tira a cebola da calabresa" | a observação entra no item |
+| "dinheiro, preciso de troco para cem reais" | pagamento e troco na comanda |
+| "só isso" e depois "sim, pode confirmar" | o pedido é gravado e aparece em "Pedidos em andamento" no painel |
+
+No painel, o botão "Começar preparo" leva o pedido até "entregue", um passo por vez.
+
 ## Configuração
 
 O projeto roda sem nenhuma configuração na máquina de desenvolvimento. Estas variáveis de ambiente mudam o padrão:
@@ -85,6 +105,7 @@ O projeto roda sem nenhuma configuração na máquina de desenvolvimento. Estas 
 | `OLLAMA_MODEL` | Modelo de linguagem. O padrão é `llama3.2:3b`. Para usar outro, baixe antes com `ollama pull`. |
 | `WHISPER_MODEL` | Tamanho do Whisper. O padrão é `base`. |
 | `WHISPER_DEVICE` | O padrão é `cuda`. Sem placa NVIDIA, o Whisper passa a usar o processador. |
+| `PIPER_VOICE` | Modelo de voz do Piper. O padrão é `pt_BR-dii-medium` (feminina). Outras opções: `pt_BR-sage-medium` (feminina) ou `pt_BR-cadu-medium` (masculina). |
 
 ## Dados do cliente
 
@@ -96,7 +117,7 @@ O modelo de linguagem não tem acesso ao banco. Todas as consultas e gravações
 
 A pasta `backend` tem o servidor e as regras da conversa. O arquivo principal é o `atendimento.py`, que conduz a chamada da saudação até a confirmação. Em `backend/agente` ficam a interpretação das falas, o prompt e os serviços de transcrição, linguagem e voz.
 
-A tela da chamada está em `frontend` e o painel em `frontend/admin`. O esquema do banco e as migrações estão em `database`, e os testes em `tests`. A pasta `scripts/diagnostico` guarda uma página usada para testar o WebSocket sem a tela.
+A tela da chamada está em `frontend` e o painel em `frontend/admin`. O esquema do banco e as migrações estão em `database`, e os testes em `tests`. A pasta `scripts/diagnostico` guarda uma página usada para testar o WebSocket sem a tela, e a pasta `docs` reúne relatórios de decisões, como o da troca de voz.
 
 ## Testes
 
@@ -109,7 +130,7 @@ Os testes em Python usam um banco separado, chamado `pizzaria_teste`, que é rec
 
 ## O que ainda falta
 
-A IARA atende pelo navegador do computador e não está ligada a uma linha telefônica. O andamento do pedido é marcado à mão no painel, que ainda não tem login. O sistema também não calcula taxa nem prazo de entrega, e ainda não testamos várias chamadas ao mesmo tempo.
+A IARA atende pelo navegador do computador e não está ligada a uma linha telefônica. O andamento do pedido é marcado à mão no painel, que ainda não tem login. O sistema também não calcula taxa nem prazo de entrega. Testamos três chamadas ao mesmo tempo, mas não uma carga maior.
 
 ## Equipe
 

@@ -122,3 +122,19 @@ class TestRotas:
         modulo = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(modulo)
         assert requisitar(modulo.app, "/api/admin/pedidos/andamento")[0] == 404
+
+
+class TestCanceladoNaoViraSugestao:
+    # 40 pudins cancelados passariam a calabresa da ana e todos os campeoes da casa
+    @pytest.fixture
+    def pudins_cancelados(self, db, ana):
+        pedido = repositorio.salvar_pedido(db, ana.id, [{"produto": "pudim de leite", "quantidade": 40}])
+        repositorio.mudar_status(db, pedido.id, "cancelado")
+        return pedido
+
+    def test_favorito_do_cliente_ignora_cancelado(self, db, ana, pudins_cancelados):
+        favorito = repositorio.itens_mais_pedidos_do_cliente(db, ana.id, 1)[0][0]
+        assert "Pudim" not in favorito.nome
+
+    def test_mais_pedidos_da_casa_ignora_cancelado(self, db, pudins_cancelados):
+        assert all("Pudim" not in p.nome for p, _ in repositorio.itens_mais_pedidos_da_casa(db, 2))

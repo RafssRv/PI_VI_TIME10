@@ -319,7 +319,7 @@ class TestAtendenteFalaPrimeiro:
         asyncio.run(turno_de_voz.saudar(segunda, Atendimento()))
 
         assert primeira.enviados[0]["tipo"] == "transcricao"
-        assert "Seja bem-vindo" in primeira.enviados[0]["texto"]
+        assert "Aqui é a IARA" in primeira.enviados[0]["texto"]
         assert [e["tipo"] for e in primeira.enviados if isinstance(e, dict)][1:] == ["audio_resposta", "fim_audio"]
         assert b"voz" in primeira.enviados
         assert segunda.enviados == primeira.enviados
